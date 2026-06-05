@@ -1,0 +1,13 @@
+# Keep the build context (and final image) lean and free of local-only files.
+.env
+.git
+bin/
+*.log
+
+# These are local dev infra, never part of the deployed image.
+docker-compose.yml
+Makefile
+.golangci.yml
+
+# If ever vendored locally, don't ship it into the build context.
+vendor/

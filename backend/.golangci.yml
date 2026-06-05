@@ -1,0 +1,21 @@
+# Configuration for golangci-lint (https://golangci-lint.run).
+# A linter catches likely bugs and style issues before they reach review.
+# Install it once with:  brew install golangci-lint
+# Then run:  make lint
+
+run:
+  timeout: 3m
+
+linters:
+  # Start with a sensible, not-overwhelming set. We can add more later.
+  enable:
+    - errcheck     # flags errors that are silently ignored
+    - govet        # reports suspicious constructs (the official `go vet`)
+    - ineffassign  # detects assignments that are never used
+    - staticcheck  # a large, high-quality suite of checks
+    - unused       # finds unused code
+
+issues:
+  # Show all issues, not just a handful per linter.
+  max-issues-per-linter: 0
+  max-same-issues: 0

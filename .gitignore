@@ -1,0 +1,12 @@
+# Go
+backend/.env
+backend/bin/
+*.test
+
+# Node / Expo
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+
+# OS
+.DS_Store

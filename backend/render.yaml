@@ -1,0 +1,35 @@
+# Render Blueprint: defines the services to deploy in one file. You can either
+# point Render at this file (New > Blueprint) or configure the web service by
+# hand in the dashboard using these same values. See DEPLOY.md for the full walk.
+
+services:
+  # The Go API, built from the Dockerfile in this directory.
+  - type: web
+    name: virtualrun-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      # ENV marks this as production (affects logging/behavior later).
+      - key: ENV
+        value: production
+      # DATABASE_URL comes from Neon — set it as a secret in the dashboard.
+      # (Left without a value so Render prompts for it / you add it manually.)
+      - key: DATABASE_URL
+        sync: false
+      # JWT secrets: generate strong values. `generateValue` makes Render create
+      # a random secret once and keep it stable across deploys.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      # REDIS_URL: from the Key Value service below (set after it's created), or
+      # from Upstash. Marked secret.
+      - key: REDIS_URL
+        sync: false
+
+# Render's managed Redis (Key Value). Free tier is fine for the leaderboard.
+# After it's created, copy its internal connection URL into REDIS_URL above.
+# (If you prefer Upstash, delete this block and use the Upstash URL instead.)
