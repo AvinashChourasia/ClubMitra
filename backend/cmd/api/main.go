@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/avinash/virtual-run-tracker/backend/internal/activities"
+	"github.com/avinash/virtual-run-tracker/backend/internal/attendance"
 	"github.com/avinash/virtual-run-tracker/backend/internal/auth"
 	"github.com/avinash/virtual-run-tracker/backend/internal/challenges"
 	"github.com/avinash/virtual-run-tracker/backend/internal/config"
@@ -81,6 +82,10 @@ func main() {
 	orgSvc := organisations.NewService(organisations.NewRepository(pool))
 	orgHandler := organisations.NewHandler(orgSvc, permChecker)
 
+	// Attendance: scheduled group runs + member check-ins.
+	attendanceSvc := attendance.NewService(attendance.NewRepository(pool))
+	attendanceHandler := attendance.NewHandler(attendanceSvc, permChecker)
+
 	activitiesSvc := activities.NewService(activities.NewRepository(pool))
 	activitiesHandler := activities.NewHandler(activitiesSvc)
 
@@ -95,7 +100,7 @@ func main() {
 	// 4. Build the HTTP server around the router.
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      newRouter(authHandler, usersHandler, orgHandler, activitiesHandler, challengesHandler, tokenMgr),
+		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, tokenMgr),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -125,7 +130,7 @@ func main() {
 }
 
 // newRouter builds the middleware stack and mounts all routes.
-func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, tokenMgr *auth.TokenManager) http.Handler {
+func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, tokenMgr *auth.TokenManager) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID) // tag each request with a unique id
@@ -145,6 +150,10 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 			r.Mount("/users", usersHandler.Routes())
 			r.Mount("/activities", activitiesHandler.Routes())
 			r.Mount("/challenges", challengesHandler.Routes())
+			// Attendance: /runs (schedule/list/get/checkin/attendance) and a
+			// member's cross-chapter history under /members.
+			r.Mount("/runs", attendanceHandler.RunRoutes())
+			r.Mount("/members", attendanceHandler.MemberRoutes())
 			// Club core declares its own /organisations and /chapters subtrees,
 			// so it mounts at the group root rather than under a single prefix.
 			r.Mount("/", orgHandler.Routes())

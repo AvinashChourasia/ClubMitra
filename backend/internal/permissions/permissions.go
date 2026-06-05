@@ -105,6 +105,26 @@ func (c *Checker) decide(w http.ResponseWriter, role string, err error, allowed 
 	return false
 }
 
+// HasChapterRole reports whether a user holds one of the allowed roles on a
+// chapter (directly or via an org-wide grant). It's the programmatic form of
+// RequireChapterRole, for handlers whose route does NOT carry a {chapterID} in
+// the path (e.g. POST /runs, where the chapter comes from the request body).
+func (c *Checker) HasChapterRole(ctx context.Context, userID string, chapterID uuid.UUID, allowed ...string) (bool, error) {
+	role, err := c.chapterRole(ctx, userID, chapterID)
+	if errors.Is(err, errNoRole) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, a := range allowed {
+		if role == a {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // errNoRole signals "the user holds no applicable role" (a 403), distinct from a
 // real query failure (a 500).
 var errNoRole = errors.New("no applicable role")
