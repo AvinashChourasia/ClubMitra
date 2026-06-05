@@ -116,14 +116,15 @@ runmitra/
 
 **Goal: A club admin can create their club, add members, schedule runs, and run challenges.**
 
-> **Foundation built so far (this pass):** standalone auth (register + login with
-> bcrypt, JWT + refresh-token rotation/theft detection — the MarathonMitra
-> identity dependency has been removed); the `users` table now holds the full
-> runner profile; the club core is live — organisations, city-level chapters with
-> unique invite codes, the `org_roles` permission model (`org_admin` /
-> `chapter_admin` / `co_admin`), invite-first join, and member listing — all
-> gated by role-checking middleware. Attendance, challenge-visibility rules, and
-> the proof flow are the next slice.
+> **Phase 1 backend status:** essentially complete. Standalone auth (register +
+> login with bcrypt, JWT + refresh-token rotation/theft detection — MarathonMitra
+> dependency removed); full runner profile; club core (organisations, chapters
+> with invite codes, the `org_roles` permission model, invite-first join, member
+> management with status + soft-delete); attendance (scheduled runs + check-in +
+> history); and the visibility-aware challenge engine (typed goals, scoping,
+> individual/club join, manual proof + admin verify, Redis leaderboard). Every
+> admin action is role-gated. **Remaining:** push notifications (mobile-coupled,
+> deferred) and the mobile app, which still needs to be rebuilt for the club API.
 
 #### Week 1–2: Identity + Organisation
 - [x] User registration — name, age, phone, email, t-shirt size, city, profile photo
@@ -136,16 +137,16 @@ runmitra/
 
 #### Week 3–4: Members + Attendance + Challenges
 - [x] Member management: add, view, status (active / lapsed / suspended), soft delete
-- [ ] Member profile view for admins (t-shirt size, join date, fee status, attendance record)
-- [ ] Attendance: admin schedules group run (title, date, time, location, distance target)
-- [ ] Post-run check-in: member marks attendance after run
-- [ ] Attendance history per member and per run
-- [ ] Challenge create: title, type (distance / days / streak), duration, target, visibility
-- [ ] Challenge visibility: public / chapter-only / city-only / org-wide
-- [ ] Challenge join: individual runner or club joins
-- [ ] Leaderboard per challenge (Redis sorted sets)
-- [ ] Phase 1 proof: runner pastes Strava link or screenshot → admin verifies manually
-- [ ] Basic push notifications: run scheduled, challenge update
+- [x] Member profile view for admins (t-shirt size, join date, attendance record)
+- [x] Attendance: admin schedules group run (title, date, time, location, distance target)
+- [x] Post-run check-in: member marks attendance after run (or admin marks them)
+- [x] Attendance history per member and per run
+- [x] Challenge create: title, type (distance / days / streak), duration, target, visibility
+- [x] Challenge visibility: public / chapter-only / city-only / org-wide
+- [x] Challenge join: individual runner or club joins
+- [x] Leaderboard per challenge (Redis sorted sets)
+- [x] Phase 1 proof: runner pastes Strava link or screenshot → admin verifies manually
+- [ ] Basic push notifications: run scheduled, challenge update *(deferred — mobile-coupled)*
 
 ---
 
@@ -210,34 +211,40 @@ GET    /api/v1/users/me/stats
 # Organisations + Chapters
 POST   /api/v1/organisations
 GET    /api/v1/organisations/:id
+PUT    /api/v1/organisations/:id             # org admin
+DELETE /api/v1/organisations/:id             # soft delete, org admin
 POST   /api/v1/organisations/:id/chapters
 GET    /api/v1/organisations/:id/chapters
-POST   /api/v1/organisations/:id/roles      # assign org/chapter admin role
-GET    /api/v1/chapters/:id                  # (planned)
-PUT    /api/v1/chapters/:id                  # (planned)
-DELETE /api/v1/chapters/:id                  # soft delete only (planned)
+POST   /api/v1/organisations/:id/roles       # assign org/chapter admin role
+GET    /api/v1/chapters/:id
+PUT    /api/v1/chapters/:id                   # chapter admin
+DELETE /api/v1/chapters/:id                   # soft delete, org admin
 
 # Members
-POST   /api/v1/chapters/join                 # join via invite code
-POST   /api/v1/chapters/:id/members          # admin adds a member
+POST   /api/v1/chapters/join                  # join via invite code
+POST   /api/v1/chapters/:id/members           # admin adds a member
 GET    /api/v1/chapters/:id/members
-PUT    /api/v1/chapters/:id/members/:uid     # (planned)
-DELETE /api/v1/chapters/:id/members/:uid     # soft delete only (planned)
+GET    /api/v1/chapters/:id/members/:uid      # admin: member detail
+PUT    /api/v1/chapters/:id/members/:uid      # admin: set status
+DELETE /api/v1/chapters/:id/members/:uid      # soft delete, admin
 
-# Attendance (planned)
-POST   /api/v1/chapters/:id/runs
-GET    /api/v1/chapters/:id/runs
-POST   /api/v1/runs/:id/checkin
+# Attendance
+POST   /api/v1/runs                           # schedule (chapter_id in body; admin)
+GET    /api/v1/runs?chapter_id=:id            # a chapter's runs
+GET    /api/v1/runs/:id
+POST   /api/v1/runs/:id/checkin               # self check-in (or admin marks a member)
 GET    /api/v1/runs/:id/attendance
-GET    /api/v1/members/:id/attendance
+GET    /api/v1/members/:uid/attendance        # member's attendance history
 
 # Challenges
-GET    /api/v1/challenges
+GET    /api/v1/challenges                      # browse visible (or ?joined=true)
 POST   /api/v1/challenges
 GET    /api/v1/challenges/:id
-POST   /api/v1/challenges/:id/join
+POST   /api/v1/challenges/:id/join             # individual, or {chapter_id} as a club
 GET    /api/v1/challenges/:id/leaderboard
-GET    /api/v1/challenges/:id/progress
+POST   /api/v1/challenges/:id/proof            # submit Strava link / screenshot
+GET    /api/v1/challenges/:id/proof            # creator: review queue
+POST   /api/v1/challenges/:id/proof/:pid/verify # creator: verify -> credits progress
 
 # Inventory (Phase 2)
 GET    /api/v1/chapters/:id/inventory
