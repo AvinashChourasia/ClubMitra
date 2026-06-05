@@ -50,6 +50,21 @@ type Member struct {
 	JoinedAt time.Time `json:"joined_at"`
 }
 
+// MemberDetail is the admin-facing profile of one member: their account fields
+// plus their membership state in this chapter.
+type MemberDetail struct {
+	UserID       string     `json:"user_id"`
+	Name         string     `json:"name"`
+	Email        string     `json:"email"`
+	Phone        string     `json:"phone"`
+	Age          *int       `json:"age,omitempty"`
+	TshirtSize   *string    `json:"tshirt_size,omitempty"`
+	City         *string    `json:"city,omitempty"`
+	Status       string     `json:"status"`
+	JoinedAt     time.Time  `json:"joined_at"`
+	FeePaidUntil *time.Time `json:"fee_paid_until,omitempty"`
+}
+
 // ErrNotFound is returned when an org/chapter/invite lookup matches nothing.
 var ErrNotFound = errors.New("not found")
 
@@ -95,6 +110,32 @@ func (r *Repository) CreateOrg(ctx context.Context, name, description, creatorID
 		return nil, err
 	}
 	return &o, nil
+}
+
+// UpdateOrg edits an organisation's name/description. Missing or deleted rows
+// return ErrNotFound (RETURNING yields no row, surfaced as pgx.ErrNoRows).
+func (r *Repository) UpdateOrg(ctx context.Context, id uuid.UUID, name, description string) (*Organisation, error) {
+	const q = `
+		UPDATE organisations SET name = $2, description = $3
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING id, name, description, logo, created_by, created_at, updated_at`
+	var o Organisation
+	err := r.db.QueryRow(ctx, q, id, name, description).Scan(
+		&o.ID, &o.Name, &o.Description, &o.Logo, &o.CreatedBy, &o.CreatedAt, &o.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
+// SoftDeleteOrg stamps deleted_at. Returns ErrNotFound if nothing was updated
+// (already gone), so the handler reports 404 rather than a silent success.
+func (r *Repository) SoftDeleteOrg(ctx context.Context, id uuid.UUID) error {
+	return r.softDelete(ctx, `UPDATE organisations SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 }
 
 // GetOrg fetches one organisation (non-deleted).
@@ -159,6 +200,37 @@ func (r *Repository) GetChapterByInvite(ctx context.Context, code string) (*Chap
 	return c, err
 }
 
+// GetChapter fetches one chapter by id (non-deleted).
+func (r *Repository) GetChapter(ctx context.Context, id uuid.UUID) (*Chapter, error) {
+	const q = `
+		SELECT id, org_id, name, city, description, is_public, invite_code, created_at, updated_at
+		FROM chapters WHERE id = $1 AND deleted_at IS NULL`
+	c, err := scanChapter(r.db.QueryRow(ctx, q, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return c, err
+}
+
+// UpdateChapter edits a chapter's editable fields (the invite code and fee
+// settings are managed elsewhere).
+func (r *Repository) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, description string, isPublic bool) (*Chapter, error) {
+	const q = `
+		UPDATE chapters SET name = $2, city = $3, description = $4, is_public = $5
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING id, org_id, name, city, description, is_public, invite_code, created_at, updated_at`
+	c, err := scanChapter(r.db.QueryRow(ctx, q, id, name, city, description, isPublic))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return c, err
+}
+
+// SoftDeleteChapter stamps deleted_at on a chapter.
+func (r *Repository) SoftDeleteChapter(ctx context.Context, id uuid.UUID) error {
+	return r.softDelete(ctx, `UPDATE chapters SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
+}
+
 // AssignRole grants a role to a user, scoped to an org (chapterID nil) or a
 // single chapter. ON CONFLICT DO NOTHING makes re-granting the same role a safe
 // no-op rather than a duplicate-key error.
@@ -205,6 +277,73 @@ func (r *Repository) ListMembers(ctx context.Context, chapterID uuid.UUID) ([]Me
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// GetMemberDetail returns the admin-facing profile of one chapter member.
+func (r *Repository) GetMemberDetail(ctx context.Context, chapterID uuid.UUID, userID string) (*MemberDetail, error) {
+	const q = `
+		SELECT m.user_id, u.name, u.email, COALESCE(u.phone, ''),
+		       u.age, u.tshirt_size, u.city,
+		       m.status, m.joined_at, m.fee_paid_until
+		FROM chapter_members m
+		JOIN users u ON u.id = m.user_id
+		WHERE m.chapter_id = $1 AND m.user_id = $2 AND m.deleted_at IS NULL`
+	var d MemberDetail
+	err := r.db.QueryRow(ctx, q, chapterID, userID).Scan(
+		&d.UserID, &d.Name, &d.Email, &d.Phone,
+		&d.Age, &d.TshirtSize, &d.City,
+		&d.Status, &d.JoinedAt, &d.FeePaidUntil,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// UpdateMemberStatus changes a membership's status (active / lapsed / suspended).
+func (r *Repository) UpdateMemberStatus(ctx context.Context, chapterID uuid.UUID, userID, status string) error {
+	const q = `
+		UPDATE chapter_members SET status = $3
+		WHERE chapter_id = $1 AND user_id = $2 AND deleted_at IS NULL`
+	tag, err := r.db.Exec(ctx, q, chapterID, userID, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SoftDeleteMember removes a runner from a chapter (soft).
+func (r *Repository) SoftDeleteMember(ctx context.Context, chapterID uuid.UUID, userID string) error {
+	const q = `
+		UPDATE chapter_members SET deleted_at = now()
+		WHERE chapter_id = $1 AND user_id = $2 AND deleted_at IS NULL`
+	tag, err := r.db.Exec(ctx, q, chapterID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// softDelete runs an UPDATE ... SET deleted_at = now() and maps "no row touched"
+// to ErrNotFound. Shared by the org and chapter soft-delete methods.
+func (r *Repository) softDelete(ctx context.Context, q string, id uuid.UUID) error {
+	tag, err := r.db.Exec(ctx, q, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // row is the small surface scanChapter needs, satisfied by both pgx.Row and

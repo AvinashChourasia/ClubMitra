@@ -49,6 +49,64 @@ func (s *Service) GetOrg(ctx context.Context, id uuid.UUID) (*Organisation, erro
 	return s.repo.GetOrg(ctx, id)
 }
 
+// validMemberStatuses are the states a membership can be set to.
+var validMemberStatuses = map[string]bool{"active": true, "lapsed": true, "suspended": true}
+
+// UpdateOrg validates and edits an organisation.
+func (s *Service) UpdateOrg(ctx context.Context, id uuid.UUID, name, description string) (*Organisation, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, ValidationError{Msg: "organisation name is required"}
+	}
+	return s.repo.UpdateOrg(ctx, id, name, strings.TrimSpace(description))
+}
+
+// DeleteOrg soft-deletes an organisation.
+func (s *Service) DeleteOrg(ctx context.Context, id uuid.UUID) error {
+	return s.repo.SoftDeleteOrg(ctx, id)
+}
+
+// GetChapter returns one chapter.
+func (s *Service) GetChapter(ctx context.Context, id uuid.UUID) (*Chapter, error) {
+	return s.repo.GetChapter(ctx, id)
+}
+
+// UpdateChapter validates and edits a chapter.
+func (s *Service) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, description string, isPublic bool) (*Chapter, error) {
+	name = strings.TrimSpace(name)
+	city = strings.TrimSpace(city)
+	if name == "" {
+		return nil, ValidationError{Msg: "chapter name is required"}
+	}
+	if city == "" {
+		return nil, ValidationError{Msg: "city is required"}
+	}
+	return s.repo.UpdateChapter(ctx, id, name, city, strings.TrimSpace(description), isPublic)
+}
+
+// DeleteChapter soft-deletes a chapter.
+func (s *Service) DeleteChapter(ctx context.Context, id uuid.UUID) error {
+	return s.repo.SoftDeleteChapter(ctx, id)
+}
+
+// GetMemberDetail returns one member's admin-facing profile.
+func (s *Service) GetMemberDetail(ctx context.Context, chapterID uuid.UUID, userID string) (*MemberDetail, error) {
+	return s.repo.GetMemberDetail(ctx, chapterID, userID)
+}
+
+// UpdateMemberStatus validates and sets a member's status.
+func (s *Service) UpdateMemberStatus(ctx context.Context, chapterID uuid.UUID, userID, status string) error {
+	if !validMemberStatuses[status] {
+		return ValidationError{Msg: "status must be one of active, lapsed, suspended"}
+	}
+	return s.repo.UpdateMemberStatus(ctx, chapterID, userID, status)
+}
+
+// RemoveMember soft-deletes a membership.
+func (s *Service) RemoveMember(ctx context.Context, chapterID uuid.UUID, userID string) error {
+	return s.repo.SoftDeleteMember(ctx, chapterID, userID)
+}
+
 // CreateChapter validates input, generates a unique invite code, and creates the
 // chapter. A code collision is astronomically unlikely, but we retry a few times
 // rather than ever surface one to the caller.

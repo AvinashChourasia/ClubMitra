@@ -31,22 +31,36 @@ var adminRoles = []string{permissions.RoleOrgAdmin, permissions.RoleChapterAdmin
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
 
+	orgAdmin := h.check.RequireOrgRole(permissions.RoleOrgAdmin)
+	chapterAdmin := h.check.RequireChapterRole(adminRoles...)
+	// Soft-deleting a chapter is reserved for an org admin (per the permission
+	// table); RequireChapterRole resolves an org-wide grant for the chapter.
+	chapterOrgAdmin := h.check.RequireChapterRole(permissions.RoleOrgAdmin)
+
 	r.Route("/organisations", func(r chi.Router) {
 		r.Post("/", h.createOrg)
 		r.Route("/{orgID}", func(r chi.Router) {
 			r.Get("/", h.getOrg)
 			r.Get("/chapters", h.listChapters)
+			r.With(orgAdmin).Put("/", h.updateOrg)
+			r.With(orgAdmin).Delete("/", h.deleteOrg)
 			// Only an org admin may add chapters or hand out roles.
-			r.With(h.check.RequireOrgRole(permissions.RoleOrgAdmin)).Post("/chapters", h.createChapter)
-			r.With(h.check.RequireOrgRole(permissions.RoleOrgAdmin)).Post("/roles", h.assignRole)
+			r.With(orgAdmin).Post("/chapters", h.createChapter)
+			r.With(orgAdmin).Post("/roles", h.assignRole)
 		})
 	})
 
 	r.Route("/chapters", func(r chi.Router) {
 		r.Post("/join", h.joinByInvite) // any authenticated runner
 		r.Route("/{chapterID}", func(r chi.Router) {
-			r.With(h.check.RequireChapterRole(adminRoles...)).Post("/members", h.addMember)
-			r.With(h.check.RequireChapterRole(adminRoles...)).Get("/members", h.listMembers)
+			r.Get("/", h.getChapter)
+			r.With(chapterAdmin).Put("/", h.updateChapter)
+			r.With(chapterOrgAdmin).Delete("/", h.deleteChapter)
+			r.With(chapterAdmin).Post("/members", h.addMember)
+			r.With(chapterAdmin).Get("/members", h.listMembers)
+			r.With(chapterAdmin).Get("/members/{userID}", h.getMember)
+			r.With(chapterAdmin).Put("/members/{userID}", h.updateMemberStatus)
+			r.With(chapterAdmin).Delete("/members/{userID}", h.removeMember)
 		})
 	})
 
@@ -78,6 +92,22 @@ type joinRequest struct {
 
 type addMemberRequest struct {
 	UserID string `json:"user_id"`
+}
+
+type updateOrgRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type updateChapterRequest struct {
+	Name        string `json:"name"`
+	City        string `json:"city"`
+	Description string `json:"description"`
+	IsPublic    *bool  `json:"is_public"` // omitted = public
+}
+
+type updateMemberStatusRequest struct {
+	Status string `json:"status"`
 }
 
 // --- handlers ---
@@ -130,6 +160,122 @@ func (h *Handler) createChapter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, chapter)
+}
+
+func (h *Handler) updateOrg(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := h.orgID(w, r)
+	if !ok {
+		return
+	}
+	var req updateOrgRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	org, err := h.svc.UpdateOrg(r.Context(), orgID, req.Name, req.Description)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, org)
+}
+
+func (h *Handler) deleteOrg(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := h.orgID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteOrg(r.Context(), orgID); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+func (h *Handler) getChapter(w http.ResponseWriter, r *http.Request) {
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	chapter, err := h.svc.GetChapter(r.Context(), chapterID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, chapter)
+}
+
+func (h *Handler) updateChapter(w http.ResponseWriter, r *http.Request) {
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	var req updateChapterRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	isPublic := req.IsPublic == nil || *req.IsPublic
+	chapter, err := h.svc.UpdateChapter(r.Context(), chapterID, req.Name, req.City, req.Description, isPublic)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, chapter)
+}
+
+func (h *Handler) deleteChapter(w http.ResponseWriter, r *http.Request) {
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteChapter(r.Context(), chapterID); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+func (h *Handler) getMember(w http.ResponseWriter, r *http.Request) {
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	detail, err := h.svc.GetMemberDetail(r.Context(), chapterID, chi.URLParam(r, "userID"))
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, detail)
+}
+
+func (h *Handler) updateMemberStatus(w http.ResponseWriter, r *http.Request) {
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	var req updateMemberStatusRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.UpdateMemberStatus(r.Context(), chapterID, chi.URLParam(r, "userID"), req.Status); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+func (h *Handler) removeMember(w http.ResponseWriter, r *http.Request) {
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.RemoveMember(r.Context(), chapterID, chi.URLParam(r, "userID")); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
 }
 
 func (h *Handler) listChapters(w http.ResponseWriter, r *http.Request) {
