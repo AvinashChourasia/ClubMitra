@@ -166,13 +166,36 @@ func (r *Repository) GetOrg(ctx context.Context, id uuid.UUID) (*Organisation, e
 }
 
 // CreateChapter inserts a chapter under an org with a caller-supplied unique
-// invite code.
-func (r *Repository) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city, description, inviteCode string) (*Chapter, error) {
-	const q = `
+// invite code, and enrols the creator as a member in the same transaction (an
+// admin is also a member of their own club). Returns the new chapter.
+func (r *Repository) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city, description, inviteCode, createdBy string) (*Chapter, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) // no-op once Commit succeeds
+
+	const insertChapter = `
 		INSERT INTO chapters (org_id, name, city, description, invite_code)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, org_id, name, city, description, is_public, invite_code, created_at, updated_at`
-	return scanChapter(r.db.QueryRow(ctx, q, orgID, name, city, description, inviteCode))
+	chapter, err := scanChapter(tx.QueryRow(ctx, insertChapter, orgID, name, city, description, inviteCode))
+	if err != nil {
+		return nil, err
+	}
+
+	const insertMember = `
+		INSERT INTO chapter_members (chapter_id, user_id, added_by)
+		VALUES ($1, $2, $2)
+		ON CONFLICT (chapter_id, user_id) DO NOTHING`
+	if _, err := tx.Exec(ctx, insertMember, chapter.ID, createdBy); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return chapter, nil
 }
 
 // ListChapters returns an org's chapters, newest first.

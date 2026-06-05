@@ -110,7 +110,7 @@ func (s *Service) RemoveMember(ctx context.Context, chapterID uuid.UUID, userID 
 // CreateChapter validates input, generates a unique invite code, and creates the
 // chapter. A code collision is astronomically unlikely, but we retry a few times
 // rather than ever surface one to the caller.
-func (s *Service) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city, description string) (*Chapter, error) {
+func (s *Service) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city, description, createdBy string) (*Chapter, error) {
 	name = strings.TrimSpace(name)
 	city = strings.TrimSpace(city)
 	if name == "" {
@@ -125,7 +125,7 @@ func (s *Service) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city
 		if err != nil {
 			return nil, err
 		}
-		chapter, err := s.repo.CreateChapter(ctx, orgID, name, city, strings.TrimSpace(description), code)
+		chapter, err := s.repo.CreateChapter(ctx, orgID, name, city, strings.TrimSpace(description), code, createdBy)
 		if err == nil {
 			return chapter, nil
 		}

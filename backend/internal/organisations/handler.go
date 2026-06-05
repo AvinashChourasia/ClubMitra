@@ -146,6 +146,7 @@ func (h *Handler) getOrg(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createChapter(w http.ResponseWriter, r *http.Request) {
+	actorID, _ := httpx.UserIDFromContext(r.Context())
 	orgID, ok := h.orgID(w, r)
 	if !ok {
 		return
@@ -155,7 +156,7 @@ func (h *Handler) createChapter(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	chapter, err := h.svc.CreateChapter(r.Context(), orgID, req.Name, req.City, req.Description)
+	chapter, err := h.svc.CreateChapter(r.Context(), orgID, req.Name, req.City, req.Description, actorID)
 	if err != nil {
 		h.writeError(w, err)
 		return
