@@ -52,6 +52,7 @@ func (h *Handler) Routes() http.Handler {
 
 	r.Route("/chapters", func(r chi.Router) {
 		r.Post("/join", h.joinByInvite) // any authenticated runner
+		r.Get("/mine", h.myChapters)    // the caller's chapters (static before {chapterID})
 		r.Route("/{chapterID}", func(r chi.Router) {
 			r.Get("/", h.getChapter)
 			r.With(chapterAdmin).Put("/", h.updateChapter)
@@ -316,6 +317,20 @@ func (h *Handler) assignRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+func (h *Handler) myChapters(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	chapters, err := h.svc.MyChapters(r.Context(), userID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, chapters)
 }
 
 func (h *Handler) joinByInvite(w http.ResponseWriter, r *http.Request) {

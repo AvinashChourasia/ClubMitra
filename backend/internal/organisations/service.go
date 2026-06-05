@@ -142,6 +142,11 @@ func (s *Service) ListChapters(ctx context.Context, orgID uuid.UUID) ([]Chapter,
 	return s.repo.ListChapters(ctx, orgID)
 }
 
+// MyChapters returns the chapters the user belongs to or administers.
+func (s *Service) MyChapters(ctx context.Context, userID string) ([]MyChapter, error) {
+	return s.repo.ListUserChapters(ctx, userID)
+}
+
 // AssignRole grants a role to a user within an org (optionally scoped to one
 // chapter).
 func (s *Service) AssignRole(ctx context.Context, orgID uuid.UUID, chapterID *uuid.UUID, userID, role, assignedBy string) error {

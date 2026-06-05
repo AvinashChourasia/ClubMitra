@@ -65,6 +65,15 @@ type MemberDetail struct {
 	FeePaidUntil *time.Time `json:"fee_paid_until,omitempty"`
 }
 
+// MyChapter is a chapter the caller belongs to or administers, annotated with
+// their membership status and role (either may be null: an org admin who never
+// joined a chapter has a role but no status).
+type MyChapter struct {
+	Chapter
+	Status *string `json:"status,omitempty"`
+	Role   *string `json:"role,omitempty"`
+}
+
 // ErrNotFound is returned when an org/chapter/invite lookup matches nothing.
 var ErrNotFound = errors.New("not found")
 
@@ -229,6 +238,48 @@ func (r *Repository) UpdateChapter(ctx context.Context, id uuid.UUID, name, city
 // SoftDeleteChapter stamps deleted_at on a chapter.
 func (r *Repository) SoftDeleteChapter(ctx context.Context, id uuid.UUID) error {
 	return r.softDelete(ctx, `UPDATE chapters SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
+}
+
+// ListUserChapters returns the chapters a user belongs to OR administers (an
+// org admin sees their org's chapters even before joining one), each annotated
+// with the user's membership status and most-specific role.
+func (r *Repository) ListUserChapters(ctx context.Context, userID string) ([]MyChapter, error) {
+	const q = `
+		SELECT c.id, c.org_id, c.name, c.city, c.description, c.is_public,
+		       c.invite_code, c.created_at, c.updated_at,
+		       (SELECT m.status FROM chapter_members m
+		         WHERE m.chapter_id = c.id AND m.user_id = $1 AND m.deleted_at IS NULL) AS status,
+		       (SELECT r.role FROM org_roles r
+		         WHERE r.user_id = $1 AND r.deleted_at IS NULL
+		           AND (r.chapter_id = c.id OR (r.chapter_id IS NULL AND r.org_id = c.org_id))
+		         ORDER BY r.chapter_id NULLS LAST LIMIT 1) AS role
+		FROM chapters c
+		WHERE c.deleted_at IS NULL
+		  AND (
+		    EXISTS (SELECT 1 FROM chapter_members m
+		             WHERE m.chapter_id = c.id AND m.user_id = $1 AND m.deleted_at IS NULL)
+		    OR EXISTS (SELECT 1 FROM org_roles r
+		               WHERE r.user_id = $1 AND r.deleted_at IS NULL
+		                 AND (r.chapter_id = c.id OR (r.chapter_id IS NULL AND r.org_id = c.org_id)))
+		  )
+		ORDER BY c.name`
+	rows, err := r.db.Query(ctx, q, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]MyChapter, 0)
+	for rows.Next() {
+		var m MyChapter
+		if err := rows.Scan(
+			&m.ID, &m.OrgID, &m.Name, &m.City, &m.Description, &m.IsPublic,
+			&m.InviteCode, &m.CreatedAt, &m.UpdatedAt, &m.Status, &m.Role,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // AssignRole grants a role to a user, scoped to an org (chapterID nil) or a
