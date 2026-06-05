@@ -1,220 +1,577 @@
-# RunMitra Architecture
+# RunMitra — System Architecture
 
-How RunMitra is built, and how it integrates with the MarathonMitra platform.
-
-> **Status:** Phases 1–4 complete and device-tested; Phase 5 (deploy + MarathonMitra integration) in progress. This document reflects the code as it exists today, plus the integration design that is still **to be decided** (see [§7](#7-marathonmitra-integration--to-decide)).
-
----
-
-## 1. High-Level Architecture
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                        CLIENT                                  │
-│   ┌────────────────────────────────────────────────────┐     │
-│   │  RunMitra Mobile App  (React Native + Expo, iOS)    │     │
-│   │  • GPS recording  • Maps  • Challenges  • Profile   │     │
-│   └───────────────────────┬────────────────────────────┘     │
-└───────────────────────────┼──────────────────────────────────┘
-                            │ HTTPS (JWT bearer)
-┌───────────────────────────┼──────────────────────────────────┐
-│                    RUNMITRA BACKEND (Go + Chi)                │
-│   handler → service → repository  (per feature)              │
-│   auth · activities · challenges · leaderboard · users      │
-└───────┬───────────────────────────────────┬──────────────────┘
-        │                                    │
-┌───────┼──────────────┐          ┌──────────┼──────────────────┐
-│  PostgreSQL+PostGIS   │          │         Redis              │
-│  • users (RunMitra)   │          │  • leaderboard ZSETs       │
-│  • activities (routes)│          │  (fast, rebuildable)       │
-│  • challenges         │          └────────────────────────────┘
-└───────────────────────┘
-        ╎ (integration — to decide, §7)
-┌───────╎──────────────────────────────────────────────────────┐
-│  MARATHONMITRA PLATFORM (separate product, already live)      │
-│  Next.js web + Express API + **MongoDB** + Redis             │
-│  • users/accounts • events • participation (race registrations)│
-└───────────────────────────────────────────────────────────────┘
-```
-
-**Key fact:** MarathonMitra is **Node/Express + MongoDB**. RunMitra is **Go + PostgreSQL/PostGIS**. They are two different database engines — see [§7](#7-marathonmitra-integration--to-decide) for how shared-account + badges actually work across that boundary.
+> Standalone running-club operating system. RunMitra owns identity (no external
+> auth dependency). Phase 1 is the club core; finance, inventory, and GPS land in
+> later phases.
 
 ---
 
-## 2. Design Principles
+## System Overview
 
-1. **Layered backend**: every feature is `handler (HTTP) → service (business logic) → repository (SQL)`. Handlers never touch SQL; repositories never hold business rules. (Same discipline as MarathonMitra's controller/service/repository split.)
-2. **Postgres is the source of truth; Redis is a disposable cache.** Leaderboards live in Redis for speed but rebuild from Postgres if lost.
-3. **Small, named packages — no `utils` junk drawer.** Shared web helpers live in `httpx`; geo math in `pkg/geo`.
-4. **Offline-first mobile**: a finished run is persisted locally *before* any upload, then synced.
-5. **Self-contained deploys**: migrations are embedded in the binary and run on startup.
-6. **Stateless API**: JWT-based; horizontally scalable (no server-side session state except the Redis leaderboard cache).
+```
+┌────────────────────────────────────────────────────────────────┐
+│                        MOBILE CLIENT                            │
+│                   React Native + Expo                          │
+│         iOS                          Android                    │
+└────────────────────────┬───────────────────────────────────────┘
+                         │  HTTPS / REST (JWT bearer)
+                         │
+┌────────────────────────┼───────────────────────────────────────┐
+│                      GO API (Chi)                              │
+│                    Render · :8090                              │
+│                                                                │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐  │
+│  │  auth/   │ │  orgs/   │ │challenge/│ │    finance/      │  │
+│  │  users/  │ │ chapters/│ │leaderb'd │ │  razorpay/       │  │
+│  │          │ │ members/ │ └──────────┘ └──────────────────┘  │
+│  │          │ │attendance│                                     │
+│  │          │ │inventory │                                     │
+│  └──────────┘ └──────────┘                                     │
+│                                                                │
+│  middleware: JWT auth · permission checks · soft-delete filter │
+└──────┬──────────────────────────┬──────────────────────────────┘
+       │                          │
+┌──────┴──────┐          ┌────────┴────────┐
+│ PostgreSQL  │          │  Redis (Upstash) │
+│  + PostGIS  │          │                 │
+│  Neon       │          │  leaderboards   │
+│             │          │  sessions       │
+│  all data   │          │  rate limiting  │
+└──────┬──────┘          └─────────────────┘
+       │
+┌──────┴──────────────────────────────────────┐
+│          External Services                   │
+│                                              │
+│  Razorpay + Route   payment + auto-split     │
+│  Cloudinary         photos, certs, logos     │
+│  Expo Notifications push notifications       │
+└──────────────────────────────────────────────┘
+```
 
 ---
 
-## 3. Backend Architecture (Go)
+## Database Schema
 
-**Location:** `backend/` · **Stack:** Go 1.25, Chi router, pgx, go-redis, goose
+> **Implementation note.** `users.id` is stored as `TEXT` holding a generated
+> UUID (`gen_random_uuid()::text`). This keeps the column compatible with the
+> existing GPS/challenge/refresh-token tables (which all reference `users(id)`),
+> while still being a UUID value. The club tables below use native `uuid` for
+> their own primary keys and reference `users(id)` as text.
 
-### Module layout
+### Identity Layer
+
+```sql
+-- Every person using the app (RunMitra owns identity and the password hash).
+CREATE TABLE users (
+    id              TEXT PRIMARY KEY,        -- UUID stored as text
+    name            TEXT NOT NULL,
+    email           CITEXT UNIQUE NOT NULL,  -- case-insensitive
+    phone           TEXT UNIQUE,             -- unique when present
+    password_hash   TEXT NOT NULL,           -- bcrypt
+    age             INT,
+    tshirt_size     TEXT,                    -- XS / S / M / L / XL / XXL
+    city            TEXT,
+    profile_photo   TEXT,                    -- Cloudinary URL
+    is_verified     BOOLEAN DEFAULT false,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ              -- soft delete
+);
+
+-- JWT refresh tokens with rotation + theft detection.
+CREATE TABLE refresh_tokens (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         TEXT REFERENCES users(id) ON DELETE CASCADE,
+    token_hash      TEXT NOT NULL UNIQUE,    -- SHA-256 of the raw token
+    expires_at      TIMESTAMPTZ NOT NULL,
+    revoked_at      TIMESTAMPTZ,             -- set on rotation/logout
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+```
+
+---
+
+### Organisation Layer
+
+```sql
+-- Top-level entity (e.g. "XYZ Running Academy")
+CREATE TABLE organisations (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            TEXT NOT NULL,
+    description     TEXT,
+    logo            TEXT,                       -- Cloudinary URL
+    created_by      TEXT REFERENCES users(id),
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ                 -- platform admin only
+);
+
+-- City-level chapter under an org. Same admin can run Bangalore + Pune as
+-- separate chapters.
+CREATE TABLE chapters (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id                  UUID REFERENCES organisations(id),
+    name                    TEXT NOT NULL,
+    city                    TEXT NOT NULL,
+    description             TEXT,
+    logo                    TEXT,
+    is_public               BOOLEAN DEFAULT true,
+    invite_code             TEXT UNIQUE NOT NULL,   -- for invite link
+    membership_fee_enabled  BOOLEAN DEFAULT false,
+    membership_fee_amount   NUMERIC(10,2),
+    razorpay_account_id     TEXT,                   -- linked after KYC
+    created_at              TIMESTAMPTZ DEFAULT now(),
+    updated_at              TIMESTAMPTZ DEFAULT now(),
+    deleted_at              TIMESTAMPTZ
+);
+
+-- Who controls what. chapter_id NULL = org-wide access; chapter_id SET = that
+-- chapter only.
+CREATE TABLE org_roles (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id          UUID REFERENCES organisations(id),
+    chapter_id      UUID REFERENCES chapters(id),   -- nullable
+    user_id         TEXT REFERENCES users(id),
+    role            TEXT NOT NULL,
+    -- 'org_admin' | 'chapter_admin' | 'co_admin'
+    assigned_by     TEXT REFERENCES users(id),
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+```
+
+---
+
+### Member Layer
+
+```sql
+-- Runner's membership in a chapter
+CREATE TABLE chapter_members (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chapter_id      UUID REFERENCES chapters(id),
+    user_id         TEXT REFERENCES users(id),
+    status          TEXT NOT NULL DEFAULT 'active',
+    -- 'active' | 'lapsed' | 'suspended'
+    joined_at       TIMESTAMPTZ DEFAULT now(),
+    fee_paid_until  TIMESTAMPTZ,
+    added_by        TEXT REFERENCES users(id),
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ,
+
+    UNIQUE (chapter_id, user_id)
+);
+```
+
+---
+
+### Attendance Layer *(Phase 1, upcoming)*
+
+```sql
+CREATE TABLE runs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chapter_id      UUID REFERENCES chapters(id),
+    created_by      TEXT REFERENCES users(id),
+    title           TEXT NOT NULL,
+    scheduled_at    TIMESTAMPTZ NOT NULL,
+    location        TEXT,
+    location_lat    NUMERIC,
+    location_lng    NUMERIC,
+    distance_target NUMERIC(6,2),   -- km
+    notes           TEXT,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+
+CREATE TABLE run_attendance (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id          UUID REFERENCES runs(id),
+    user_id         TEXT REFERENCES users(id),
+    chapter_id      UUID REFERENCES chapters(id),
+    checked_in_at   TIMESTAMPTZ DEFAULT now(),
+    marked_by       TEXT REFERENCES users(id),  -- null = self check-in
+    notes           TEXT,
+    deleted_at      TIMESTAMPTZ,
+
+    UNIQUE (run_id, user_id)
+);
+```
+
+---
+
+### Challenge Layer
+
+```sql
+CREATE TABLE challenges (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_by      TEXT REFERENCES users(id),
+    org_id          UUID REFERENCES organisations(id),    -- nullable
+    chapter_id      UUID REFERENCES chapters(id),         -- nullable
+    title           TEXT NOT NULL,
+    description     TEXT,
+    banner          TEXT,           -- Cloudinary URL
+    type            TEXT NOT NULL,  -- 'distance' | 'days' | 'streak'
+    visibility      TEXT NOT NULL,  -- 'public' | 'chapter' | 'city' | 'org'
+    city            TEXT,           -- used when visibility = 'city'
+    target_km       NUMERIC(8,2),
+    target_days     INT,
+    start_date      TIMESTAMPTZ NOT NULL,
+    end_date        TIMESTAMPTZ NOT NULL,
+    allow_teams     BOOLEAN DEFAULT true,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+
+CREATE TABLE challenge_participants (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    challenge_id    UUID REFERENCES challenges(id),
+    user_id         TEXT REFERENCES users(id),       -- nullable if team
+    chapter_id      UUID REFERENCES chapters(id),    -- nullable if solo
+    progress_km     NUMERIC(8,2) DEFAULT 0,
+    progress_days   INT DEFAULT 0,
+    current_streak  INT DEFAULT 0,
+    joined_at       TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ,
+
+    UNIQUE (challenge_id, user_id)
+);
+
+-- Phase 1 only — manual proof before GPS is built.
+CREATE TABLE challenge_proof (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    challenge_id    UUID REFERENCES challenges(id),
+    user_id         TEXT REFERENCES users(id),
+    strava_link     TEXT,
+    screenshot_url  TEXT,
+    km_claimed      NUMERIC(6,2),
+    verified        BOOLEAN DEFAULT false,
+    verified_by     TEXT REFERENCES users(id),
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+
+-- Redis: one sorted set per challenge
+--   Key:    challenge:{challenge_id}:leaderboard
+--   Score:  progress_km or progress_days
+--   Member: user:{id} or chapter:{id}
+```
+
+> The current code ships an earlier solo-tracker `challenges` schema
+> (`target_distance_m`, `challenge_members`). It is migrated to the
+> visibility-aware model above as part of the upcoming Phase 1 challenge slice.
+
+---
+
+### Inventory Layer *(Phase 2)*
+
+```sql
+CREATE TABLE inventory_items (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chapter_id      UUID REFERENCES chapters(id),
+    name            TEXT NOT NULL,
+    category        TEXT,           -- 'apparel'|'equipment'|'medals'|'bibs'|'other'
+    total_quantity  INT NOT NULL DEFAULT 0,
+    available_qty   INT NOT NULL DEFAULT 0,
+    size_breakdown  JSONB,          -- {"S":10,"M":25,"L":15,"XL":8}
+    unit_price      NUMERIC(10,2),
+    image_url       TEXT,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+
+CREATE TABLE inventory_transactions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    item_id         UUID REFERENCES inventory_items(id),
+    chapter_id      UUID REFERENCES chapters(id),
+    user_id         TEXT REFERENCES users(id),
+    type            TEXT NOT NULL,  -- 'issue'|'return'|'purchase'|'restock'
+    quantity        INT NOT NULL,
+    size            TEXT,
+    amount          NUMERIC(10,2),
+    notes           TEXT,
+    created_by      TEXT REFERENCES users(id),
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+```
+
+---
+
+### Finance Layer *(Phase 2)*
+
+```sql
+-- Every money movement. Platform cut stored at transaction time, never derived.
+CREATE TABLE transactions (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type                TEXT NOT NULL,
+    -- 'membership_fee'|'inventory_purchase'|'subscription'|'chapter_fee'
+    payer_id            TEXT REFERENCES users(id),
+    chapter_id          UUID REFERENCES chapters(id),
+    org_id              UUID REFERENCES organisations(id),
+    reference_id        TEXT,       -- Razorpay order/payment ID
+    razorpay_route_id   TEXT,       -- Route transfer ID
+    gross_amount        NUMERIC(10,2) NOT NULL,
+    platform_cut_pct    NUMERIC(5,2) NOT NULL,
+    platform_cut_amount NUMERIC(10,2) NOT NULL,
+    net_amount          NUMERIC(10,2) NOT NULL,  -- goes to club
+    currency            TEXT DEFAULT 'INR',
+    status              TEXT NOT NULL DEFAULT 'pending',
+    -- 'pending'|'completed'|'failed'|'refunded'
+    metadata            JSONB,
+    created_at          TIMESTAMPTZ DEFAULT now(),
+    updated_at          TIMESTAMPTZ DEFAULT now(),
+    deleted_at          TIMESTAMPTZ  -- audit trail only
+);
+
+CREATE TABLE subscriptions (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id              UUID REFERENCES organisations(id),
+    chapter_id          UUID REFERENCES chapters(id),  -- nullable = org plan
+    plan                TEXT NOT NULL,        -- 'free'|'basic'|'pro'
+    member_count_billed INT DEFAULT 0,
+    amount              NUMERIC(10,2),
+    billing_start       TIMESTAMPTZ,
+    billing_end         TIMESTAMPTZ,
+    status              TEXT DEFAULT 'active', -- 'active'|'cancelled'|'expired'
+    razorpay_sub_id     TEXT,
+    created_at          TIMESTAMPTZ DEFAULT now(),
+    updated_at          TIMESTAMPTZ DEFAULT now(),
+    deleted_at          TIMESTAMPTZ
+);
+```
+
+---
+
+### GPS Tracking Layer *(Phase 3 — already present from the earlier build)*
+
+```sql
+CREATE TABLE activities (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         TEXT REFERENCES users(id),
+    chapter_id      UUID REFERENCES chapters(id),  -- nullable (to be added)
+    title           TEXT,
+    route           geography(LineString, 4326),   -- PostGIS
+    distance_m      DOUBLE PRECISION,
+    avg_pace_s_per_km DOUBLE PRECISION,
+    elevation_gain_m  DOUBLE PRECISION,
+    duration_s      INT,
+    started_at      TIMESTAMPTZ,
+    ended_at        TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_activities_route ON activities USING GIST (route);
+CREATE INDEX idx_activities_user_started ON activities (user_id, started_at DESC);
+```
+
+---
+
+## Permission System
+
+### How it works
+
+The `org_roles` table drives all permissions. The middleware checks it on every
+protected request.
 
 ```
-backend/
-├── cmd/api/main.go            # Entry point: config → DB → migrate → Redis → wire → serve
-├── internal/
-│   ├── auth/                  # Register/login, JWT access + rotating refresh tokens,
-│   │                          #   bcrypt, RequireAuth middleware
-│   ├── activities/            # Run recording, server-side stats, GeoJSON, /stats
-│   ├── challenges/            # Challenge CRUD, join, progress, leaderboard read
-│   ├── leaderboard/           # Redis sorted-set operations
-│   ├── users/                 # Profile, batch display-name lookup
-│   ├── database/              # pgx pool, Redis client, startup migrator
-│   ├── httpx/                 # JSON encode/decode, error responses, request-context user id
-│   └── config/                # Env-based typed config (fail-fast)
-├── db/
-│   ├── migrations.go          # go:embed of the SQL files (ships inside the binary)
-│   └── migrations/*.sql       # goose migrations (extensions, users, activities, challenges…)
-├── pkg/geo/                   # Pure helpers: EWKT LineString, elevation gain, duration
-├── Dockerfile                 # Multi-stage → ~41 MB static image
-├── render.yaml                # Render deploy blueprint
-└── DEPLOY.md                  # Deploy walkthrough
+org_roles row:
+  org_id     = ABC
+  chapter_id = null      → user has org-wide access to org ABC
+  role       = org_admin
+
+org_roles row:
+  org_id     = ABC
+  chapter_id = XYZ       → user only controls chapter XYZ
+  role       = chapter_admin
 ```
 
-### Request flow
+### Middleware (implemented in internal/permissions)
+
+```go
+// RequireChapterRole guards a route carrying {chapterID}. The caller passes if
+// they hold an allowed role on that chapter OR an org-wide role on its org.
+func (c *Checker) RequireChapterRole(allowed ...string) func(http.Handler) http.Handler
+
+// Lookup (most-specific role wins: chapter-scoped over org-wide):
+//   SELECT r.role FROM org_roles r
+//   JOIN chapters c ON c.id = $chapterID
+//   WHERE r.user_id = $userID AND r.deleted_at IS NULL
+//     AND (r.chapter_id = c.id OR (r.chapter_id IS NULL AND r.org_id = c.org_id))
+//   ORDER BY r.chapter_id NULLS LAST
+//   LIMIT 1
+```
+
+`RequireOrgRole(...)` is the org-scoped equivalent for routes carrying `{orgID}`.
+No applicable role → `403`; a query failure → `500`.
+
+### Soft delete filter
+
+Every table has `deleted_at`; queries append `WHERE deleted_at IS NULL` unless a
+platform admin explicitly requests deleted records.
+
+---
+
+## Payment Architecture *(Phase 2)*
+
+### Razorpay Route — how every transaction flows
 
 ```
-HTTP request → Chi router → [RequireAuth middleware] → Handler → Service → Repository → Postgres/Redis
+Runner pays ₹500 membership fee to Bangalore Runners chapter
+
+Step 1: POST /api/v1/payments/initiate
+        → backend creates a Razorpay Order
+        → pending transaction: gross=500, cut_pct=10, cut=50, net=450
+
+Step 2: Razorpay payment sheet opens on mobile; runner pays
+
+Step 3: Razorpay webhook → POST /api/v1/payments/webhook
+        → verify signature
+        → Route auto-transfers ₹450 → chapter bank, ₹50 → RunMitra
+        → transaction status = 'completed'
+
+Step 4: membership status = 'active', fee_paid_until = now + period
 ```
 
-### Why these choices (vs. MarathonMitra's Node/Mongo)
-| Concern | RunMitra | Why different |
+### Before KYC
+
+`membership_fee_enabled` cannot be set true while `razorpay_account_id` is null —
+enforced at the API level.
+
+---
+
+## Challenge Visibility Logic
+
+```
+Public    → explore feed for all users; any runner/chapter can join
+City      → only users whose profile city matches; city checked at join
+Chapter   → only that chapter's members; hidden from explore
+Org-wide  → all members across the org's chapters; chapters compete
+```
+
+---
+
+## Redis Leaderboard
+
+```
+One sorted set per challenge:
+  Key:    challenge:{uuid}:leaderboard
+  Score:  progress_km (float) or progress_days (int)
+  Member: user:{uuid} or chapter:{uuid}
+
+On proof verified (Phase 1) / run logged (Phase 3):
+  ZINCRBY challenge:{id}:leaderboard {km} user:{id}
+
+On fetch:
+  ZREVRANGE challenge:{id}:leaderboard 0 49 WITHSCORES   -- top 50
+
+Self-heal (Redis down):
+  Rebuild from challenge_participants.progress_km in Postgres
+```
+
+---
+
+## Soft Delete Strategy
+
+```
+Who can soft delete what:
+  Platform admin → anything
+  Org admin      → org, chapters under org, members
+  Chapter admin  → members, runs, inventory in their chapter
+  Co-admin       → members, runs, inventory in their chapter
+  Member         → their own account only
+
+Hard delete:
+  Platform admin only, only for legal/GDPR, logged in audit_log
+
+Queries:
+  All append WHERE deleted_at IS NULL automatically
+  Platform admin may pass ?include_deleted=true (logged + rate-limited)
+```
+
+---
+
+## Folder Responsibilities
+
+```
+internal/auth/           Register, login, JWT issue + refresh, logout,
+                         token rotation + theft detection
+internal/users/          Account + profile, stats aggregation (Phase 3)
+internal/organisations/  Org + chapter CRUD, invite codes, role assignment,
+                         membership (join by invite, list) [Phase 1]
+internal/permissions/    org_roles-backed role middleware (org + chapter scope)
+internal/members/        (future split out of organisations)
+internal/attendance/     Schedule runs, post-run check-in, attendance history
+internal/challenges/     Challenge CRUD, visibility rules, join, proof,
+                         progress updates, leaderboard sync
+internal/leaderboard/    Redis sorted-set operations, self-heal from Postgres
+internal/inventory/      Item CRUD, size breakdown (JSONB), issue/return/purchase
+internal/finance/        Transactions, platform cut, Razorpay order + webhook,
+                         finance dashboards, subscriptions
+internal/notifications/  Expo push tokens, send helpers, event triggers
+internal/activities/     GPS recording (Phase 3), PostGIS routes, challenge credit
+pkg/middleware/          JWT validation, permission checks, soft-delete, rate limit
+pkg/razorpay/            Razorpay client, Route transfer helpers, webhook verify
+pkg/geo/                 PostGIS distance calc (Phase 3), coordinate validation
+```
+
+---
+
+## Build Sequence (Phase 1)
+
+```
+Week 1
+  DB schema + migrations · standalone auth (register/login, JWT, refresh)
+  Org + chapter CRUD, invite codes · role assignment + permission middleware
+
+Week 2
+  Member add + list, status · invite-link join flow
+  Soft delete on all entities + middleware filter · mobile: auth + club screens
+
+Week 3
+  Run scheduling API + screen · post-run check-in
+  Attendance history · challenge CRUD + visibility rules
+
+Week 4
+  Challenge join (solo + club) · Redis leaderboard
+  Phase 1 proof (Strava link / screenshot + admin verify)
+  Mobile challenge screens · push notifications · E2E testing + beta
+```
+
+---
+
+## Environment Variables
+
+```env
+# backend/.env
+DATABASE_URL=postgres://runmitra:runmitra@localhost:5433/runmitra?sslmode=disable
+REDIS_URL=redis://localhost:6379
+JWT_SECRET=your-secret-here
+JWT_REFRESH_SECRET=your-refresh-secret-here
+PORT=8090
+ENV=development
+
+# Phase 2
+RAZORPAY_KEY_ID=rzp_live_xxxxx
+RAZORPAY_KEY_SECRET=your-key-secret
+RAZORPAY_WEBHOOK_SECRET=your-webhook-secret
+PLATFORM_CUT_PCT=10
+CLOUDINARY_URL=cloudinary://api_key:api_secret@cloud_name
+```
+
+---
+
+## Deployment
+
+| Service | Use | Cost |
 |---|---|---|
-| Language | Go | Strong concurrency + a single static binary for cheap deploys |
-| DB | PostgreSQL + **PostGIS** | Geospatial routes/geodesic distance — the core of run tracking. Mongo's geo is weaker for this. |
-| Leaderboard | Redis ZSET | O(log n) ranking without re-sorting |
+| Render | Go API | Free / $7 mo |
+| Neon | PostgreSQL + PostGIS | Free (0.5 GB) |
+| Upstash | Redis leaderboard | Free (10k req/day) |
+| Cloudinary | Photos, certs, logos | Free (25 GB) |
+| Expo EAS | App builds | Free |
 
 ---
 
-## 4. Data Model (PostgreSQL)
-
-```
-users
-  id (uuid, pk) · email (citext, unique) · password_hash · display_name · timestamps
-
-refresh_tokens
-  id · user_id → users · token_hash (sha256) · expires_at · revoked_at
-  (rotation + theft detection)
-
-activities                                   ← a recorded run
-  id · user_id → users · started_at · ended_at · duration_s
-  distance_m · avg_pace_s_per_km · elevation_gain_m
-  route  geography(LineStringZ, 4326)         ← lat/lng/altitude path; GiST indexed
-
-challenges
-  id · creator_id → users · name · description
-  target_distance_m · starts_at · ends_at
-
-challenge_members                            ← who joined + durable progress
-  (challenge_id, user_id) pk · progress_distance_m · joined_at
-```
-
-**Redis:** `leaderboard:challenge:<id>` → sorted set of `user_id → total_distance_m`.
-
----
-
-## 5. Mobile Architecture (React Native + Expo)
-
-**Location:** `mobile/` · **Stack:** Expo SDK 54, Expo Router, react-native-maps, expo-location, expo-secure-store, AsyncStorage
-
-```
-mobile/
-├── app/                       # Expo Router (file = route)
-│   ├── (auth)/                # login, register
-│   ├── (tabs)/                # home (dashboard), challenges, profile
-│   ├── activity/              # record (live HUD), [id] (detail + map + elevation)
-│   └── challenge/             # [id] (detail + leaderboard), new (create)
-├── components/                # StatCard, ProgressBar, ElevationChart
-└── lib/                       # The shared "service" layer:
-    ├── api.ts                 # fetch wrapper: base URL, JWT header, error parsing
-    ├── auth.tsx               # AuthContext; tokens in SecureStore (Keychain)
-    ├── activities.ts          # activities + stats API client
-    ├── challenges.ts          # challenges API client
-    ├── runQueue.ts            # OFFLINE QUEUE: persist-first, auto-sync (AsyncStorage)
-    ├── useRunRecorder.ts      # GPS watch + timer + live distance
-    ├── gpsFilter.ts           # noise filtering (accuracy gate, speed sanity, floor)
-    ├── mapRegion.ts           # frame a route on the map
-    └── format.ts / theme.ts   # display formatters + MarathonMitra-branded styles
-```
-
-**Principles:** screens render, `lib/` holds logic (the RN mirror of handler/service). Tokens are secrets → Keychain; runs are data → AsyncStorage. Auth state via React Context (no heavyweight store until needed).
-
----
-
-## 6. Cross-Cutting Concerns
-
-| Concern | How |
-|---|---|
-| **Auth** | JWT access (15 min) + DB-stored rotating refresh tokens (30 d). Bearer header. |
-| **Offline** | Run saved locally first; queue flushes on finish, on Home focus, on app launch. |
-| **GPS accuracy** | Per-fix accuracy gate, speed-sanity, noise floor vs. last *accepted* point. |
-| **Migrations** | Embedded in binary; `goose.Up` on startup → deploys can't run a stale schema. |
-| **Resilience** | Leaderboard self-heals from Postgres if Redis is empty. |
-| **Config/secrets** | Env vars only; `.env` gitignored; platform injects prod secrets. |
-
----
-
-## 7. MarathonMitra Integration — TO DECIDE
-
-The V1 goal is **one shared MarathonMitra account** + **finisher badges** synced from website race registrations. But the two systems use **different databases** (Mongo vs. Postgres), so "literally share one DB" isn't possible. Here are the realistic options.
-
-### The accounts problem
-- MarathonMitra users live in **MongoDB**, passwords hashed by their Node backend.
-- RunMitra currently has its **own** `users` table + bcrypt in Postgres.
-
-**Options for shared login:**
-
-| Option | How it works | Trade-offs |
-|---|---|---|
-| **A. RunMitra calls MarathonMitra's auth API** (recommended) | App sends email/password (or OAuth) to MarathonMitra's `/auth/login`. MM verifies and returns identity. RunMitra issues its *own* JWT for app use, keyed to the MM user id. | True single account. No password duplication. Needs MM to expose an auth/verify endpoint (you control the API — §3 of their doc). Must match MM's password-hash scheme only on *their* side. |
-| **B. Token federation / SSO** | MM issues a token the app trusts (shared secret or JWKS); RunMitra validates it. | Cleanest long-term; more upfront work (token exchange, key rotation). |
-| **C. Mirror users into Postgres** | Sync MM users → RunMitra `users` on first login. | Duplicate data, sync drift, password-hash mismatch risk. **Not recommended.** |
-
-### The badges/certificates problem
-Race registrations live in MarathonMitra's **`participation`** collection (MongoDB). To show a finisher badge on the RunMitra profile, RunMitra must **read** that — via an MM API endpoint (e.g. `GET /users/:id/participations`), **not** by touching their database directly.
-
-### Proposed integration shape (pending your confirmation)
-```
-RunMitra app
-   │  login (email/pw or OAuth)
-   ▼
-RunMitra API ──HTTPS──► MarathonMitra API  (verify identity, fetch race participations)
-   │  issues RunMitra JWT (keyed to MM user_id)
-   ▼
-Postgres: RunMitra owns activities/challenges, keyed by MM user_id
-          (no RunMitra-owned passwords; MM is the identity source)
-```
-
-**Open questions for you:**
-1. Does MarathonMitra expose (or can we add) an **auth/verify endpoint** the app can call? (Their doc shows `POST /auth/login`, `GET /auth/me` — likely yes.)
-2. Login method: **email/password**, **Google OAuth**, or **phone/OTP**? (Their doc mentions Google/Facebook OAuth + email magic-link.)
-3. Is the MM user id a Mongo **ObjectId** (string)? RunMitra's `user_id` columns are currently `uuid` — we'd switch them to `text` to hold an ObjectId.
-4. For badges: what identifies a "finisher" in `participation` (a status field? a result?), and can we read it via an API?
-
-Once these are answered, the migration is modest: drop RunMitra's own auth/passwords, key everything on the MM user id, and add a thin MarathonMitra API client on the Go side.
-
----
-
-## 8. Deployment
-
-| Service | Host | Notes |
-|---|---|---|
-| RunMitra API | Render (Docker) | Self-migrating; `/api/v1/health` health check |
-| Postgres + PostGIS | Neon | Supports postgis + citext (verified) |
-| Redis | Render Key Value | Free; non-persistent OK (leaderboard self-heals) |
-| Mobile builds | Expo EAS | Dev build needed for background GPS + push |
-
-See `backend/DEPLOY.md`. The MarathonMitra platform deploys separately (their own Docker/K8s + MongoDB).
-
----
-
-*Last updated: 2026-06 · reflects code through Phase 4; Phase 5 integration design pending.*
+*RunMitra — Built for Indian running clubs.*

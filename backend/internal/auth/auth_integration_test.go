@@ -1,8 +1,8 @@
 package auth_test
 
-// INTEGRATION test for the MarathonMitra-backed auth flow. It talks to the real
-// Postgres from docker-compose, but uses the MarathonMitra dev STUB for identity
-// (no MarathonMitra server needed). Run with:  make test
+// INTEGRATION test for the standalone auth flow (register -> login -> refresh
+// rotation + theft detection -> logout). It talks to the real Postgres from
+// docker-compose. Run with:  make test
 // Auto-skips if DATABASE_URL isn't set.
 
 import (
@@ -14,7 +14,6 @@ import (
 
 	"github.com/avinash/virtual-run-tracker/backend/internal/auth"
 	"github.com/avinash/virtual-run-tracker/backend/internal/database"
-	"github.com/avinash/virtual-run-tracker/backend/internal/marathonmitra"
 	"github.com/avinash/virtual-run-tracker/backend/internal/users"
 )
 
@@ -33,47 +32,55 @@ func TestAuthFlow(t *testing.T) {
 
 	userRepo := users.NewRepository(pool)
 	svc := auth.NewService(
-		marathonmitra.NewStub(), // dev stub: accepts any email + password >= 4 chars
 		userRepo,
 		auth.NewRefreshRepository(pool),
 		auth.NewTokenManager("test-access-secret", 15*time.Minute),
 		30*24*time.Hour,
 	)
 
-	// Unique email per run so the derived MarathonMitra id is unique.
+	// Unique email per run so registration never collides with a prior run.
 	email := "itest_" + time.Now().Format("20060102150405.000000") + "@example.com"
-	const password = "secret"
+	const password = "secret-password"
 
-	// --- Login via MarathonMitra (stub) ---
-	pair, user, err := svc.Login(ctx, "  "+email+"  ", password)
+	// --- Register a new account ---
+	pair, user, err := svc.Register(ctx, auth.RegisterParams{
+		Name:     "Integration Tester",
+		Email:    "  " + email + "  ", // verify trimming/normalisation
+		Password: password,
+	})
 	if err != nil {
-		t.Fatalf("login: %v", err)
+		t.Fatalf("register: %v", err)
 	}
 	if pair.AccessToken == "" || pair.RefreshToken == "" {
-		t.Fatal("login: expected non-empty tokens")
+		t.Fatal("register: expected non-empty tokens")
 	}
 	if user.Email != email {
-		t.Fatalf("login: email not normalized: got %q want %q", user.Email, email)
+		t.Fatalf("register: email not normalised: got %q want %q", user.Email, email)
 	}
 	if user.ID == "" {
-		t.Fatal("login: expected a MarathonMitra user id")
+		t.Fatal("register: expected a generated user id")
 	}
-	// Clean up this cached user (cascades to refresh_tokens) at the end.
+	// Clean up this user (cascades to refresh_tokens) at the end.
 	defer func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM users WHERE id = $1", user.ID)
 	}()
 
-	// --- Logging in again maps to the SAME user id (stable identity) ---
+	// --- Registering the same email again is rejected ---
+	if _, _, err := svc.Register(ctx, auth.RegisterParams{Name: "Dup", Email: email, Password: password}); !errors.Is(err, auth.ErrEmailTaken) {
+		t.Fatalf("duplicate register: want ErrEmailTaken, got %v", err)
+	}
+
+	// --- Login maps to the SAME account (stable identity) ---
 	_, user2, err := svc.Login(ctx, email, password)
 	if err != nil {
-		t.Fatalf("second login: %v", err)
+		t.Fatalf("login: %v", err)
 	}
 	if user2.ID != user.ID {
 		t.Fatalf("same email should map to same id: %q vs %q", user2.ID, user.ID)
 	}
 
-	// --- Bad credentials are rejected (stub rejects empty/short passwords) ---
-	if _, _, err := svc.Login(ctx, email, "x"); !errors.Is(err, auth.ErrInvalidCredentials) {
+	// --- Wrong password is rejected ---
+	if _, _, err := svc.Login(ctx, email, "wrong-password"); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Fatalf("bad credentials: want ErrInvalidCredentials, got %v", err)
 	}
 

@@ -24,7 +24,8 @@ import (
 	"github.com/avinash/virtual-run-tracker/backend/internal/config"
 	"github.com/avinash/virtual-run-tracker/backend/internal/database"
 	"github.com/avinash/virtual-run-tracker/backend/internal/leaderboard"
-	"github.com/avinash/virtual-run-tracker/backend/internal/marathonmitra"
+	"github.com/avinash/virtual-run-tracker/backend/internal/organisations"
+	"github.com/avinash/virtual-run-tracker/backend/internal/permissions"
 	"github.com/avinash/virtual-run-tracker/backend/internal/users"
 )
 
@@ -68,21 +69,17 @@ func main() {
 	refreshRepo := auth.NewRefreshRepository(pool)
 	tokenMgr := auth.NewTokenManager(cfg.JWTSecret, cfg.AccessTokenTTL)
 
-	// Identity is verified by MarathonMitra. Use the real HTTP client when an API
-	// URL is configured; otherwise fall back to a dev stub so the login flow works
-	// locally without MarathonMitra running.
-	var mmClient marathonmitra.Client
-	if cfg.MarathonMitraURL != "" {
-		mmClient = marathonmitra.NewHTTPClient(cfg.MarathonMitraURL)
-		log.Printf("marathonmitra: using API at %s", cfg.MarathonMitraURL)
-	} else {
-		mmClient = marathonmitra.NewStub()
-		log.Println("marathonmitra: using DEV STUB (set MARATHONMITRA_API_URL for the real API)")
-	}
-
-	authSvc := auth.NewService(mmClient, userRepo, refreshRepo, tokenMgr, cfg.RefreshTokenTTL)
+	// RunMitra owns identity now (no external platform): the auth service stores
+	// password hashes and verifies them itself.
+	authSvc := auth.NewService(userRepo, refreshRepo, tokenMgr, cfg.RefreshTokenTTL)
 	authHandler := auth.NewHandler(authSvc)
 	usersHandler := users.NewHandler(userRepo)
+
+	// Club core: organisations, chapters, roles, members — gated by the
+	// org_roles-backed permission checker.
+	permChecker := permissions.NewChecker(pool)
+	orgSvc := organisations.NewService(organisations.NewRepository(pool))
+	orgHandler := organisations.NewHandler(orgSvc, permChecker)
 
 	activitiesSvc := activities.NewService(activities.NewRepository(pool))
 	activitiesHandler := activities.NewHandler(activitiesSvc)
@@ -98,7 +95,7 @@ func main() {
 	// 4. Build the HTTP server around the router.
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      newRouter(authHandler, usersHandler, activitiesHandler, challengesHandler, tokenMgr),
+		Handler:      newRouter(authHandler, usersHandler, orgHandler, activitiesHandler, challengesHandler, tokenMgr),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -128,7 +125,7 @@ func main() {
 }
 
 // newRouter builds the middleware stack and mounts all routes.
-func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, tokenMgr *auth.TokenManager) http.Handler {
+func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, tokenMgr *auth.TokenManager) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID) // tag each request with a unique id
@@ -148,6 +145,9 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, activitie
 			r.Mount("/users", usersHandler.Routes())
 			r.Mount("/activities", activitiesHandler.Routes())
 			r.Mount("/challenges", challengesHandler.Routes())
+			// Club core declares its own /organisations and /chapters subtrees,
+			// so it mounts at the group root rather than under a single prefix.
+			r.Mount("/", orgHandler.Routes())
 		})
 	})
 

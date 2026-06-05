@@ -6,11 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/marathonmitra"
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/avinash/virtual-run-tracker/backend/internal/users"
 )
 
-// TokenPair is what we hand back to a client on login/refresh.
+// TokenPair is what we hand back to a client on register/login/refresh.
 type TokenPair struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -21,19 +22,30 @@ type ValidationError struct{ Msg string }
 
 func (e ValidationError) Error() string { return e.Msg }
 
-// ErrInvalidCredentials means MarathonMitra rejected the login. Deliberately
+// ErrInvalidCredentials means the email/password didn't match. Deliberately
 // vague so it doesn't reveal whether an email exists.
 var ErrInvalidCredentials = errors.New("invalid email or password")
+
+// ErrEmailTaken / ErrPhoneTaken are returned from Register when the account
+// already exists, mapped to a 409 by the handler.
+var (
+	ErrEmailTaken = users.ErrEmailTaken
+	ErrPhoneTaken = users.ErrPhoneTaken
+)
 
 // ErrInvalidRefreshToken covers any unusable refresh token (missing, expired,
 // already used, or revoked).
 var ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
 
-// Service holds the auth business logic. Identity is verified by MarathonMitra
-// (mm); RunMitra then issues its OWN app JWT + refresh token keyed to the
-// MarathonMitra user id, and caches the profile locally (users).
+// minPasswordLen is the floor we enforce at registration. bcrypt itself caps
+// input at 72 bytes; we reject longer passwords rather than silently truncate.
+const minPasswordLen = 8
+const maxPasswordLen = 72
+
+// Service holds the auth business logic. RunMitra owns identity now: it stores a
+// bcrypt password hash, verifies it on login, and issues its own JWT + rotating
+// refresh token.
 type Service struct {
-	mm         marathonmitra.Client
 	users      *users.Repository
 	refresh    *RefreshRepository
 	tokens     *TokenManager
@@ -41,36 +53,92 @@ type Service struct {
 }
 
 // NewService wires the service together.
-func NewService(mm marathonmitra.Client, u *users.Repository, rt *RefreshRepository, tm *TokenManager, refreshTTL time.Duration) *Service {
-	return &Service{mm: mm, users: u, refresh: rt, tokens: tm, refreshTTL: refreshTTL}
+func NewService(u *users.Repository, rt *RefreshRepository, tm *TokenManager, refreshTTL time.Duration) *Service {
+	return &Service{users: u, refresh: rt, tokens: tm, refreshTTL: refreshTTL}
 }
 
-// Login verifies credentials against MarathonMitra, refreshes the local profile
-// cache, and returns a RunMitra token pair. RunMitra never sees a stored
-// password — MarathonMitra is the identity authority.
+// RegisterParams is the full runner profile captured at sign-up. The README's
+// invite-first onboarding funnels every new account through here.
+type RegisterParams struct {
+	Name       string
+	Email      string
+	Phone      string
+	Password   string
+	Age        *int
+	TshirtSize *string
+	City       *string
+}
+
+// Register validates the profile, hashes the password, creates the account, and
+// returns a token pair plus the created user.
+func (s *Service) Register(ctx context.Context, p RegisterParams) (*TokenPair, *users.User, error) {
+	p.Name = strings.TrimSpace(p.Name)
+	p.Email = normalizeEmail(p.Email)
+	p.Phone = strings.TrimSpace(p.Phone)
+
+	if p.Name == "" {
+		return nil, nil, ValidationError{Msg: "name is required"}
+	}
+	if !looksLikeEmail(p.Email) {
+		return nil, nil, ValidationError{Msg: "a valid email is required"}
+	}
+	if len(p.Password) < minPasswordLen {
+		return nil, nil, ValidationError{Msg: "password must be at least 8 characters"}
+	}
+	if len(p.Password) > maxPasswordLen {
+		return nil, nil, ValidationError{Msg: "password must be at most 72 characters"}
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(p.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	user, err := s.users.Create(ctx, users.NewUser{
+		Name:         p.Name,
+		Email:        p.Email,
+		Phone:        p.Phone,
+		PasswordHash: string(hash),
+		Age:          p.Age,
+		TshirtSize:   p.TshirtSize,
+		City:         p.City,
+	})
+	if err != nil {
+		// ErrEmailTaken / ErrPhoneTaken flow straight to the handler as a 409.
+		return nil, nil, err
+	}
+
+	pair, err := s.issueTokens(ctx, user.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pair, user, nil
+}
+
+// Login verifies an email/password against the stored bcrypt hash and, on
+// success, returns a token pair plus the user. The same vague error covers both
+// "no such email" and "wrong password" so neither is distinguishable.
 func (s *Service) Login(ctx context.Context, email, password string) (*TokenPair, *users.User, error) {
 	email = normalizeEmail(email)
 	if email == "" || password == "" {
 		return nil, nil, ErrInvalidCredentials
 	}
 
-	// 1. Ask MarathonMitra to verify. It returns the canonical identity.
-	mmUser, err := s.mm.VerifyCredentials(ctx, email, password)
+	user, err := s.users.GetByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, marathonmitra.ErrInvalidCredentials) {
+		if errors.Is(err, users.ErrNotFound) {
+			// Hash a dummy value anyway so the response time doesn't reveal
+			// whether the email exists (timing-attack hardening).
+			_ = bcrypt.CompareHashAndPassword([]byte("$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv"), []byte(password))
 			return nil, nil, ErrInvalidCredentials
 		}
-		return nil, nil, err // an upstream/transport problem -> 500
-	}
-
-	// 2. Mirror the identity into our local profile cache (used to label runs
-	//    and leaderboards). Keyed by the MarathonMitra user id.
-	user, err := s.users.Upsert(ctx, mmUser.ID, mmUser.Email, mmUser.DisplayName)
-	if err != nil {
 		return nil, nil, err
 	}
 
-	// 3. Issue RunMitra's own tokens.
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		return nil, nil, ErrInvalidCredentials
+	}
+
 	pair, err := s.issueTokens(ctx, user.ID)
 	if err != nil {
 		return nil, nil, err
@@ -105,9 +173,6 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*TokenPa
 	if err := s.refresh.Revoke(ctx, stored.ID); err != nil {
 		return nil, err
 	}
-
-	// Issue fresh tokens for the same user id (no MarathonMitra call needed — the
-	// refresh token itself is the proof of a prior successful login).
 	return s.issueTokens(ctx, stored.UserID)
 }
 
@@ -125,7 +190,7 @@ func (s *Service) Logout(ctx context.Context, rawRefreshToken string) error {
 }
 
 // issueTokens mints a new access token and a new (stored) refresh token for the
-// given MarathonMitra user id.
+// given user id.
 func (s *Service) issueTokens(ctx context.Context, userID string) (*TokenPair, error) {
 	access, err := s.tokens.NewAccessToken(userID)
 	if err != nil {
@@ -145,4 +210,15 @@ func (s *Service) issueTokens(ctx context.Context, userID string) (*TokenPair, e
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// looksLikeEmail is a deliberately loose sanity check — it rejects obvious junk
+// (no "@", no domain) without trying to fully validate an address (impossible in
+// practice). Real verification is a future "confirm your email" step.
+func looksLikeEmail(email string) bool {
+	at := strings.IndexByte(email, '@')
+	if at <= 0 || at == len(email)-1 {
+		return false
+	}
+	return strings.IndexByte(email[at+1:], '.') >= 0
 }

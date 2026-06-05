@@ -18,7 +18,6 @@ import (
 type Config struct {
 	DatabaseURL      string
 	RedisURL         string
-	MarathonMitraURL string // base URL of the MarathonMitra API; empty => dev stub
 	JWTSecret        string
 	JWTRefreshSecret string
 	Port             string
@@ -44,7 +43,6 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		RedisURL:         os.Getenv("REDIS_URL"),
-		MarathonMitraURL: os.Getenv("MARATHONMITRA_API_URL"),
 		JWTSecret:        os.Getenv("JWT_SECRET"),
 		JWTRefreshSecret: os.Getenv("JWT_REFRESH_SECRET"),
 		Port:             getEnv("PORT", "8080"),

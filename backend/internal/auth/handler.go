@@ -22,10 +22,11 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // Routes returns a router with all /auth endpoints mounted, ready to attach
-// under /api/v1/auth in main.
+// under /api/v1/auth in main. RunMitra owns identity now, so /register lives
+// here (accounts are created in-app, not on an external platform).
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
-	// No /register: accounts are created on MarathonMitra (the website), not here.
+	r.Post("/register", h.register)
 	r.Post("/login", h.login)
 	r.Post("/refresh", h.refresh)
 	r.Post("/logout", h.logout)
@@ -33,6 +34,16 @@ func (h *Handler) Routes() http.Handler {
 }
 
 // --- request/response shapes ---
+
+type registerRequest struct {
+	Name       string  `json:"name"`
+	Email      string  `json:"email"`
+	Phone      string  `json:"phone"`
+	Password   string  `json:"password"`
+	Age        *int    `json:"age"`
+	TshirtSize *string `json:"tshirt_size"`
+	City       *string `json:"city"`
+}
 
 type loginRequest struct {
 	Email    string `json:"email"`
@@ -43,13 +54,35 @@ type refreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-// authResponse is returned on login: the tokens plus the (cached) user profile.
+// authResponse is returned on register/login: the tokens plus the user profile.
 type authResponse struct {
 	*TokenPair
 	User *users.User `json:"user"`
 }
 
 // --- handlers ---
+
+func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
+	var req registerRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	pair, user, err := h.svc.Register(r.Context(), RegisterParams{
+		Name:       req.Name,
+		Email:      req.Email,
+		Phone:      req.Phone,
+		Password:   req.Password,
+		Age:        req.Age,
+		TshirtSize: req.TshirtSize,
+		City:       req.City,
+	})
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, authResponse{TokenPair: pair, User: user})
+}
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
@@ -99,6 +132,10 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &validationErr):
 		httpx.Error(w, http.StatusBadRequest, validationErr.Msg)
+	case errors.Is(err, ErrEmailTaken):
+		httpx.Error(w, http.StatusConflict, "an account with this email already exists")
+	case errors.Is(err, ErrPhoneTaken):
+		httpx.Error(w, http.StatusConflict, "an account with this phone already exists")
 	case errors.Is(err, ErrInvalidCredentials):
 		httpx.Error(w, http.StatusUnauthorized, "invalid email or password")
 	case errors.Is(err, ErrInvalidRefreshToken):

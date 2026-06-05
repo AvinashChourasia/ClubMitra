@@ -1,21 +1,58 @@
 # RunMitra
 
-A **MarathonMitra** product — a GPS run-tracking app for Indian runners. Track real runs, join virtual challenges, compete on leaderboards, and earn finisher badges linked to your MarathonMitra race registrations.
+A running club operating system for India. Member management, attendance, challenges, inventory, and finances — with GPS run tracking built in.
 
-> **V1 Goal:** Ship fully tested by end of June 2026. One shared MarathonMitra account across app and website.
+> **Primary customer: Running clubs.** Free for runners. Clubs pay for features.
+
+---
+
+## What RunMitra Solves
+
+Indian running clubs today run entirely on WhatsApp + spreadsheets + UPI screenshots. RunMitra replaces that with:
+
+- One place to manage all club members, attendance, and fees
+- Challenges with leaderboards (public, private, city-wide, org-wide)
+- Inventory tracking (t-shirts, medals, bibs, gear)
+- In-app payment collection with automatic platform split via Razorpay Route
+- GPS run tracking (Phase 3) replacing manual Strava screenshots
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Mobile | React Native + Expo (SDK 54), Expo Router |
-| Backend API | Go (Chi router) |
-| Database | PostgreSQL + PostGIS |
-| Cache / Leaderboard | Redis |
-| Deployment | Render (API + Redis) + Neon (Postgres) |
-| Maps | react-native-maps (Apple Maps via Expo Go) |
+| Layer | Technology | Purpose |
+|---|---|---|
+| Mobile | React Native + Expo (SDK 54) | iOS + Android |
+| Backend API | Go (Chi) | REST API |
+| Primary DB | PostgreSQL + PostGIS | All relational data + GPS routes |
+| Cache / Leaderboard | Redis (Upstash) | Real-time challenge rankings |
+| Payments | Razorpay + Razorpay Route | Collections + automatic platform split |
+| File Storage | Cloudinary | Profile photos, club logos, finisher certs |
+| Push Notifications | Expo Notifications | Run reminders, challenge updates, fee alerts |
+| Deployment | Render (API) + Neon (DB) + Upstash (Redis) | Low cost, scalable |
+
+**Estimated monthly infrastructure cost: $0–$7 at launch**
+
+---
+
+## Revenue Model
+
+```
+Club pays:
+  ├── Base subscription       flat monthly fee per chapter
+  ├── Per-member fee          variable, after free member limit
+  ├── Chapter fee             extra charge per additional chapter (org feature)
+  └── Platform cut            % of every transaction processed through app:
+        ├── Member joining fee (when club charges runners)
+        ├── Inventory purchases
+        └── Any future in-app payment
+
+Runner pays:
+  └── Nothing to RunMitra directly
+      (pays club membership fee if club enables it)
+```
+
+All money flows through **Razorpay Route** — automatic split at transaction time. No manual settlements. No compliance risk.
 
 ---
 
@@ -24,133 +61,175 @@ A **MarathonMitra** product — a GPS run-tracking app for Indian runners. Track
 ```
 runmitra/
 │
-├── backend/                  # Go API
-│   ├── cmd/api/main.go       # Entry point (self-migrates on startup)
+├── backend/
+│   ├── cmd/
+│   │   └── api/
+│   │       └── main.go
 │   ├── internal/
-│   │   ├── auth/             # JWT access + rotating refresh tokens
-│   │   ├── activities/       # Run recording, stats, GeoJSON
-│   │   ├── challenges/       # Virtual run / challenge engine
-│   │   ├── leaderboard/      # Redis sorted sets
-│   │   ├── users/            # Profiles
-│   │   ├── database/         # pgx pool, Redis, migration runner
-│   │   ├── httpx/            # Shared HTTP helpers (JSON, decode, context)
-│   │   └── config/           # Env-based config
-│   ├── db/migrations/        # goose SQL migrations (embedded in binary)
-│   ├── pkg/geo/              # GPS helpers, EWKT, elevation, duration
-│   ├── Dockerfile            # Multi-stage prod image (~41 MB)
-│   ├── render.yaml           # Render deploy blueprint
-│   ├── DEPLOY.md             # Step-by-step deploy guide
-│   └── Makefile
+│   │   ├── auth/              # JWT, refresh tokens, registration
+│   │   ├── users/             # Profiles, stats, aggregates
+│   │   ├── organisations/     # Org + chapter + roles + membership
+│   │   ├── permissions/       # Role-based access control middleware
+│   │   ├── members/           # Member CRUD, status, invites (future split)
+│   │   ├── attendance/        # Run scheduling, post-run check-in
+│   │   ├── challenges/        # Challenge engine, visibility rules
+│   │   ├── leaderboard/       # Redis sorted sets
+│   │   ├── inventory/         # Items, stock, issue/return/purchase
+│   │   ├── finance/           # Transactions, platform cut, settlements
+│   │   ├── notifications/     # Push notification service
+│   │   └── activities/        # GPS run recording (Phase 3)
+│   ├── db/
+│   │   └── migrations/        # goose SQL migrations
+│   ├── pkg/
+│   │   ├── geo/               # PostGIS helpers (Phase 3)
+│   │   ├── razorpay/          # Payment + Route integration
+│   │   └── middleware/        # Auth, permissions, soft-delete
+│   ├── .env.example
+│   ├── Makefile
+│   └── go.mod
 │
-├── mobile/                   # React Native (Expo)
+├── mobile/
 │   ├── app/
-│   │   ├── (auth)/           # Login, Register
-│   │   ├── (tabs)/           # Home, Challenges, Profile
-│   │   ├── activity/         # Live run + run detail
-│   │   └── challenge/        # Challenge detail + create
-│   ├── components/           # StatCard, ProgressBar, ElevationChart
-│   └── lib/                  # api, auth, activities, challenges, runQueue, gpsFilter
+│   │   ├── (auth)/            # Login, Register (with full profile)
+│   │   ├── (tabs)/            # Home, Clubs, Challenges, Profile
+│   │   ├── club/              # Club detail, members, attendance
+│   │   ├── challenge/         # Challenge detail, leaderboard
+│   │   ├── inventory/         # Club inventory screens
+│   │   ├── finance/           # Admin finance dashboard
+│   │   └── activity/          # GPS run screens (Phase 3)
+│   ├── components/
+│   ├── hooks/
+│   ├── services/              # API client (axios)
+│   ├── store/                 # Zustand state management
+│   ├── app.json
+│   └── package.json
 │
+├── ARCHITECTURE.md
 └── README.md
 ```
 
 ---
 
-## V1 Delivery — June 2026
+## Build Phases
 
-### Phase 1 — Project setup & auth ✅ DONE
-- [x] Go project structure, modules, linter, Makefile
-- [x] PostgreSQL + PostGIS setup, migrations with goose
-- [x] Auth API: login via MarathonMitra (shared account), JWT + refresh tokens (rotation + theft detection), logout, protected `/users/me`
-- [x] React Native + Expo init (SDK 54), Expo Router navigation shell
-- [x] Login UI wired to auth API — tested on a physical iPhone via Expo Go
+### Phase 1 — Club Core `(Month 1)` 🚧 IN PROGRESS
 
-### Phase 2 — GPS run recording ✅ MOSTLY DONE
-- [x] Activities DB schema with PostGIS geometry column (`geography(LineStringZ,4326)` + GiST index)
-- [x] `POST /activities` — accept coordinate array, store route
-- [x] Server-side stats: distance (PostGIS geodesic), avg pace, elevation gain
-- [x] Live run screen: timer, pace, distance HUD (+ GPS noise filtering for accurate distance)
-- [x] Upload run to API on finish + offline queue (persist-first, auto-sync)
-- [ ] **Background GPS recording** — foreground done; needs EAS dev build (Expo Go limitation). Also bundle in-progress-run checkpoint/resume here.
+**Goal: A club admin can create their club, add members, schedule runs, and run challenges.**
 
-### Phase 3 — Map & activity history ✅ DONE
-- [x] `GET /activities` with pagination, `GET /activities/:id` (ownership-checked)
-- [x] GeoJSON endpoint for route polyline (`GET /activities/:id/geojson`, 3D LineString)
-- [x] Route map view (react-native-maps, Apple Maps)
-- [x] Activity detail: stats cards + elevation chart (altitude stored as route Z dimension)
-- [x] Run history list with weekly summary
+> **Foundation built so far (this pass):** standalone auth (register + login with
+> bcrypt, JWT + refresh-token rotation/theft detection — the MarathonMitra
+> identity dependency has been removed); the `users` table now holds the full
+> runner profile; the club core is live — organisations, city-level chapters with
+> unique invite codes, the `org_roles` permission model (`org_admin` /
+> `chapter_admin` / `co_admin`), invite-first join, and member listing — all
+> gated by role-checking middleware. Attendance, challenge-visibility rules, and
+> the proof flow are the next slice.
 
-### Phase 4 — Virtual run / challenge engine ✅ DONE
-- [x] Challenge schema: target distance + time window + memberships (durable progress)
-- [x] Challenge API: create, join, list, get, progress tracking (runs auto-credit all joined challenges)
-- [x] Per-run opt-out ("don't count toward challenges") for warm-ups / test runs
-- [x] Redis leaderboard: sorted set per challenge (self-heals from Postgres)
-- [x] Challenge browse + join screen (All / Joined filter, create form)
-- [x] My challenges + detail: progress bar, %, leaderboard with your rank highlighted
+#### Week 1–2: Identity + Organisation
+- [x] User registration — name, age, phone, email, t-shirt size, city, profile photo
+- [x] JWT auth + refresh tokens (rotation + theft detection)
+- [x] Organisation create (update: pending)
+- [x] Chapter create under org (same admin, multiple cities supported)
+- [x] Admin role assignment: org_admin, chapter_admin, co_admin
+- [x] Invite link per chapter (unique code, runner signs up via link → auto-joins chapter)
+- [x] Soft delete on all entities — `deleted_at` everywhere, no hard delete for any org/admin action
 
-### Phase 5 — Profile, MarathonMitra integration & deployment 🔧 IN PROGRESS
-- [x] User stats API: total km, total runs, longest run, best pace, current streak (`GET /activities/stats`)
-- [x] Profile screen + personal stats dashboard (+ Home dashboard: this-week, streak, records, active challenges, recent runs)
-- [x] Deploy prep: Dockerfile, `render.yaml`, self-migrating binary, `DEPLOY.md` (verified locally; not yet deployed)
-- [ ] Deploy Go API on Render, Postgres on Neon, Redis on Render — **action: accounts + deploy**
-- [~] **MarathonMitra account integration** — shared-account auth refactor DONE (login verifies via MarathonMitra; no RunMitra passwords; user ids are MarathonMitra ObjectIds; dev stub built). Remaining: wire the real MarathonMitra `/auth/login` contract.
-- [ ] **Finisher certificate** — auto-issued on challenge completion
-- [ ] **MarathonMitra badge sync** — race registered on website → badge on app profile (read MarathonMitra `participation`)
-- [ ] EAS dev build (unlocks background GPS + push notifications)
-- [ ] Push notifications via Expo Notifications — challenge milestones, run reminders
-- [ ] TestFlight / internal Android test track
-
-### Phase 6 — Testing & V1 sign-off 🎯 THIS MONTH
-- [ ] End-to-end: register on MM website → log in on app → join virtual run → complete → get badge
-- [ ] GPS accuracy test across 3+ real outdoor runs
-- [ ] Offline sync test: run without internet, verify auto-upload on reconnect
-- [ ] Load test leaderboard with 50+ simulated users
-- [ ] Fix all crashes, edge cases, empty states
-- [ ] Internal beta: 20 real runners from existing MM WhatsApp groups
+#### Week 3–4: Members + Attendance + Challenges
+- [x] Member management: add, view, status (active / lapsed / suspended), soft delete
+- [ ] Member profile view for admins (t-shirt size, join date, fee status, attendance record)
+- [ ] Attendance: admin schedules group run (title, date, time, location, distance target)
+- [ ] Post-run check-in: member marks attendance after run
+- [ ] Attendance history per member and per run
+- [ ] Challenge create: title, type (distance / days / streak), duration, target, visibility
+- [ ] Challenge visibility: public / chapter-only / city-only / org-wide
+- [ ] Challenge join: individual runner or club joins
+- [ ] Leaderboard per challenge (Redis sorted sets)
+- [ ] Phase 1 proof: runner pastes Strava link or screenshot → admin verifies manually
+- [ ] Basic push notifications: run scheduled, challenge update
 
 ---
 
-## V1 Feature Scope
+### Phase 2 — Finance + Inventory `(Month 2)`
 
-### ✅ In V1
-- GPS run tracking (foreground now; background after EAS build)
-- Offline run recording with auto-sync
-- Route map + elevation chart per run
-- Run history with weekly summary
-- Virtual challenge join + progress tracking (with per-run opt-out)
-- Live leaderboard per challenge
-- Finisher certificate on challenge completion
-- User profile: total km, streak, personal records
-- MarathonMitra badge sync (website race → app profile)
-- Shared MarathonMitra account across website + app
-- Push notifications for challenge milestones
+- [ ] Razorpay Route setup — KYC flow for chapter admin during onboarding
+- [ ] Membership fee toggle per chapter (on/off, set amount)
+- [ ] In-app payment: runner pays chapter membership fee
+- [ ] Platform cut calculated and stored at transaction time
+- [ ] Automatic split via Razorpay Route (club gets net, RunMitra gets cut)
+- [ ] Transaction history: per runner, per chapter, per org
+- [ ] Finance dashboard for chapter admin: collected, pending, platform cut
+- [ ] Subscription billing: org pays RunMitra for base + per-member fee
+- [ ] Inventory CRUD: item name, category, quantity, size breakdown (JSONB)
+- [ ] Inventory issue / return / purchase flow
+- [ ] Platform cut on inventory purchases (member buys merch from club)
+- [ ] Inventory dashboard: stock levels, transaction history
 
-### ❌ Not in V1 → V2 and beyond
-- Social feed (follow runners, activity feed) — V2
-- Running clubs and club leaderboards — V2
-- Stories / run highlights — V2
-- Coach profiles — V3
-- Garmin / Apple Watch / Fitbit sync — V3
-- Segments (fastest on a route) — V3
-- Premium subscription / Stripe — post-V2
+---
+
+### Phase 3 — GPS Tracking `(Month 3)`
+
+- [ ] GPS run recording: live route, distance, pace, elevation
+- [ ] Offline run recording with auto-sync
+- [ ] Server-side stats via PostGIS (geodesic distance, elevation gain)
+- [ ] Route map + elevation chart per activity
+- [ ] Run history with weekly summary
+- [ ] Runs auto-credit to active challenges (replaces manual Strava proof)
+- [ ] Personal stats: total km, streak, personal records
+- [ ] Activity feed per chapter
+- [ ] Background GPS (requires EAS dev build)
+- [ ] Finisher certificate generation (Cloudinary PDF)
+
+> The existing GPS/activities, leaderboard, and PostGIS code from the earlier
+> solo-tracker build is kept in place and unused by the club core until Phase 3.
+
+---
+
+### Phase 4 — Social + Growth `(Month 4–5)`
+
+- [ ] Public explore: discover clubs and challenges
+- [ ] Club public profile page
+- [ ] Follow individual runners
+- [ ] Badges and achievements
+- [ ] Org-wide challenge leaderboard (all chapters compete)
+- [ ] Push notifications full suite
 
 ---
 
 ## Key API Endpoints
 
 ```
-# Auth
+# Auth + Users
 POST   /api/v1/auth/register
 POST   /api/v1/auth/login
 POST   /api/v1/auth/refresh
 POST   /api/v1/auth/logout
+GET    /api/v1/users/me
+PUT    /api/v1/users/me
+GET    /api/v1/users/me/stats
 
-# Activities
-GET    /api/v1/activities
-POST   /api/v1/activities
-GET    /api/v1/activities/stats
-GET    /api/v1/activities/:id
-GET    /api/v1/activities/:id/geojson
+# Organisations + Chapters
+POST   /api/v1/organisations
+GET    /api/v1/organisations/:id
+POST   /api/v1/organisations/:id/chapters
+GET    /api/v1/organisations/:id/chapters
+POST   /api/v1/organisations/:id/roles      # assign org/chapter admin role
+GET    /api/v1/chapters/:id                  # (planned)
+PUT    /api/v1/chapters/:id                  # (planned)
+DELETE /api/v1/chapters/:id                  # soft delete only (planned)
+
+# Members
+POST   /api/v1/chapters/join                 # join via invite code
+POST   /api/v1/chapters/:id/members          # admin adds a member
+GET    /api/v1/chapters/:id/members
+PUT    /api/v1/chapters/:id/members/:uid     # (planned)
+DELETE /api/v1/chapters/:id/members/:uid     # soft delete only (planned)
+
+# Attendance (planned)
+POST   /api/v1/chapters/:id/runs
+GET    /api/v1/chapters/:id/runs
+POST   /api/v1/runs/:id/checkin
+GET    /api/v1/runs/:id/attendance
+GET    /api/v1/members/:id/attendance
 
 # Challenges
 GET    /api/v1/challenges
@@ -158,38 +237,89 @@ POST   /api/v1/challenges
 GET    /api/v1/challenges/:id
 POST   /api/v1/challenges/:id/join
 GET    /api/v1/challenges/:id/leaderboard
+GET    /api/v1/challenges/:id/progress
 
-# Users
-GET    /api/v1/users/me
+# Inventory (Phase 2)
+GET    /api/v1/chapters/:id/inventory
+POST   /api/v1/chapters/:id/inventory
+PUT    /api/v1/inventory/:id
+POST   /api/v1/inventory/:id/issue
+POST   /api/v1/inventory/:id/return
+POST   /api/v1/inventory/:id/purchase
 
-# Planned (Phase 5)
-GET    /api/v1/users/me/badges       # MarathonMitra finisher badges
-GET    /api/v1/challenges/:id/certificate
+# Finance (Phase 2)
+GET    /api/v1/chapters/:id/transactions
+GET    /api/v1/chapters/:id/finance/summary
+POST   /api/v1/payments/initiate
+POST   /api/v1/payments/webhook           # Razorpay webhook
+
+# Activities (Phase 3)
+GET    /api/v1/activities
+POST   /api/v1/activities
+GET    /api/v1/activities/:id
+GET    /api/v1/activities/:id/geojson
 ```
+
+---
+
+## Permission Rules
+
+| Action | Platform Admin | Org Admin | Chapter Admin | Co-Admin | Member |
+|---|---|---|---|---|---|
+| Create organisation | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Create chapter | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Assign chapter admin | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Assign co-admin | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Add / remove member | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Soft delete member | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Soft delete chapter | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Soft delete org | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Create challenge | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Manage inventory | ✅ | ✅ | ✅ | ✅ | ❌ |
+| View finances | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Manage billing | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Hard delete anything | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+---
+
+## Core Design Rules
+
+1. **Soft delete everywhere** — every table has `deleted_at`. No org or admin can permanently delete data. Only platform admin for legal/compliance only.
+2. **One transaction table** — every money movement goes through `transactions`. Platform cut stored at transaction time, never derived later.
+3. **Razorpay Route only** — no manual splits. Every club collecting money must complete Razorpay KYC before enabling fees.
+4. **Invite-first onboarding** — each chapter gets a unique invite link. Runner clicks → signs up with full profile → auto-joins chapter.
+5. **Redis leaderboard** — self-heals from Postgres. Sorted sets per challenge. Challenge progress updates on every run log.
+6. **Standalone** — RunMitra owns identity. No external auth dependency, no shared DB, no linked accounts required.
 
 ---
 
 ## Getting Started
 
 ### Prerequisites
+
 - Go 1.22+
 - Node.js 18+
-- Docker (runs Postgres + Redis locally)
-- Expo Go app on your iPhone (same Wi-Fi as your Mac)
+- PostgreSQL 15+ with PostGIS
+- Redis (local or Upstash)
+- Expo CLI: `npm install -g expo`
+- Razorpay account with Route enabled (Phase 2)
 
 ### Backend setup
+
 ```bash
 cd backend
-cp .env.example .env        # DATABASE_URL, REDIS_URL, JWT secrets
-docker compose up -d        # Postgres (5433) + Redis (6380)
-make run                    # starts API on :8090 (auto-migrates on startup)
+cp .env.example .env
+go mod tidy
+make migrate-up
+make run
 ```
 
 ### Mobile setup
+
 ```bash
 cd mobile
 npm install
-npx expo start              # scan QR with iPhone Camera → opens in Expo Go
+npx expo start
 ```
 
 ---
@@ -198,55 +328,44 @@ npx expo start              # scan QR with iPhone Camera → opens in Expo Go
 
 ```env
 # backend/.env
-# Local dev uses non-default ports to avoid clashes:
-#   Postgres on 5433, Redis on 6380, API on 8090
-DATABASE_URL=postgres://virtualrun:virtualrun@localhost:5433/virtualrun?sslmode=disable
-REDIS_URL=redis://localhost:6380
+
+DATABASE_URL=postgres://runmitra:runmitra@localhost:5433/runmitra?sslmode=disable
+REDIS_URL=redis://localhost:6379
 JWT_SECRET=your-secret-here
 JWT_REFRESH_SECRET=your-refresh-secret-here
 PORT=8090
 ENV=development
+
+# Phase 2
+RAZORPAY_KEY_ID=your-key-id
+RAZORPAY_KEY_SECRET=your-key-secret
+RAZORPAY_WEBHOOK_SECRET=your-webhook-secret
+PLATFORM_CUT_PCT=10
+
+CLOUDINARY_URL=cloudinary://your-cloudinary-url
 ```
 
 ---
 
-## Deployment (V1 — low cost)
+## Deployment
 
 | Service | Use | Cost |
 |---|---|---|
-| Render | Go API hosting | Free / $7 mo |
-| Render Key Value | Redis leaderboard | Free |
+| Render | Go API | Free / $7 mo |
 | Neon | PostgreSQL + PostGIS | Free (0.5 GB) |
-| Expo EAS | App builds + TestFlight | Free |
+| Upstash | Redis | Free (10k req/day) |
+| Cloudinary | File storage | Free (25 GB) |
+| Expo EAS | App builds | Free |
 
-**Estimated monthly cost: $0–$7.** See `backend/DEPLOY.md` for the step-by-step guide. The API self-migrates on startup, so deploys never run against a stale schema.
-
----
-
-## Post-V1 Roadmap
-
-### V2 — Community (Month 2–3)
-- Running clubs: home page, captain, club leaderboard
-- Activity feed: see your club's runs
-- Follow individual runners
-- City-based leaderboards (Bangalore, Pune, Delhi…)
-- Club challenges: club runs X km together
-
-### V3 — Social & Scale (Month 4–6)
-- Explore feed: public runs, top performers
-- Stories / run highlights
-- Coach profiles + connect
-- Segment leaderboards (fastest on a route)
-- Garmin / Apple Watch sync
+**Estimated monthly cost at launch: $0–$7**
 
 ---
 
-## About
+## Roadmap Summary
 
-RunMitra is built under the **MarathonMitra** brand — India's running ecosystem platform.
-
-- Website (event discovery + registration): [marathonmitra.com](https://marathonmitra.com)
-- One shared account across website and app
-- Race registered on website → finisher badge appears on RunMitra profile
-
-Built with Go + React Native. AI pair-programmed with Claude.
+| Phase | Focus | Timeline |
+|---|---|---|
+| 1 | Club core — members, attendance, challenges | Month 1 |
+| 2 | Finance + inventory + Razorpay Route | Month 2 |
+| 3 | GPS tracking + auto challenge credit | Month 3 |
+| 4 | Social, explore, public profiles | Month 4–5 |
