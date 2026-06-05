@@ -91,7 +91,7 @@ func main() {
 
 	board := leaderboard.New(rdb)
 	challengesSvc := challenges.NewService(challenges.NewRepository(pool), board, userRepo)
-	challengesHandler := challenges.NewHandler(challengesSvc)
+	challengesHandler := challenges.NewHandler(challengesSvc, permChecker)
 
 	// Connect the two: when a run is recorded, credit challenge progress. This
 	// callback is how activities stays unaware of the challenges package.

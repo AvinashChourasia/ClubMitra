@@ -34,11 +34,13 @@ func key(challengeID uuid.UUID) string {
 	return "leaderboard:challenge:" + challengeID.String()
 }
 
-// Entry is one ranked participant. UserID is the MarathonMitra user id string.
+// Entry is one ranked participant. Member is the participant key (a user id, or
+// "chapter:<id>" for a club). Score is the ranked value — km for a distance
+// challenge, days for a days/streak challenge.
 type Entry struct {
-	UserID    string  `json:"user_id"`
-	DistanceM float64 `json:"distance_m"`
-	Rank      int     `json:"rank"` // 1-based
+	Member string  `json:"member"`
+	Score  float64 `json:"score"`
+	Rank   int     `json:"rank"` // 1-based
 }
 
 // AddProgress increases a user's score in a challenge by deltaM meters and
@@ -67,7 +69,7 @@ func (l *Leaderboard) Top(ctx context.Context, challengeID uuid.UUID, limit int)
 		if !ok {
 			return nil, fmt.Errorf("leaderboard: unexpected member type %T", z.Member)
 		}
-		entries = append(entries, Entry{UserID: member, DistanceM: z.Score, Rank: i + 1})
+		entries = append(entries, Entry{Member: member, Score: z.Score, Rank: i + 1})
 	}
 	return entries, nil
 }
