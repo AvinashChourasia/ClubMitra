@@ -36,13 +36,14 @@ func (h *Handler) Routes() http.Handler {
 // --- request/response shapes ---
 
 type registerRequest struct {
-	Name       string  `json:"name"`
-	Email      string  `json:"email"`
-	Phone      string  `json:"phone"`
-	Password   string  `json:"password"`
-	Age        *int    `json:"age"`
-	TshirtSize *string `json:"tshirt_size"`
-	City       *string `json:"city"`
+	Name         string  `json:"name"`
+	Email        string  `json:"email"`
+	Phone        string  `json:"phone"`
+	Password     string  `json:"password"`
+	Age          *int    `json:"age"`
+	TshirtSize   *string `json:"tshirt_size"`
+	City         *string `json:"city"`
+	RunningLevel *string `json:"running_level"`
 }
 
 type loginRequest struct {
@@ -69,13 +70,14 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pair, user, err := h.svc.Register(r.Context(), RegisterParams{
-		Name:       req.Name,
-		Email:      req.Email,
-		Phone:      req.Phone,
-		Password:   req.Password,
-		Age:        req.Age,
-		TshirtSize: req.TshirtSize,
-		City:       req.City,
+		Name:         req.Name,
+		Email:        req.Email,
+		Phone:        req.Phone,
+		Password:     req.Password,
+		Age:          req.Age,
+		TshirtSize:   req.TshirtSize,
+		City:         req.City,
+		RunningLevel: req.RunningLevel,
 	})
 	if err != nil {
 		writeAuthError(w, err)

@@ -25,6 +25,7 @@ type User struct {
 	Age          *int      `json:"age,omitempty"`
 	TshirtSize   *string   `json:"tshirt_size,omitempty"`
 	City         *string   `json:"city,omitempty"`
+	RunningLevel *string   `json:"running_level,omitempty"`
 	ProfilePhoto *string   `json:"profile_photo,omitempty"`
 	IsVerified   bool      `json:"is_verified"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -41,6 +42,23 @@ type NewUser struct {
 	Age          *int
 	TshirtSize   *string
 	City         *string
+	RunningLevel *string
+}
+
+// ProfileUpdate carries the editable profile fields (everything a runner can
+// change about themselves later — not email or password, which auth owns).
+type ProfileUpdate struct {
+	Name         string
+	Phone        string
+	Age          *int
+	City         *string
+	TshirtSize   *string
+	RunningLevel *string
+}
+
+// ValidRunningLevels is the allowed set (mirrors the DB CHECK constraint).
+var ValidRunningLevels = map[string]bool{
+	"beginner": true, "amateur": true, "intermediate": true, "advanced": true,
 }
 
 // ErrNotFound is returned when no (non-deleted) user exists for a lookup.
@@ -67,46 +85,63 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 // (gen_random_uuid()::text) so callers never mint ids themselves.
 func (r *Repository) Create(ctx context.Context, n NewUser) (*User, error) {
 	const q = `
-		INSERT INTO users (id, name, email, phone, password_hash, age, tshirt_size, city)
-		VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, name, email, COALESCE(phone, ''), password_hash,
-		          age, tshirt_size, city, profile_photo, is_verified,
-		          created_at, updated_at`
+		INSERT INTO users (id, name, email, phone, password_hash, age, tshirt_size, city, running_level)
+		VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING ` + userColumns
 	var u User
 	err := r.db.QueryRow(ctx, q,
-		n.Name, n.Email, nullable(n.Phone), n.PasswordHash, n.Age, n.TshirtSize, n.City,
-	).Scan(
-		&u.ID, &u.Name, &u.Email, &u.Phone, &u.PasswordHash,
-		&u.Age, &u.TshirtSize, &u.City, &u.ProfilePhoto, &u.IsVerified,
-		&u.CreatedAt, &u.UpdatedAt,
-	)
+		n.Name, n.Email, nullable(n.Phone), n.PasswordHash, n.Age, n.TshirtSize, n.City, n.RunningLevel,
+	).Scan(scanDest(&u)...)
 	if err != nil {
 		return nil, mapUniqueViolation(err)
 	}
 	return &u, nil
 }
 
+// UpdateProfile edits the caller's own editable fields and returns the updated
+// user. A duplicate phone maps to ErrPhoneTaken.
+func (r *Repository) UpdateProfile(ctx context.Context, id string, p ProfileUpdate) (*User, error) {
+	const q = `
+		UPDATE users
+		SET name = $2, phone = $3, age = $4, tshirt_size = $5, city = $6, running_level = $7
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING ` + userColumns
+	var u User
+	err := r.db.QueryRow(ctx, q,
+		id, p.Name, nullable(p.Phone), p.Age, p.TshirtSize, p.City, p.RunningLevel,
+	).Scan(scanDest(&u)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, mapUniqueViolation(err)
+	}
+	return &u, nil
+}
+
+// userColumns is the shared SELECT/RETURNING list, kept in sync with scanDest.
+const userColumns = `id, name, email, COALESCE(phone, ''), password_hash,
+	age, tshirt_size, city, running_level, profile_photo, is_verified,
+	created_at, updated_at`
+
+// scanDest returns the scan targets for userColumns, in the same order.
+func scanDest(u *User) []any {
+	return []any{
+		&u.ID, &u.Name, &u.Email, &u.Phone, &u.PasswordHash,
+		&u.Age, &u.TshirtSize, &u.City, &u.RunningLevel, &u.ProfilePhoto, &u.IsVerified,
+		&u.CreatedAt, &u.UpdatedAt,
+	}
+}
+
 // GetByEmail looks up an account by email (case-insensitive via citext), used at
 // login. The returned User includes PasswordHash so the service can verify it.
 func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
-	const q = `
-		SELECT id, name, email, COALESCE(phone, ''), password_hash,
-		       age, tshirt_size, city, profile_photo, is_verified,
-		       created_at, updated_at
-		FROM users
-		WHERE email = $1 AND deleted_at IS NULL`
-	return r.scanOne(ctx, q, email)
+	return r.scanOne(ctx, `SELECT `+userColumns+` FROM users WHERE email = $1 AND deleted_at IS NULL`, email)
 }
 
 // GetByID looks up an account by id (used by /users/me).
 func (r *Repository) GetByID(ctx context.Context, id string) (*User, error) {
-	const q = `
-		SELECT id, name, email, COALESCE(phone, ''), password_hash,
-		       age, tshirt_size, city, profile_photo, is_verified,
-		       created_at, updated_at
-		FROM users
-		WHERE id = $1 AND deleted_at IS NULL`
-	return r.scanOne(ctx, q, id)
+	return r.scanOne(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1 AND deleted_at IS NULL`, id)
 }
 
 // DisplayNames resolves many user ids to their names in one query — used by the
@@ -135,11 +170,7 @@ func (r *Repository) DisplayNames(ctx context.Context, ids []string) (map[string
 // scanOne runs a single-row profile query and maps "no rows" to ErrNotFound.
 func (r *Repository) scanOne(ctx context.Context, q string, arg any) (*User, error) {
 	var u User
-	err := r.db.QueryRow(ctx, q, arg).Scan(
-		&u.ID, &u.Name, &u.Email, &u.Phone, &u.PasswordHash,
-		&u.Age, &u.TshirtSize, &u.City, &u.ProfilePhoto, &u.IsVerified,
-		&u.CreatedAt, &u.UpdatedAt,
-	)
+	err := r.db.QueryRow(ctx, q, arg).Scan(scanDest(&u)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

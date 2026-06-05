@@ -60,13 +60,14 @@ func NewService(u *users.Repository, rt *RefreshRepository, tm *TokenManager, re
 // RegisterParams is the full runner profile captured at sign-up. The README's
 // invite-first onboarding funnels every new account through here.
 type RegisterParams struct {
-	Name       string
-	Email      string
-	Phone      string
-	Password   string
-	Age        *int
-	TshirtSize *string
-	City       *string
+	Name         string
+	Email        string
+	Phone        string
+	Password     string
+	Age          *int
+	TshirtSize   *string
+	City         *string
+	RunningLevel *string
 }
 
 // Register validates the profile, hashes the password, creates the account, and
@@ -88,6 +89,19 @@ func (s *Service) Register(ctx context.Context, p RegisterParams) (*TokenPair, *
 	if len(p.Password) > maxPasswordLen {
 		return nil, nil, ValidationError{Msg: "password must be at most 72 characters"}
 	}
+	// Everything except t-shirt size is required at sign-up.
+	if p.Phone == "" {
+		return nil, nil, ValidationError{Msg: "phone is required"}
+	}
+	if p.Age == nil || *p.Age <= 0 {
+		return nil, nil, ValidationError{Msg: "a valid age is required"}
+	}
+	if p.City == nil || strings.TrimSpace(*p.City) == "" {
+		return nil, nil, ValidationError{Msg: "city is required"}
+	}
+	if p.RunningLevel == nil || !users.ValidRunningLevels[*p.RunningLevel] {
+		return nil, nil, ValidationError{Msg: "running level must be one of beginner, amateur, intermediate, advanced"}
+	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(p.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -102,6 +116,7 @@ func (s *Service) Register(ctx context.Context, p RegisterParams) (*TokenPair, *
 		Age:          p.Age,
 		TshirtSize:   p.TshirtSize,
 		City:         p.City,
+		RunningLevel: p.RunningLevel,
 	})
 	if err != nil {
 		// ErrEmailTaken / ErrPhoneTaken flow straight to the handler as a 409.

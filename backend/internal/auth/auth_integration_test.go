@@ -42,11 +42,18 @@ func TestAuthFlow(t *testing.T) {
 	email := "itest_" + time.Now().Format("20060102150405.000000") + "@example.com"
 	const password = "secret-password"
 
-	// --- Register a new account ---
+	// --- Register a new account (all profile fields except t-shirt required) ---
+	age := 30
+	city := "Bangalore"
+	level := "amateur"
 	pair, user, err := svc.Register(ctx, auth.RegisterParams{
-		Name:     "Integration Tester",
-		Email:    "  " + email + "  ", // verify trimming/normalisation
-		Password: password,
+		Name:         "Integration Tester",
+		Email:        "  " + email + "  ", // verify trimming/normalisation
+		Password:     password,
+		Phone:        "+9100" + time.Now().Format("0405.000000"),
+		Age:          &age,
+		City:         &city,
+		RunningLevel: &level,
 	})
 	if err != nil {
 		t.Fatalf("register: %v", err)
@@ -65,8 +72,13 @@ func TestAuthFlow(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM users WHERE id = $1", user.ID)
 	}()
 
-	// --- Registering the same email again is rejected ---
-	if _, _, err := svc.Register(ctx, auth.RegisterParams{Name: "Dup", Email: email, Password: password}); !errors.Is(err, auth.ErrEmailTaken) {
+	// --- Registering the same email again is rejected (distinct phone so the
+	//     conflict is on email, not phone) ---
+	dupPhone := "+9111" + time.Now().Format("0405.000000")
+	if _, _, err := svc.Register(ctx, auth.RegisterParams{
+		Name: "Dup", Email: email, Password: password,
+		Phone: dupPhone, Age: &age, City: &city, RunningLevel: &level,
+	}); !errors.Is(err, auth.ErrEmailTaken) {
 		t.Fatalf("duplicate register: want ErrEmailTaken, got %v", err)
 	}
 
