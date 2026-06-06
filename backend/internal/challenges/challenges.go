@@ -46,7 +46,11 @@ type Challenge struct {
 	StartDate   time.Time  `json:"start_date"`
 	EndDate     time.Time  `json:"end_date"`
 	AllowTeams  bool       `json:"allow_teams"`
-	CreatedAt   time.Time  `json:"created_at"`
+	// Optional join fee; LockDate is the cutoff after which a participant can no
+	// longer leave.
+	JoinFee   *float64   `json:"join_fee,omitempty"`
+	LockDate  *time.Time `json:"lock_date,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 
 	// Populated for the requesting user on get/list (not stored columns):
 	Joined        bool    `json:"joined"`
@@ -72,6 +76,8 @@ type NewChallenge struct {
 	StartDate   time.Time
 	EndDate     time.Time
 	AllowTeams  bool
+	JoinFee     *float64
+	LockDate    *time.Time
 }
 
 // Proof is a Phase 1 manual submission (Strava link / screenshot) awaiting or
@@ -104,7 +110,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 const challengeColumns = `
 	c.id, c.creator_id, c.org_id, c.chapter_id, c.title, c.description,
 	c.type, c.visibility, c.city, c.target_km, c.target_days,
-	c.start_date, c.end_date, c.allow_teams, c.created_at,
+	c.start_date, c.end_date, c.allow_teams, c.join_fee, c.lock_date, c.created_at,
 	p.id IS NOT NULL AS joined,
 	COALESCE(p.progress_km, 0), COALESCE(p.progress_days, 0), COALESCE(p.current_streak, 0),
 	(SELECT COUNT(*) FROM challenge_participants pc
@@ -115,7 +121,7 @@ func scanChallenge(s interface{ Scan(...any) error }) (*Challenge, error) {
 	err := s.Scan(
 		&c.ID, &c.CreatorID, &c.OrgID, &c.ChapterID, &c.Title, &c.Description,
 		&c.Type, &c.Visibility, &c.City, &c.TargetKM, &c.TargetDays,
-		&c.StartDate, &c.EndDate, &c.AllowTeams, &c.CreatedAt,
+		&c.StartDate, &c.EndDate, &c.AllowTeams, &c.JoinFee, &c.LockDate, &c.CreatedAt,
 		&c.Joined, &c.ProgressKM, &c.ProgressDays, &c.CurrentStreak, &c.ParticipantCount,
 	)
 	if err != nil {
@@ -129,18 +135,18 @@ func (r *Repository) Create(ctx context.Context, c NewChallenge) (*Challenge, er
 	const q = `
 		INSERT INTO challenges (creator_id, org_id, chapter_id, title, description,
 		                        type, visibility, city, target_km, target_days,
-		                        start_date, end_date, allow_teams)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		                        start_date, end_date, allow_teams, join_fee, lock_date)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		RETURNING ` + challengeReturning
 	var out Challenge
 	err := r.db.QueryRow(ctx, q,
 		c.CreatorID, c.OrgID, c.ChapterID, c.Title, c.Description,
 		c.Type, c.Visibility, c.City, c.TargetKM, c.TargetDays,
-		c.StartDate, c.EndDate, c.AllowTeams,
+		c.StartDate, c.EndDate, c.AllowTeams, c.JoinFee, c.LockDate,
 	).Scan(
 		&out.ID, &out.CreatorID, &out.OrgID, &out.ChapterID, &out.Title, &out.Description,
 		&out.Type, &out.Visibility, &out.City, &out.TargetKM, &out.TargetDays,
-		&out.StartDate, &out.EndDate, &out.AllowTeams, &out.CreatedAt,
+		&out.StartDate, &out.EndDate, &out.AllowTeams, &out.JoinFee, &out.LockDate, &out.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -152,7 +158,7 @@ func (r *Repository) Create(ctx context.Context, c NewChallenge) (*Challenge, er
 const challengeReturning = `
 	id, creator_id, org_id, chapter_id, title, description,
 	type, visibility, city, target_km, target_days,
-	start_date, end_date, allow_teams, created_at`
+	start_date, end_date, allow_teams, join_fee, lock_date, created_at`
 
 // Get returns one challenge annotated with the user's participation.
 func (r *Repository) Get(ctx context.Context, userID string, id uuid.UUID) (*Challenge, error) {
@@ -216,13 +222,26 @@ func (r *Repository) List(ctx context.Context, userID string, joinedOnly bool) (
 
 // JoinAsUser adds an individual participation (idempotent). Returns whether a
 // new row was created.
-func (r *Repository) JoinAsUser(ctx context.Context, challengeID uuid.UUID, userID string) (bool, error) {
+func (r *Repository) JoinAsUser(ctx context.Context, challengeID uuid.UUID, userID string, feePaid bool) (bool, error) {
 	const q = `
-		INSERT INTO challenge_participants (challenge_id, user_id)
-		SELECT $1, $2
+		INSERT INTO challenge_participants (challenge_id, user_id, fee_paid)
+		SELECT $1, $2, $3
 		WHERE NOT EXISTS (
 			SELECT 1 FROM challenge_participants
 			WHERE challenge_id = $1 AND user_id = $2 AND deleted_at IS NULL)`
+	tag, err := r.db.Exec(ctx, q, challengeID, userID, feePaid)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// LeaveAsUser soft-deletes an individual's participation. Returns whether a row
+// was removed.
+func (r *Repository) LeaveAsUser(ctx context.Context, challengeID uuid.UUID, userID string) (bool, error) {
+	const q = `
+		UPDATE challenge_participants SET deleted_at = now()
+		WHERE challenge_id = $1 AND user_id = $2 AND deleted_at IS NULL`
 	tag, err := r.db.Exec(ctx, q, challengeID, userID)
 	if err != nil {
 		return false, err

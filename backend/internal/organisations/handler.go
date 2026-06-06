@@ -55,12 +55,14 @@ func (h *Handler) Routes() http.Handler {
 		r.Get("/mine", h.myChapters)    // the caller's chapters (static before {chapterID})
 		r.Route("/{chapterID}", func(r chi.Router) {
 			r.Get("/", h.getChapter)
+			r.Post("/pay", h.payMembership) // self-service: pay/renew own membership
 			r.With(chapterAdmin).Put("/", h.updateChapter)
 			r.With(chapterOrgAdmin).Delete("/", h.deleteChapter)
 			r.With(chapterAdmin).Post("/members", h.addMember)
 			r.With(chapterAdmin).Get("/members", h.listMembers)
 			r.With(chapterAdmin).Get("/members/{userID}", h.getMember)
 			r.With(chapterAdmin).Put("/members/{userID}", h.updateMemberStatus)
+			r.With(chapterAdmin).Post("/members/{userID}/approve", h.approveMember)
 			r.With(chapterAdmin).Delete("/members/{userID}", h.removeMember)
 		})
 	})
@@ -75,10 +77,36 @@ type createOrgRequest struct {
 	Description string `json:"description"`
 }
 
+// chapterSettingsFields are the fee/approval config, embedded in create+update.
+type chapterSettingsFields struct {
+	RequiresApproval  *bool    `json:"requires_approval"`
+	FeeEnabled        *bool    `json:"membership_fee_enabled"`
+	FeeAmount         *float64 `json:"membership_fee_amount"`
+	MembershipPeriod  *string  `json:"membership_period"`
+	RenewalWindowDays *int     `json:"renewal_window_days"`
+}
+
+// toSettings builds ChapterSettings with sensible defaults (approval on,
+// fee off, 5-day renewal window) when fields are omitted.
+func (f chapterSettingsFields) toSettings() ChapterSettings {
+	s := ChapterSettings{
+		RequiresApproval:  f.RequiresApproval == nil || *f.RequiresApproval,
+		FeeEnabled:        f.FeeEnabled != nil && *f.FeeEnabled,
+		FeeAmount:         f.FeeAmount,
+		MembershipPeriod:  f.MembershipPeriod,
+		RenewalWindowDays: 5,
+	}
+	if f.RenewalWindowDays != nil {
+		s.RenewalWindowDays = *f.RenewalWindowDays
+	}
+	return s
+}
+
 type createChapterRequest struct {
 	Name        string `json:"name"`
 	City        string `json:"city"`
 	Description string `json:"description"`
+	chapterSettingsFields
 }
 
 type assignRoleRequest struct {
@@ -105,6 +133,7 @@ type updateChapterRequest struct {
 	City        string `json:"city"`
 	Description string `json:"description"`
 	IsPublic    *bool  `json:"is_public"` // omitted = public
+	chapterSettingsFields
 }
 
 type updateMemberStatusRequest struct {
@@ -156,7 +185,7 @@ func (h *Handler) createChapter(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	chapter, err := h.svc.CreateChapter(r.Context(), orgID, req.Name, req.City, req.Description, actorID)
+	chapter, err := h.svc.CreateChapter(r.Context(), orgID, req.Name, req.City, req.Description, actorID, req.toSettings())
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -218,12 +247,43 @@ func (h *Handler) updateChapter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	isPublic := req.IsPublic == nil || *req.IsPublic
-	chapter, err := h.svc.UpdateChapter(r.Context(), chapterID, req.Name, req.City, req.Description, isPublic)
+	chapter, err := h.svc.UpdateChapter(r.Context(), chapterID, req.Name, req.City, req.Description, isPublic, req.toSettings())
 	if err != nil {
 		h.writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, chapter)
+}
+
+func (h *Handler) approveMember(w http.ResponseWriter, r *http.Request) {
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	status, err := h.svc.ApproveMember(r.Context(), chapterID, chi.URLParam(r, "userID"))
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+func (h *Handler) payMembership(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	until, err := h.svc.PayMembership(r.Context(), chapterID, userID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"status": "active", "fee_paid_until": until})
 }
 
 func (h *Handler) deleteChapter(w http.ResponseWriter, r *http.Request) {
@@ -345,12 +405,12 @@ func (h *Handler) joinByInvite(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	chapter, err := h.svc.JoinByInvite(r.Context(), req.InviteCode, userID)
+	result, err := h.svc.JoinByInvite(r.Context(), req.InviteCode, userID)
 	if err != nil {
 		h.writeError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, chapter)
+	httpx.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) addMember(w http.ResponseWriter, r *http.Request) {

@@ -56,6 +56,11 @@ func (l *Leaderboard) SetScore(ctx context.Context, challengeID uuid.UUID, userI
 	return l.rdb.ZAdd(ctx, key(challengeID), redis.Z{Score: totalM, Member: userID}).Err()
 }
 
+// Remove drops a member from a challenge's board (e.g. when they leave).
+func (l *Leaderboard) Remove(ctx context.Context, challengeID uuid.UUID, member string) error {
+	return l.rdb.ZRem(ctx, key(challengeID), member).Err()
+}
+
 // Top returns the highest-scoring participants, best first, with 1-based ranks.
 func (l *Leaderboard) Top(ctx context.Context, challengeID uuid.UUID, limit int) ([]Entry, error) {
 	// WithScores so we get distance alongside each member. Rev = descending.

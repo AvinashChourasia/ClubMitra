@@ -2,6 +2,7 @@ package challenges
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -106,18 +107,45 @@ func (s *Service) List(ctx context.Context, userID string, joinedOnly bool) ([]C
 	return s.repo.List(ctx, userID, joinedOnly)
 }
 
+// ErrPaymentRequired means the challenge has a join fee that hasn't been paid.
+var ErrPaymentRequired = errors.New("payment required to join this challenge")
+
 // Join adds the user as an individual participant and registers them on the
-// leaderboard at their current score, so they appear ranked immediately.
-func (s *Service) Join(ctx context.Context, userID string, challengeID uuid.UUID) (*Challenge, error) {
+// leaderboard at their current score. If the challenge has a join fee, `paid`
+// must be true (the client completes the mock payment first).
+func (s *Service) Join(ctx context.Context, userID string, challengeID uuid.UUID, paid bool) (*Challenge, error) {
 	ch, err := s.repo.Get(ctx, userID, challengeID)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.repo.JoinAsUser(ctx, challengeID, userID); err != nil {
+	hasFee := ch.JoinFee != nil && *ch.JoinFee > 0
+	if hasFee && !paid && !ch.Joined {
+		return nil, ErrPaymentRequired
+	}
+	if _, err := s.repo.JoinAsUser(ctx, challengeID, userID, hasFee); err != nil {
 		return nil, err
 	}
 	if err := s.board.SetScore(ctx, challengeID, userID, scoreOf(ch)); err != nil {
 		log.Printf("challenges: leaderboard SetScore on join failed: %v", err)
+	}
+	return s.repo.Get(ctx, userID, challengeID)
+}
+
+// Leave removes the user's participation, allowed only before the lock date (if
+// the organiser set one). The leaderboard entry is removed too.
+func (s *Service) Leave(ctx context.Context, userID string, challengeID uuid.UUID) (*Challenge, error) {
+	ch, err := s.repo.Get(ctx, userID, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	if ch.LockDate != nil && !time.Now().Before(*ch.LockDate) {
+		return nil, ValidationError{Msg: "leaving is locked for this challenge"}
+	}
+	if _, err := s.repo.LeaveAsUser(ctx, challengeID, userID); err != nil {
+		return nil, err
+	}
+	if err := s.board.Remove(ctx, challengeID, userID); err != nil {
+		log.Printf("challenges: leaderboard Remove on leave failed: %v", err)
 	}
 	return s.repo.Get(ctx, userID, challengeID)
 }
@@ -181,7 +209,7 @@ func (s *Service) VerifyProof(ctx context.Context, verifierID string, proofID uu
 			return nil, err
 		}
 		if !ok { // submitter hadn't joined — verifying a proof implies participation
-			if _, err := s.repo.JoinAsUser(ctx, proof.ChallengeID, proof.UserID); err != nil {
+			if _, err := s.repo.JoinAsUser(ctx, proof.ChallengeID, proof.UserID, true); err != nil {
 				return nil, err
 			}
 			total, _, err = s.repo.AddProgressKM(ctx, proof.ChallengeID, proof.UserID, km)
@@ -196,7 +224,7 @@ func (s *Service) VerifyProof(ctx context.Context, verifierID string, proofID uu
 			return nil, err
 		}
 		if !ok {
-			if _, err := s.repo.JoinAsUser(ctx, proof.ChallengeID, proof.UserID); err != nil {
+			if _, err := s.repo.JoinAsUser(ctx, proof.ChallengeID, proof.UserID, true); err != nil {
 				return nil, err
 			}
 			days, _, err = s.repo.AddProgressDay(ctx, proof.ChallengeID, proof.UserID)

@@ -5,12 +5,28 @@ import (
 	"crypto/rand"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/avinash/virtual-run-tracker/backend/internal/permissions"
 )
+
+// Membership lifecycle states.
+const (
+	StatusActive         = "active"
+	StatusPending        = "pending"         // awaiting admin approval
+	StatusPendingPayment = "pending_payment" // approved, awaiting the fee
+)
+
+// addPeriod extends t by one subscription period ("monthly" or "annual").
+func addPeriod(t time.Time, period *string) time.Time {
+	if period != nil && *period == "annual" {
+		return t.AddDate(1, 0, 0)
+	}
+	return t.AddDate(0, 1, 0) // default monthly
+}
 
 // ValidationError carries a client-safe 400 message.
 type ValidationError struct{ Msg string }
@@ -71,8 +87,27 @@ func (s *Service) GetChapter(ctx context.Context, id uuid.UUID) (*Chapter, error
 	return s.repo.GetChapter(ctx, id)
 }
 
-// UpdateChapter validates and edits a chapter.
-func (s *Service) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, description string, isPublic bool) (*Chapter, error) {
+// validateSettings checks the fee/approval config and normalises defaults.
+func validateSettings(s ChapterSettings) (ChapterSettings, error) {
+	if s.RenewalWindowDays <= 0 {
+		s.RenewalWindowDays = 5
+	}
+	if s.FeeEnabled {
+		if s.FeeAmount == nil || *s.FeeAmount <= 0 {
+			return s, ValidationError{Msg: "a fee amount is required when a membership fee is enabled"}
+		}
+		if s.MembershipPeriod == nil || (*s.MembershipPeriod != "monthly" && *s.MembershipPeriod != "annual") {
+			return s, ValidationError{Msg: "membership period must be monthly or annual"}
+		}
+	} else {
+		s.FeeAmount = nil
+		s.MembershipPeriod = nil
+	}
+	return s, nil
+}
+
+// UpdateChapter validates and edits a chapter (incl. fee/approval settings).
+func (s *Service) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, description string, isPublic bool, settings ChapterSettings) (*Chapter, error) {
 	name = strings.TrimSpace(name)
 	city = strings.TrimSpace(city)
 	if name == "" {
@@ -81,7 +116,11 @@ func (s *Service) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, d
 	if city == "" {
 		return nil, ValidationError{Msg: "city is required"}
 	}
-	return s.repo.UpdateChapter(ctx, id, name, city, strings.TrimSpace(description), isPublic)
+	settings, err := validateSettings(settings)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.UpdateChapter(ctx, id, name, city, strings.TrimSpace(description), isPublic, settings)
 }
 
 // DeleteChapter soft-deletes a chapter.
@@ -110,7 +149,7 @@ func (s *Service) RemoveMember(ctx context.Context, chapterID uuid.UUID, userID 
 // CreateChapter validates input, generates a unique invite code, and creates the
 // chapter. A code collision is astronomically unlikely, but we retry a few times
 // rather than ever surface one to the caller.
-func (s *Service) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city, description, createdBy string) (*Chapter, error) {
+func (s *Service) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city, description, createdBy string, settings ChapterSettings) (*Chapter, error) {
 	name = strings.TrimSpace(name)
 	city = strings.TrimSpace(city)
 	if name == "" {
@@ -119,13 +158,17 @@ func (s *Service) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city
 	if city == "" {
 		return nil, ValidationError{Msg: "city is required"}
 	}
+	settings, err := validateSettings(settings)
+	if err != nil {
+		return nil, err
+	}
 
 	for attempt := 0; attempt < 5; attempt++ {
 		code, err := newInviteCode()
 		if err != nil {
 			return nil, err
 		}
-		chapter, err := s.repo.CreateChapter(ctx, orgID, name, city, strings.TrimSpace(description), code, createdBy)
+		chapter, err := s.repo.CreateChapter(ctx, orgID, name, city, strings.TrimSpace(description), code, createdBy, settings)
 		if err == nil {
 			return chapter, nil
 		}
@@ -160,10 +203,19 @@ func (s *Service) AssignRole(ctx context.Context, orgID uuid.UUID, chapterID *uu
 	return s.repo.AssignRole(ctx, orgID, chapterID, userID, role, assignedBy)
 }
 
-// JoinByInvite resolves an invite code and joins the caller to that chapter. This
-// is the invite-first onboarding path: a runner who signed up via a chapter link
-// lands here right after registering.
-func (s *Service) JoinByInvite(ctx context.Context, code, userID string) (*Chapter, error) {
+// JoinResult is what JoinByInvite returns: the chapter plus the resulting
+// membership status, so the client knows the next step (await approval / pay /
+// done).
+type JoinResult struct {
+	Chapter *Chapter `json:"chapter"`
+	Status  string   `json:"status"`
+}
+
+// JoinByInvite resolves an invite code and starts the caller's membership. The
+// resulting status depends on the club's config: requires_approval -> pending;
+// else a fee -> pending_payment; else active. Already-active members are
+// returned unchanged.
+func (s *Service) JoinByInvite(ctx context.Context, code, userID string) (*JoinResult, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil, ValidationError{Msg: "invite_code is required"}
@@ -172,19 +224,103 @@ func (s *Service) JoinByInvite(ctx context.Context, code, userID string) (*Chapt
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.AddMember(ctx, chapter.ID, userID, userID); err != nil {
+
+	// If they already have a membership, leave it as-is (don't reset a pending
+	// or active member back a step by re-joining).
+	if existing, err := s.repo.GetMembership(ctx, chapter.ID, userID); err == nil {
+		return &JoinResult{Chapter: chapter, Status: existing.Status}, nil
+	}
+
+	status := StatusActive
+	switch {
+	case chapter.RequiresApproval:
+		status = StatusPending
+	case chapter.FeeEnabled:
+		status = StatusPendingPayment
+	}
+	if err := s.repo.AddMember(ctx, chapter.ID, userID, userID, status); err != nil {
 		return nil, err
 	}
-	return chapter, nil
+	return &JoinResult{Chapter: chapter, Status: status}, nil
 }
 
-// AddMember adds a runner to a chapter on an admin's behalf.
+// AddMember adds a runner to a chapter on an admin's behalf (active immediately —
+// an admin adding someone is itself the approval).
 func (s *Service) AddMember(ctx context.Context, chapterID uuid.UUID, userID, addedBy string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return ValidationError{Msg: "user_id is required"}
 	}
-	return s.repo.AddMember(ctx, chapterID, userID, addedBy)
+	return s.repo.AddMember(ctx, chapterID, userID, addedBy, StatusActive)
+}
+
+// ApproveMember moves a pending member forward: to pending_payment if the club
+// charges a fee, otherwise straight to active. Returns the new status.
+func (s *Service) ApproveMember(ctx context.Context, chapterID uuid.UUID, userID string) (string, error) {
+	chapter, err := s.repo.GetChapter(ctx, chapterID)
+	if err != nil {
+		return "", err
+	}
+	m, err := s.repo.GetMembership(ctx, chapterID, userID)
+	if err != nil {
+		return "", err
+	}
+	if m.Status != StatusPending {
+		return "", ValidationError{Msg: "this member is not awaiting approval"}
+	}
+	next := StatusActive
+	if chapter.FeeEnabled {
+		next = StatusPendingPayment
+	}
+	if err := s.repo.UpdateMemberStatus(ctx, chapterID, userID, next); err != nil {
+		return "", err
+	}
+	return next, nil
+}
+
+// PayMembership records a (mock) fee payment for the caller's own membership and
+// activates it, extending fee_paid_until by one period. Used for the first
+// payment (pending_payment) and for renewals (active, within the renewal
+// window). Renewals extend from the current expiry, not from today.
+func (s *Service) PayMembership(ctx context.Context, chapterID uuid.UUID, userID string) (*time.Time, error) {
+	chapter, err := s.repo.GetChapter(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+	if !chapter.FeeEnabled {
+		return nil, ValidationError{Msg: "this club has no membership fee"}
+	}
+	m, err := s.repo.GetMembership(ctx, chapterID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	switch m.Status {
+	case StatusPendingPayment:
+		// first payment — fine
+	case StatusActive, "lapsed":
+		// renewal: only within the window before expiry (or any time once lapsed/expired)
+		if m.FeePaidUntil != nil && m.FeePaidUntil.After(now) {
+			window := m.FeePaidUntil.AddDate(0, 0, -chapter.RenewalWindowDays)
+			if now.Before(window) {
+				return nil, ValidationError{Msg: "renewal opens closer to your expiry date"}
+			}
+		}
+	default:
+		return nil, ValidationError{Msg: "this membership can't be paid for in its current state"}
+	}
+
+	// Extend from the later of (current expiry, now) so early renewals stack.
+	base := now
+	if m.FeePaidUntil != nil && m.FeePaidUntil.After(now) {
+		base = *m.FeePaidUntil
+	}
+	until := addPeriod(base, chapter.MembershipPeriod)
+	if err := s.repo.ActivateMembership(ctx, chapterID, userID, &until); err != nil {
+		return nil, err
+	}
+	return &until, nil
 }
 
 // ListMembers returns a chapter's members.

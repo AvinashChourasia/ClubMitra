@@ -37,6 +37,7 @@ func (h *Handler) Routes() http.Handler {
 	r.Route("/{id}", func(r chi.Router) {
 		r.Get("/", h.get)
 		r.Post("/join", h.join)
+		r.Post("/leave", h.leave)
 		r.Get("/leaderboard", h.leaderboard)
 		r.Post("/proof", h.submitProof)
 		r.Get("/proof", h.listProof)            // creator only
@@ -55,15 +56,18 @@ type createRequest struct {
 	City        *string   `json:"city"`
 	OrgID       *string   `json:"org_id"`
 	ChapterID   *string   `json:"chapter_id"`
-	TargetKM    *float64  `json:"target_km"`
-	TargetDays  *int      `json:"target_days"`
-	StartDate   time.Time `json:"start_date"`
-	EndDate     time.Time `json:"end_date"`
-	AllowTeams  *bool     `json:"allow_teams"`
+	TargetKM    *float64   `json:"target_km"`
+	TargetDays  *int       `json:"target_days"`
+	StartDate   time.Time  `json:"start_date"`
+	EndDate     time.Time  `json:"end_date"`
+	AllowTeams  *bool      `json:"allow_teams"`
+	JoinFee     *float64   `json:"join_fee"`
+	LockDate    *time.Time `json:"lock_date"`
 }
 
 type joinRequest struct {
 	ChapterID *string `json:"chapter_id"` // present = join as this club
+	Paid      bool    `json:"paid"`       // mock-payment confirmation for a fee challenge
 }
 
 type submitProofRequest struct {
@@ -111,6 +115,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		StartDate:   req.StartDate,
 		EndDate:     req.EndDate,
 		AllowTeams:  allowTeams,
+		JoinFee:     req.JoinFee,
+		LockDate:    req.LockDate,
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -197,8 +203,26 @@ func (h *Handler) join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Individual join.
-	ch, err := h.svc.Join(r.Context(), userID, id)
+	// Individual join (paid=true is the mock-payment confirmation for fee ones).
+	ch, err := h.svc.Join(r.Context(), userID, id, req.Paid)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, ch)
+}
+
+func (h *Handler) leave(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	ch, err := h.svc.Leave(r.Context(), userID, id)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -315,6 +339,8 @@ func writeErr(w http.ResponseWriter, err error) {
 		httpx.Error(w, http.StatusBadRequest, ve.Msg)
 	case errors.Is(err, ErrNotFound):
 		httpx.Error(w, http.StatusNotFound, "challenge not found")
+	case errors.Is(err, ErrPaymentRequired):
+		httpx.Error(w, http.StatusPaymentRequired, ErrPaymentRequired.Error())
 	default:
 		httpx.InternalError(w, err)
 	}

@@ -36,8 +36,47 @@ type Chapter struct {
 	Description string    `json:"description"`
 	IsPublic    bool      `json:"is_public"`
 	InviteCode  string    `json:"invite_code"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+
+	// Membership fee + subscription config. When FeeEnabled, joining requires
+	// paying FeeAmount, and membership lasts one Period (monthly/annual).
+	RequiresApproval  bool     `json:"requires_approval"`
+	FeeEnabled        bool     `json:"membership_fee_enabled"`
+	FeeAmount         *float64 `json:"membership_fee_amount,omitempty"`
+	MembershipPeriod  *string  `json:"membership_period,omitempty"`
+	RenewalWindowDays int      `json:"renewal_window_days"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ChapterSettings carries the editable club config (fee + approval). Used on
+// create and update.
+type ChapterSettings struct {
+	RequiresApproval  bool
+	FeeEnabled        bool
+	FeeAmount         *float64
+	MembershipPeriod  *string
+	RenewalWindowDays int
+}
+
+// chapterColumns is the shared SELECT/RETURNING list, kept in sync with
+// scanChapter. (membership_fee_amount is NUMERIC; pgx scans it into *float64.)
+const chapterColumns = `id, org_id, name, city, description, is_public, invite_code,
+	requires_approval, membership_fee_enabled, membership_fee_amount,
+	membership_period, renewal_window_days, created_at, updated_at`
+
+// scanChapterRow scans chapterColumns in order. Satisfied by pgx.Row and pgx.Rows.
+func scanChapterRow(s interface{ Scan(...any) error }) (*Chapter, error) {
+	var c Chapter
+	err := s.Scan(
+		&c.ID, &c.OrgID, &c.Name, &c.City, &c.Description, &c.IsPublic, &c.InviteCode,
+		&c.RequiresApproval, &c.FeeEnabled, &c.FeeAmount, &c.MembershipPeriod, &c.RenewalWindowDays,
+		&c.CreatedAt, &c.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 // Member is a runner's membership in a chapter, joined with their name/email so
@@ -170,7 +209,7 @@ func (r *Repository) GetOrg(ctx context.Context, id uuid.UUID) (*Organisation, e
 // CreateChapter inserts a chapter under an org with a caller-supplied unique
 // invite code, and enrols the creator as a member in the same transaction (an
 // admin is also a member of their own club). Returns the new chapter.
-func (r *Repository) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city, description, inviteCode, createdBy string) (*Chapter, error) {
+func (r *Repository) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city, description, inviteCode, createdBy string, s ChapterSettings) (*Chapter, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -178,10 +217,14 @@ func (r *Repository) CreateChapter(ctx context.Context, orgID uuid.UUID, name, c
 	defer tx.Rollback(ctx) // no-op once Commit succeeds
 
 	const insertChapter = `
-		INSERT INTO chapters (org_id, name, city, description, invite_code)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, org_id, name, city, description, is_public, invite_code, created_at, updated_at`
-	chapter, err := scanChapter(tx.QueryRow(ctx, insertChapter, orgID, name, city, description, inviteCode))
+		INSERT INTO chapters (org_id, name, city, description, invite_code,
+		                      requires_approval, membership_fee_enabled, membership_fee_amount,
+		                      membership_period, renewal_window_days)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING ` + chapterColumns
+	chapter, err := scanChapterRow(tx.QueryRow(ctx, insertChapter,
+		orgID, name, city, description, inviteCode,
+		s.RequiresApproval, s.FeeEnabled, s.FeeAmount, s.MembershipPeriod, s.RenewalWindowDays))
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +246,7 @@ func (r *Repository) CreateChapter(ctx context.Context, orgID uuid.UUID, name, c
 // ListChapters returns an org's chapters, newest first.
 func (r *Repository) ListChapters(ctx context.Context, orgID uuid.UUID) ([]Chapter, error) {
 	const q = `
-		SELECT id, org_id, name, city, description, is_public, invite_code, created_at, updated_at
+		SELECT ` + chapterColumns + `
 		FROM chapters WHERE org_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC`
 	rows, err := r.db.Query(ctx, q, orgID)
@@ -213,7 +256,7 @@ func (r *Repository) ListChapters(ctx context.Context, orgID uuid.UUID) ([]Chapt
 	defer rows.Close()
 	out := make([]Chapter, 0)
 	for rows.Next() {
-		c, err := scanChapter(rows)
+		c, err := scanChapterRow(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -225,9 +268,9 @@ func (r *Repository) ListChapters(ctx context.Context, orgID uuid.UUID) ([]Chapt
 // GetChapterByInvite resolves an invite code to its chapter (used at join time).
 func (r *Repository) GetChapterByInvite(ctx context.Context, code string) (*Chapter, error) {
 	const q = `
-		SELECT id, org_id, name, city, description, is_public, invite_code, created_at, updated_at
+		SELECT ` + chapterColumns + `
 		FROM chapters WHERE invite_code = $1 AND deleted_at IS NULL`
-	c, err := scanChapter(r.db.QueryRow(ctx, q, code))
+	c, err := scanChapterRow(r.db.QueryRow(ctx, q, code))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -237,23 +280,25 @@ func (r *Repository) GetChapterByInvite(ctx context.Context, code string) (*Chap
 // GetChapter fetches one chapter by id (non-deleted).
 func (r *Repository) GetChapter(ctx context.Context, id uuid.UUID) (*Chapter, error) {
 	const q = `
-		SELECT id, org_id, name, city, description, is_public, invite_code, created_at, updated_at
+		SELECT ` + chapterColumns + `
 		FROM chapters WHERE id = $1 AND deleted_at IS NULL`
-	c, err := scanChapter(r.db.QueryRow(ctx, q, id))
+	c, err := scanChapterRow(r.db.QueryRow(ctx, q, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return c, err
 }
 
-// UpdateChapter edits a chapter's editable fields (the invite code and fee
-// settings are managed elsewhere).
-func (r *Repository) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, description string, isPublic bool) (*Chapter, error) {
+// UpdateChapter edits a chapter's editable fields plus its fee/approval settings.
+func (r *Repository) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, description string, isPublic bool, s ChapterSettings) (*Chapter, error) {
 	const q = `
-		UPDATE chapters SET name = $2, city = $3, description = $4, is_public = $5
+		UPDATE chapters SET name = $2, city = $3, description = $4, is_public = $5,
+		       requires_approval = $6, membership_fee_enabled = $7, membership_fee_amount = $8,
+		       membership_period = $9, renewal_window_days = $10
 		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id, org_id, name, city, description, is_public, invite_code, created_at, updated_at`
-	c, err := scanChapter(r.db.QueryRow(ctx, q, id, name, city, description, isPublic))
+		RETURNING ` + chapterColumns
+	c, err := scanChapterRow(r.db.QueryRow(ctx, q, id, name, city, description, isPublic,
+		s.RequiresApproval, s.FeeEnabled, s.FeeAmount, s.MembershipPeriod, s.RenewalWindowDays))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -270,8 +315,9 @@ func (r *Repository) SoftDeleteChapter(ctx context.Context, id uuid.UUID) error 
 // with the user's membership status and most-specific role.
 func (r *Repository) ListUserChapters(ctx context.Context, userID string) ([]MyChapter, error) {
 	const q = `
-		SELECT c.id, c.org_id, c.name, c.city, c.description, c.is_public,
-		       c.invite_code, c.created_at, c.updated_at,
+		SELECT c.id, c.org_id, c.name, c.city, c.description, c.is_public, c.invite_code,
+		       c.requires_approval, c.membership_fee_enabled, c.membership_fee_amount,
+		       c.membership_period, c.renewal_window_days, c.created_at, c.updated_at,
 		       (SELECT m.status FROM chapter_members m
 		         WHERE m.chapter_id = c.id AND m.user_id = $1 AND m.deleted_at IS NULL) AS status,
 		       (SELECT r.role FROM org_roles r
@@ -302,8 +348,9 @@ func (r *Repository) ListUserChapters(ctx context.Context, userID string) ([]MyC
 	for rows.Next() {
 		var m MyChapter
 		if err := rows.Scan(
-			&m.ID, &m.OrgID, &m.Name, &m.City, &m.Description, &m.IsPublic,
-			&m.InviteCode, &m.CreatedAt, &m.UpdatedAt, &m.Status, &m.Role,
+			&m.ID, &m.OrgID, &m.Name, &m.City, &m.Description, &m.IsPublic, &m.InviteCode,
+			&m.RequiresApproval, &m.FeeEnabled, &m.FeeAmount, &m.MembershipPeriod, &m.RenewalWindowDays,
+			&m.CreatedAt, &m.UpdatedAt, &m.Status, &m.Role,
 			&m.MemberCount, &m.ActiveChallengeCount,
 		); err != nil {
 			return nil, err
@@ -325,16 +372,54 @@ func (r *Repository) AssignRole(ctx context.Context, orgID uuid.UUID, chapterID 
 	return err
 }
 
-// AddMember adds a runner to a chapter (or revives a previously soft-deleted
-// membership). ON CONFLICT keeps one row per (chapter, user).
-func (r *Repository) AddMember(ctx context.Context, chapterID uuid.UUID, userID, addedBy string) error {
+// AddMember adds a runner to a chapter at the given status (or revives a
+// previously soft-deleted membership at that status). ON CONFLICT keeps one row
+// per (chapter, user).
+func (r *Repository) AddMember(ctx context.Context, chapterID uuid.UUID, userID, addedBy, status string) error {
 	const q = `
-		INSERT INTO chapter_members (chapter_id, user_id, added_by)
-		VALUES ($1, $2, $3)
+		INSERT INTO chapter_members (chapter_id, user_id, added_by, status)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (chapter_id, user_id) DO UPDATE
-			SET status = 'active', deleted_at = NULL`
-	_, err := r.db.Exec(ctx, q, chapterID, userID, addedBy)
+			SET status = EXCLUDED.status, deleted_at = NULL`
+	_, err := r.db.Exec(ctx, q, chapterID, userID, addedBy, status)
 	return err
+}
+
+// Membership is the caller's own membership state in a chapter, for the join /
+// pay / renew flow.
+type Membership struct {
+	Status       string
+	FeePaidUntil *time.Time
+}
+
+// GetMembership returns a user's (non-deleted) membership, or ErrNotFound.
+func (r *Repository) GetMembership(ctx context.Context, chapterID uuid.UUID, userID string) (*Membership, error) {
+	const q = `SELECT status, fee_paid_until FROM chapter_members
+	           WHERE chapter_id = $1 AND user_id = $2 AND deleted_at IS NULL`
+	var m Membership
+	err := r.db.QueryRow(ctx, q, chapterID, userID).Scan(&m.Status, &m.FeePaidUntil)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// ActivateMembership sets a membership active and stamps fee_paid_until (used
+// after a payment / renewal).
+func (r *Repository) ActivateMembership(ctx context.Context, chapterID uuid.UUID, userID string, feePaidUntil *time.Time) error {
+	const q = `UPDATE chapter_members SET status = 'active', fee_paid_until = $3
+	           WHERE chapter_id = $1 AND user_id = $2 AND deleted_at IS NULL`
+	tag, err := r.db.Exec(ctx, q, chapterID, userID, feePaidUntil)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ListMembers returns a chapter's active members with their names.
@@ -426,22 +511,4 @@ func (r *Repository) softDelete(ctx context.Context, q string, id uuid.UUID) err
 		return ErrNotFound
 	}
 	return nil
-}
-
-// row is the small surface scanChapter needs, satisfied by both pgx.Row and
-// pgx.Rows, so one helper serves single-row and multi-row queries.
-type row interface {
-	Scan(dest ...any) error
-}
-
-func scanChapter(r row) (*Chapter, error) {
-	var c Chapter
-	err := r.Scan(
-		&c.ID, &c.OrgID, &c.Name, &c.City, &c.Description,
-		&c.IsPublic, &c.InviteCode, &c.CreatedAt, &c.UpdatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &c, nil
 }
