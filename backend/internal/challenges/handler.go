@@ -70,6 +70,7 @@ type submitProofRequest struct {
 	StravaLink    *string  `json:"strava_link"`
 	ScreenshotURL *string  `json:"screenshot_url"`
 	KMClaimed     *float64 `json:"km_claimed"`
+	ProofDate     *string  `json:"proof_date"` // "YYYY-MM-DD", optional
 }
 
 // --- handlers ---
@@ -220,7 +221,7 @@ func (h *Handler) submitProof(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	proof, err := h.svc.SubmitProof(r.Context(), userID, id, req.StravaLink, req.ScreenshotURL, req.KMClaimed)
+	proof, err := h.svc.SubmitProof(r.Context(), userID, id, req.StravaLink, req.ScreenshotURL, req.KMClaimed, req.ProofDate)
 	if err != nil {
 		writeErr(w, err)
 		return

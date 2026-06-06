@@ -53,6 +53,8 @@ type Challenge struct {
 	ProgressKM    float64 `json:"progress_km"`
 	ProgressDays  int     `json:"progress_days"`
 	CurrentStreak int     `json:"current_streak"`
+	// How many individuals have joined (for the card "X joined").
+	ParticipantCount int `json:"participant_count"`
 }
 
 // NewChallenge is the input for creating a challenge.
@@ -75,15 +77,16 @@ type NewChallenge struct {
 // Proof is a Phase 1 manual submission (Strava link / screenshot) awaiting or
 // having received admin verification.
 type Proof struct {
-	ID            uuid.UUID `json:"id"`
-	ChallengeID   uuid.UUID `json:"challenge_id"`
-	UserID        string    `json:"user_id"`
-	StravaLink    *string   `json:"strava_link,omitempty"`
-	ScreenshotURL *string   `json:"screenshot_url,omitempty"`
-	KMClaimed     *float64  `json:"km_claimed,omitempty"`
-	Verified      bool      `json:"verified"`
-	VerifiedBy    *string   `json:"verified_by,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            uuid.UUID  `json:"id"`
+	ChallengeID   uuid.UUID  `json:"challenge_id"`
+	UserID        string     `json:"user_id"`
+	StravaLink    *string    `json:"strava_link,omitempty"`
+	ScreenshotURL *string    `json:"screenshot_url,omitempty"`
+	KMClaimed     *float64   `json:"km_claimed,omitempty"`
+	ProofDate     *string    `json:"proof_date,omitempty"` // "YYYY-MM-DD"
+	Verified      bool       `json:"verified"`
+	VerifiedBy    *string    `json:"verified_by,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 // Repository is the data-access layer for challenges, participants, and proof.
@@ -103,7 +106,9 @@ const challengeColumns = `
 	c.type, c.visibility, c.city, c.target_km, c.target_days,
 	c.start_date, c.end_date, c.allow_teams, c.created_at,
 	p.id IS NOT NULL AS joined,
-	COALESCE(p.progress_km, 0), COALESCE(p.progress_days, 0), COALESCE(p.current_streak, 0)`
+	COALESCE(p.progress_km, 0), COALESCE(p.progress_days, 0), COALESCE(p.current_streak, 0),
+	(SELECT COUNT(*) FROM challenge_participants pc
+	   WHERE pc.challenge_id = c.id AND pc.deleted_at IS NULL) AS participant_count`
 
 func scanChallenge(s interface{ Scan(...any) error }) (*Challenge, error) {
 	var c Challenge
@@ -111,7 +116,7 @@ func scanChallenge(s interface{ Scan(...any) error }) (*Challenge, error) {
 		&c.ID, &c.CreatorID, &c.OrgID, &c.ChapterID, &c.Title, &c.Description,
 		&c.Type, &c.Visibility, &c.City, &c.TargetKM, &c.TargetDays,
 		&c.StartDate, &c.EndDate, &c.AllowTeams, &c.CreatedAt,
-		&c.Joined, &c.ProgressKM, &c.ProgressDays, &c.CurrentStreak,
+		&c.Joined, &c.ProgressKM, &c.ProgressDays, &c.CurrentStreak, &c.ParticipantCount,
 	)
 	if err != nil {
 		return nil, err
@@ -240,19 +245,25 @@ func (r *Repository) JoinAsChapter(ctx context.Context, challengeID, chapterID u
 	return tag.RowsAffected() > 0, nil
 }
 
-// SubmitProof records a Phase 1 proof submission.
-func (r *Repository) SubmitProof(ctx context.Context, challengeID uuid.UUID, userID string, stravaLink, screenshotURL *string, kmClaimed *float64) (*Proof, error) {
+// proofColumns is the shared column list, kept in sync with scanProof. ::text on
+// proof_date so it comes back as "YYYY-MM-DD" (date only, no time/zone).
+const proofColumns = `id, challenge_id, user_id, strava_link, screenshot_url, km_claimed,
+	proof_date::text, verified, verified_by, created_at`
+
+// SubmitProof records a Phase 1 proof submission. proofDate ("YYYY-MM-DD") is
+// optional — relevant for day/streak challenges.
+func (r *Repository) SubmitProof(ctx context.Context, challengeID uuid.UUID, userID string, stravaLink, screenshotURL *string, kmClaimed *float64, proofDate *string) (*Proof, error) {
 	const q = `
-		INSERT INTO challenge_proof (challenge_id, user_id, strava_link, screenshot_url, km_claimed)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, challenge_id, user_id, strava_link, screenshot_url, km_claimed, verified, verified_by, created_at`
-	return scanProof(r.db.QueryRow(ctx, q, challengeID, userID, stravaLink, screenshotURL, kmClaimed))
+		INSERT INTO challenge_proof (challenge_id, user_id, strava_link, screenshot_url, km_claimed, proof_date)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING ` + proofColumns
+	return scanProof(r.db.QueryRow(ctx, q, challengeID, userID, stravaLink, screenshotURL, kmClaimed, proofDate))
 }
 
 // ListProof returns a challenge's proof submissions, newest first.
 func (r *Repository) ListProof(ctx context.Context, challengeID uuid.UUID) ([]Proof, error) {
 	const q = `
-		SELECT id, challenge_id, user_id, strava_link, screenshot_url, km_claimed, verified, verified_by, created_at
+		SELECT ` + proofColumns + `
 		FROM challenge_proof
 		WHERE challenge_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC`
@@ -280,7 +291,7 @@ func (r *Repository) MarkProofVerified(ctx context.Context, proofID uuid.UUID, v
 		UPDATE challenge_proof
 		SET verified = true, verified_by = $2
 		WHERE id = $1 AND deleted_at IS NULL AND verified = false
-		RETURNING id, challenge_id, user_id, strava_link, screenshot_url, km_claimed, verified, verified_by, created_at`
+		RETURNING ` + proofColumns
 	p, err := scanProof(r.db.QueryRow(ctx, q, proofID, verifierID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Either the proof doesn't exist, or it was already verified. Disambiguate.
@@ -385,7 +396,7 @@ func scanProof(s interface{ Scan(...any) error }) (*Proof, error) {
 	var p Proof
 	err := s.Scan(
 		&p.ID, &p.ChallengeID, &p.UserID, &p.StravaLink, &p.ScreenshotURL,
-		&p.KMClaimed, &p.Verified, &p.VerifiedBy, &p.CreatedAt,
+		&p.KMClaimed, &p.ProofDate, &p.Verified, &p.VerifiedBy, &p.CreatedAt,
 	)
 	if err != nil {
 		return nil, err

@@ -131,15 +131,20 @@ func (s *Service) JoinAsChapter(ctx context.Context, challengeID, chapterID uuid
 
 // SubmitProof records a Phase 1 proof. The challenge must exist (and be visible
 // enough to fetch); progress isn't credited until an admin verifies it.
-func (s *Service) SubmitProof(ctx context.Context, userID string, challengeID uuid.UUID, stravaLink, screenshotURL *string, kmClaimed *float64) (*Proof, error) {
+func (s *Service) SubmitProof(ctx context.Context, userID string, challengeID uuid.UUID, stravaLink, screenshotURL *string, kmClaimed *float64, proofDate *string) (*Proof, error) {
 	if (stravaLink == nil || strings.TrimSpace(*stravaLink) == "") &&
 		(screenshotURL == nil || strings.TrimSpace(*screenshotURL) == "") {
 		return nil, ValidationError{Msg: "a strava_link or screenshot_url is required"}
 	}
+	// Without a Strava link to read the date from, the proof's date is required.
+	if (stravaLink == nil || strings.TrimSpace(*stravaLink) == "") &&
+		(proofDate == nil || strings.TrimSpace(*proofDate) == "") {
+		return nil, ValidationError{Msg: "a date is required when there's no Strava link"}
+	}
 	if _, err := s.repo.Get(ctx, userID, challengeID); err != nil {
 		return nil, err // ErrNotFound bubbles up
 	}
-	return s.repo.SubmitProof(ctx, challengeID, userID, stravaLink, screenshotURL, kmClaimed)
+	return s.repo.SubmitProof(ctx, challengeID, userID, stravaLink, screenshotURL, kmClaimed, proofDate)
 }
 
 // ListProof returns a challenge's proof submissions (admin review queue).

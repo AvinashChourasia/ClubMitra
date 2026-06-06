@@ -70,8 +70,10 @@ type MemberDetail struct {
 // joined a chapter has a role but no status).
 type MyChapter struct {
 	Chapter
-	Status *string `json:"status,omitempty"`
-	Role   *string `json:"role,omitempty"`
+	Status               *string `json:"status,omitempty"`
+	Role                 *string `json:"role,omitempty"`
+	MemberCount          int     `json:"member_count"`
+	ActiveChallengeCount int     `json:"active_challenge_count"`
 }
 
 // ErrNotFound is returned when an org/chapter/invite lookup matches nothing.
@@ -275,7 +277,12 @@ func (r *Repository) ListUserChapters(ctx context.Context, userID string) ([]MyC
 		       (SELECT r.role FROM org_roles r
 		         WHERE r.user_id = $1 AND r.deleted_at IS NULL
 		           AND (r.chapter_id = c.id OR (r.chapter_id IS NULL AND r.org_id = c.org_id))
-		         ORDER BY r.chapter_id NULLS LAST LIMIT 1) AS role
+		         ORDER BY r.chapter_id NULLS LAST LIMIT 1) AS role,
+		       (SELECT COUNT(*) FROM chapter_members cm
+		         WHERE cm.chapter_id = c.id AND cm.deleted_at IS NULL) AS member_count,
+		       (SELECT COUNT(*) FROM challenges ch
+		         WHERE (ch.chapter_id = c.id OR ch.org_id = c.org_id)
+		           AND ch.deleted_at IS NULL AND ch.end_date > now()) AS active_challenge_count
 		FROM chapters c
 		WHERE c.deleted_at IS NULL
 		  AND (
@@ -297,6 +304,7 @@ func (r *Repository) ListUserChapters(ctx context.Context, userID string) ([]MyC
 		if err := rows.Scan(
 			&m.ID, &m.OrgID, &m.Name, &m.City, &m.Description, &m.IsPublic,
 			&m.InviteCode, &m.CreatedAt, &m.UpdatedAt, &m.Status, &m.Role,
+			&m.MemberCount, &m.ActiveChallengeCount,
 		); err != nil {
 			return nil, err
 		}
