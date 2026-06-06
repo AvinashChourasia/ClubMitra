@@ -39,6 +39,44 @@ func (s *Service) ScheduleRun(ctx context.Context, n NewRun) (*Run, error) {
 	return s.repo.ScheduleRun(ctx, n)
 }
 
+// maxBulkRuns caps how many runs one recurring schedule can create.
+const maxBulkRuns = 120
+
+// BulkSchedule creates one run per supplied occurrence (the recurring path).
+func (s *Service) BulkSchedule(ctx context.Context, base NewRun, times []time.Time) ([]Run, error) {
+	base.Title = strings.TrimSpace(base.Title)
+	if base.Title == "" {
+		return nil, ValidationError{Msg: "title is required"}
+	}
+	if len(times) == 0 {
+		return nil, ValidationError{Msg: "at least one date is required"}
+	}
+	if len(times) > maxBulkRuns {
+		return nil, ValidationError{Msg: "that recurrence creates too many runs; shorten the date range"}
+	}
+	if base.DistanceTarget != nil && *base.DistanceTarget < 0 {
+		return nil, ValidationError{Msg: "distance_target cannot be negative"}
+	}
+	return s.repo.BulkSchedule(ctx, base, times)
+}
+
+// UpdateRun edits a run (organiser action; authorization enforced by handler).
+func (s *Service) UpdateRun(ctx context.Context, runID uuid.UUID, u RunUpdate) (*Run, error) {
+	u.Title = strings.TrimSpace(u.Title)
+	if u.Title == "" {
+		return nil, ValidationError{Msg: "title is required"}
+	}
+	if u.ScheduledAt.IsZero() {
+		return nil, ValidationError{Msg: "scheduled_at is required"}
+	}
+	return s.repo.UpdateRun(ctx, runID, u)
+}
+
+// MyRuns returns the caller's personal schedule across all their chapters.
+func (s *Service) MyRuns(ctx context.Context, userID string) ([]MyRun, error) {
+	return s.repo.ListUserRuns(ctx, userID)
+}
+
 // ListRuns returns a chapter's runs.
 func (s *Service) ListRuns(ctx context.Context, chapterID uuid.UUID) ([]Run, error) {
 	return s.repo.ListRuns(ctx, chapterID)

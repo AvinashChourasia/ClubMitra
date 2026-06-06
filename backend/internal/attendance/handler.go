@@ -3,6 +3,7 @@ package attendance
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -31,9 +32,12 @@ var adminRoles = []string{permissions.RoleOrgAdmin, permissions.RoleChapterAdmin
 func (h *Handler) RunRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Post("/", h.scheduleRun)
-	r.Get("/", h.listRuns) // ?chapter_id=...
+	r.Post("/bulk", h.bulkSchedule) // recurring schedule (client-expanded occurrences)
+	r.Get("/", h.listRuns)          // ?chapter_id=...
+	r.Get("/mine", h.myRuns)        // caller's personal schedule (all their clubs)
 	r.Route("/{runID}", func(r chi.Router) {
 		r.Get("/", h.getRun)
+		r.Put("/", h.updateRun) // organiser edits the run
 		r.Post("/checkin", h.checkIn)
 		r.Get("/attendance", h.listAttendees)
 	})
@@ -63,6 +67,25 @@ type scheduleRunRequest struct {
 type checkInRequest struct {
 	UserID string  `json:"user_id"` // optional: omit/self = self check-in
 	Notes  *string `json:"notes"`
+}
+
+type bulkScheduleRequest struct {
+	ChapterID      string   `json:"chapter_id"`
+	Title          string   `json:"title"`
+	HasTime        bool     `json:"has_time"`
+	Location       *string  `json:"location"`
+	DistanceTarget *float64 `json:"distance_target"`
+	Notes          *string  `json:"notes"`
+	ScheduledAts   []string `json:"scheduled_ats"` // RFC3339, client-expanded occurrences
+}
+
+type updateRunRequest struct {
+	Title          string   `json:"title"`
+	ScheduledAt    string   `json:"scheduled_at"` // RFC3339
+	HasTime        bool     `json:"has_time"`
+	Location       *string  `json:"location"`
+	DistanceTarget *float64 `json:"distance_target"`
+	Notes          *string  `json:"notes"`
 }
 
 // --- handlers ---
@@ -96,6 +119,7 @@ func (h *Handler) scheduleRun(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:      actorID,
 		Title:          req.Title,
 		ScheduledAt:    scheduledAt,
+		HasTime:        true,
 		Location:       req.Location,
 		LocationLat:    req.LocationLat,
 		LocationLng:    req.LocationLng,
@@ -107,6 +131,103 @@ func (h *Handler) scheduleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, run)
+}
+
+func (h *Handler) bulkSchedule(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var req bulkScheduleRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	chapterID, err := uuid.Parse(req.ChapterID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid chapter_id")
+		return
+	}
+	if !h.requireChapterAdmin(w, r, actorID, chapterID) {
+		return
+	}
+	times := make([]time.Time, 0, len(req.ScheduledAts))
+	for _, s := range req.ScheduledAts {
+		t, err := parseTime(s)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "scheduled_ats must be RFC3339 timestamps")
+			return
+		}
+		times = append(times, t)
+	}
+	runs, err := h.svc.BulkSchedule(r.Context(), NewRun{
+		ChapterID:      chapterID,
+		CreatedBy:      actorID,
+		Title:          req.Title,
+		HasTime:        req.HasTime,
+		Location:       req.Location,
+		DistanceTarget: req.DistanceTarget,
+		Notes:          req.Notes,
+	}, times)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, runs)
+}
+
+func (h *Handler) updateRun(w http.ResponseWriter, r *http.Request) {
+	actorID, _ := httpx.UserIDFromContext(r.Context())
+	runID, ok := h.runID(w, r)
+	if !ok {
+		return
+	}
+	chapterID, err := h.svc.ChapterOfRun(r.Context(), runID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	if !h.requireChapterAdmin(w, r, actorID, chapterID) {
+		return
+	}
+	var req updateRunRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	scheduledAt, err := parseTime(req.ScheduledAt)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "scheduled_at must be an RFC3339 timestamp")
+		return
+	}
+	run, err := h.svc.UpdateRun(r.Context(), runID, RunUpdate{
+		Title:          req.Title,
+		ScheduledAt:    scheduledAt,
+		HasTime:        req.HasTime,
+		Location:       req.Location,
+		DistanceTarget: req.DistanceTarget,
+		Notes:          req.Notes,
+	})
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, run)
+}
+
+func (h *Handler) myRuns(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	runs, err := h.svc.MyRuns(r.Context(), userID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, runs)
 }
 
 func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {

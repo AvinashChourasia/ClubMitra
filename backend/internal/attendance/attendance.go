@@ -15,17 +15,18 @@ import (
 
 // Run is a scheduled group run.
 type Run struct {
-	ID             uuid.UUID  `json:"id"`
-	ChapterID      uuid.UUID  `json:"chapter_id"`
-	CreatedBy      string     `json:"created_by"`
-	Title          string     `json:"title"`
-	ScheduledAt    time.Time  `json:"scheduled_at"`
-	Location       *string    `json:"location,omitempty"`
-	LocationLat    *float64   `json:"location_lat,omitempty"`
-	LocationLng    *float64   `json:"location_lng,omitempty"`
-	DistanceTarget *float64   `json:"distance_target,omitempty"`
-	Notes          *string    `json:"notes,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             uuid.UUID `json:"id"`
+	ChapterID      uuid.UUID `json:"chapter_id"`
+	CreatedBy      string    `json:"created_by"`
+	Title          string    `json:"title"`
+	ScheduledAt    time.Time `json:"scheduled_at"`
+	HasTime        bool      `json:"has_time"` // false = date only, "Time TBD"
+	Location       *string   `json:"location,omitempty"`
+	LocationLat    *float64  `json:"location_lat,omitempty"`
+	LocationLng    *float64  `json:"location_lng,omitempty"`
+	DistanceTarget *float64  `json:"distance_target,omitempty"`
+	Notes          *string   `json:"notes,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 	// AttendeeCount is populated on list/get so clients can show "12 checked in"
 	// without a second call.
 	AttendeeCount int `json:"attendee_count"`
@@ -37,9 +38,28 @@ type NewRun struct {
 	CreatedBy      string
 	Title          string
 	ScheduledAt    time.Time
+	HasTime        bool
 	Location       *string
 	LocationLat    *float64
 	LocationLng    *float64
+	DistanceTarget *float64
+	Notes          *string
+}
+
+// MyRun is a run on the caller's personal schedule (across all their chapters),
+// annotated with the club name and whether they've checked in.
+type MyRun struct {
+	Run
+	ChapterName string `json:"chapter_name"`
+	CheckedIn   bool   `json:"checked_in"`
+}
+
+// RunUpdate holds the editable fields of a run.
+type RunUpdate struct {
+	Title          string
+	ScheduledAt    time.Time
+	HasTime        bool
+	Location       *string
 	DistanceTarget *float64
 	Notes          *string
 }
@@ -76,17 +96,17 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 // ScheduleRun inserts a new run.
 func (r *Repository) ScheduleRun(ctx context.Context, n NewRun) (*Run, error) {
 	const q = `
-		INSERT INTO runs (chapter_id, created_by, title, scheduled_at,
+		INSERT INTO runs (chapter_id, created_by, title, scheduled_at, has_time,
 		                  location, location_lat, location_lng, distance_target, notes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, chapter_id, created_by, title, scheduled_at,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id, chapter_id, created_by, title, scheduled_at, has_time,
 		          location, location_lat, location_lng, distance_target, notes, created_at`
 	var run Run
 	err := r.db.QueryRow(ctx, q,
-		n.ChapterID, n.CreatedBy, n.Title, n.ScheduledAt,
+		n.ChapterID, n.CreatedBy, n.Title, n.ScheduledAt, n.HasTime,
 		n.Location, n.LocationLat, n.LocationLng, n.DistanceTarget, n.Notes,
 	).Scan(
-		&run.ID, &run.ChapterID, &run.CreatedBy, &run.Title, &run.ScheduledAt,
+		&run.ID, &run.ChapterID, &run.CreatedBy, &run.Title, &run.ScheduledAt, &run.HasTime,
 		&run.Location, &run.LocationLat, &run.LocationLng, &run.DistanceTarget, &run.Notes, &run.CreatedAt,
 	)
 	if err != nil {
@@ -95,11 +115,110 @@ func (r *Repository) ScheduleRun(ctx context.Context, n NewRun) (*Run, error) {
 	return &run, nil
 }
 
+// BulkSchedule inserts many runs (one per occurrence) in a single transaction —
+// the recurring-schedule path. The client expands the recurrence into concrete
+// timestamps (it knows the device timezone), so the server just persists them.
+func (r *Repository) BulkSchedule(ctx context.Context, base NewRun, times []time.Time) ([]Run, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	const q = `
+		INSERT INTO runs (chapter_id, created_by, title, scheduled_at, has_time,
+		                  location, location_lat, location_lng, distance_target, notes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id, chapter_id, created_by, title, scheduled_at, has_time,
+		          location, location_lat, location_lng, distance_target, notes, created_at`
+	out := make([]Run, 0, len(times))
+	for _, t := range times {
+		var run Run
+		if err := tx.QueryRow(ctx, q,
+			base.ChapterID, base.CreatedBy, base.Title, t, base.HasTime,
+			base.Location, base.LocationLat, base.LocationLng, base.DistanceTarget, base.Notes,
+		).Scan(
+			&run.ID, &run.ChapterID, &run.CreatedBy, &run.Title, &run.ScheduledAt, &run.HasTime,
+			&run.Location, &run.LocationLat, &run.LocationLng, &run.DistanceTarget, &run.Notes, &run.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpdateRun edits a run's fields (organiser action). Returns ErrNotFound if the
+// run is missing/deleted.
+func (r *Repository) UpdateRun(ctx context.Context, runID uuid.UUID, u RunUpdate) (*Run, error) {
+	const q = `
+		UPDATE runs
+		SET title = $2, scheduled_at = $3, has_time = $4, location = $5, distance_target = $6, notes = $7
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING id, chapter_id, created_by, title, scheduled_at, has_time,
+		          location, location_lat, location_lng, distance_target, notes, created_at`
+	var run Run
+	err := r.db.QueryRow(ctx, q,
+		runID, u.Title, u.ScheduledAt, u.HasTime, u.Location, u.DistanceTarget, u.Notes,
+	).Scan(
+		&run.ID, &run.ChapterID, &run.CreatedBy, &run.Title, &run.ScheduledAt, &run.HasTime,
+		&run.Location, &run.LocationLat, &run.LocationLng, &run.DistanceTarget, &run.Notes, &run.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+// ListUserRuns returns every run from the chapters a user belongs to, annotated
+// with the club name and whether the user has checked in. Powers the personal
+// schedule (list + calendar).
+func (r *Repository) ListUserRuns(ctx context.Context, userID string) ([]MyRun, error) {
+	const q = `
+		SELECT r.id, r.chapter_id, r.created_by, r.title, r.scheduled_at, r.has_time,
+		       r.location, r.location_lat, r.location_lng, r.distance_target, r.notes, r.created_at,
+		       COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS attendee_count,
+		       c.name AS chapter_name,
+		       EXISTS (SELECT 1 FROM run_attendance ma
+		               WHERE ma.run_id = r.id AND ma.user_id = $1 AND ma.deleted_at IS NULL) AS checked_in
+		FROM runs r
+		JOIN chapters c ON c.id = r.chapter_id
+		JOIN chapter_members m ON m.chapter_id = r.chapter_id AND m.user_id = $1 AND m.deleted_at IS NULL
+		LEFT JOIN run_attendance a ON a.run_id = r.id
+		WHERE r.deleted_at IS NULL AND c.deleted_at IS NULL
+		GROUP BY r.id, c.name
+		ORDER BY r.scheduled_at`
+	rows, err := r.db.Query(ctx, q, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]MyRun, 0)
+	for rows.Next() {
+		var m MyRun
+		if err := rows.Scan(
+			&m.ID, &m.ChapterID, &m.CreatedBy, &m.Title, &m.ScheduledAt, &m.HasTime,
+			&m.Location, &m.LocationLat, &m.LocationLng, &m.DistanceTarget, &m.Notes, &m.CreatedAt,
+			&m.AttendeeCount, &m.ChapterName, &m.CheckedIn,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // ListRuns returns a chapter's runs, soonest-scheduled first, each with a live
 // attendee count.
 func (r *Repository) ListRuns(ctx context.Context, chapterID uuid.UUID) ([]Run, error) {
 	const q = `
-		SELECT r.id, r.chapter_id, r.created_by, r.title, r.scheduled_at,
+		SELECT r.id, r.chapter_id, r.created_by, r.title, r.scheduled_at, r.has_time,
 		       r.location, r.location_lat, r.location_lng, r.distance_target, r.notes, r.created_at,
 		       COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS attendee_count
 		FROM runs r
@@ -127,7 +246,7 @@ func (r *Repository) ListRuns(ctx context.Context, chapterID uuid.UUID) ([]Run, 
 // run's chapter, and by the run-detail view.
 func (r *Repository) GetRun(ctx context.Context, runID uuid.UUID) (*Run, error) {
 	const q = `
-		SELECT r.id, r.chapter_id, r.created_by, r.title, r.scheduled_at,
+		SELECT r.id, r.chapter_id, r.created_by, r.title, r.scheduled_at, r.has_time,
 		       r.location, r.location_lat, r.location_lng, r.distance_target, r.notes, r.created_at,
 		       COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS attendee_count
 		FROM runs r
@@ -209,7 +328,7 @@ type scanRow interface {
 func scanRunWithCount(s scanRow) (*Run, error) {
 	var run Run
 	err := s.Scan(
-		&run.ID, &run.ChapterID, &run.CreatedBy, &run.Title, &run.ScheduledAt,
+		&run.ID, &run.ChapterID, &run.CreatedBy, &run.Title, &run.ScheduledAt, &run.HasTime,
 		&run.Location, &run.LocationLat, &run.LocationLng, &run.DistanceTarget, &run.Notes, &run.CreatedAt,
 		&run.AttendeeCount,
 	)
