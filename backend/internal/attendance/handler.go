@@ -3,6 +3,7 @@ package attendance
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -39,6 +40,7 @@ func (h *Handler) RunRoutes() http.Handler {
 		r.Get("/", h.getRun)
 		r.Put("/", h.updateRun) // organiser edits the run
 		r.Post("/checkin", h.checkIn)
+		r.Post("/checkout", h.checkOut)
 		r.Get("/attendance", h.listAttendees)
 	})
 	return r
@@ -67,6 +69,10 @@ type scheduleRunRequest struct {
 type checkInRequest struct {
 	UserID string  `json:"user_id"` // optional: omit/self = self check-in
 	Notes  *string `json:"notes"`
+}
+
+type checkOutRequest struct {
+	Reason *string `json:"reason"` // optional
 }
 
 type bulkScheduleRequest struct {
@@ -293,6 +299,36 @@ func (h *Handler) checkIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run, err := h.svc.CheckIn(r.Context(), runID, target, markedBy)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, run)
+}
+
+func (h *Handler) checkOut(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	runID, ok := h.runID(w, r)
+	if !ok {
+		return
+	}
+	var req checkOutRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Reason != nil {
+		trimmed := strings.TrimSpace(*req.Reason)
+		req.Reason = &trimmed
+		if trimmed == "" {
+			req.Reason = nil
+		}
+	}
+	run, err := h.svc.CheckOut(r.Context(), runID, userID, req.Reason)
 	if err != nil {
 		h.writeError(w, err)
 		return

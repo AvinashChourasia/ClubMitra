@@ -272,6 +272,18 @@ func (r *Repository) CheckIn(ctx context.Context, runID, chapterID uuid.UUID, us
 	return err
 }
 
+// CheckOut soft-deletes the user's attendance for a run, recording an optional
+// reason in notes. Idempotent: checking out when not checked in is a no-op.
+// (Checking in again later revives the row via the ON CONFLICT in CheckIn.)
+func (r *Repository) CheckOut(ctx context.Context, runID uuid.UUID, userID string, reason *string) error {
+	const q = `
+		UPDATE run_attendance
+		SET deleted_at = now(), notes = $3
+		WHERE run_id = $1 AND user_id = $2 AND deleted_at IS NULL`
+	_, err := r.db.Exec(ctx, q, runID, userID, reason)
+	return err
+}
+
 // ListAttendees returns who checked in to a run.
 func (r *Repository) ListAttendees(ctx context.Context, runID uuid.UUID) ([]Attendee, error) {
 	const q = `

@@ -102,6 +102,19 @@ func (s *Service) CheckIn(ctx context.Context, runID uuid.UUID, userID string, m
 	return s.repo.GetRun(ctx, run.ID)
 }
 
+// CheckOut removes the caller's attendance from a run (with an optional reason),
+// returning the refreshed run. Loads the run first to 404 on an unknown run.
+func (s *Service) CheckOut(ctx context.Context, runID uuid.UUID, userID string, reason *string) (*Run, error) {
+	run, err := s.repo.GetRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.CheckOut(ctx, run.ID, userID, reason); err != nil {
+		return nil, err
+	}
+	return s.repo.GetRun(ctx, run.ID)
+}
+
 // ListAttendees returns who checked in to a run.
 func (s *Service) ListAttendees(ctx context.Context, runID uuid.UUID) ([]Attendee, error) {
 	return s.repo.ListAttendees(ctx, runID)
