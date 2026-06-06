@@ -209,7 +209,7 @@ func (r *Repository) ListChapters(ctx context.Context, orgID uuid.UUID) ([]Chapt
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Chapter
+	out := make([]Chapter, 0)
 	for rows.Next() {
 		c, err := scanChapter(rows)
 		if err != nil {
@@ -342,7 +342,7 @@ func (r *Repository) ListMembers(ctx context.Context, chapterID uuid.UUID) ([]Me
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Member
+	out := make([]Member, 0)
 	for rows.Next() {
 		var m Member
 		if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Status, &m.JoinedAt); err != nil {

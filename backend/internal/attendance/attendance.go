@@ -112,7 +112,7 @@ func (r *Repository) ListRuns(ctx context.Context, chapterID uuid.UUID) ([]Run, 
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Run
+	out := make([]Run, 0) // never nil, so the JSON is [] not null
 	for rows.Next() {
 		run, err := scanRunWithCount(rows)
 		if err != nil {
@@ -166,7 +166,7 @@ func (r *Repository) ListAttendees(ctx context.Context, runID uuid.UUID) ([]Atte
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Attendee
+	out := make([]Attendee, 0)
 	for rows.Next() {
 		var a Attendee
 		if err := rows.Scan(&a.UserID, &a.Name, &a.CheckedInAt, &a.SelfCheckIn); err != nil {
@@ -190,7 +190,7 @@ func (r *Repository) MemberHistory(ctx context.Context, userID string) ([]Member
 		return nil, err
 	}
 	defer rows.Close()
-	var out []MemberAttendance
+	out := make([]MemberAttendance, 0)
 	for rows.Next() {
 		var m MemberAttendance
 		if err := rows.Scan(&m.RunID, &m.Title, &m.ScheduledAt, &m.CheckedInAt); err != nil {
