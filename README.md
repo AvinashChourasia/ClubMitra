@@ -88,21 +88,28 @@ runmitra/
 │   ├── Makefile
 │   └── go.mod
 │
-├── mobile/
+├── mobile/                    # Expo Router app (file-based routing)
 │   ├── app/
-│   │   ├── (auth)/            # Login, Register (with full profile)
-│   │   ├── (tabs)/            # Home, Clubs, Challenges, Profile
-│   │   ├── club/              # Club detail, members, attendance
-│   │   ├── challenge/         # Challenge detail, leaderboard
-│   │   ├── inventory/         # Club inventory screens
-│   │   ├── finance/           # Admin finance dashboard
-│   │   └── activity/          # GPS run screens (Phase 3)
-│   ├── components/
-│   ├── hooks/
-│   ├── services/              # API client (axios)
-│   ├── store/                 # Zustand state management
+│   │   ├── _layout.tsx        # ThemeProvider + AuthProvider, Inter font, push tap
+│   │   ├── index.tsx          # auth gate → /home or /login
+│   │   ├── (auth)/            # login, register (full mandatory profile)
+│   │   ├── (tabs)/            # home, clubs, challenges, profile, settings
+│   │   ├── club/              # [id] detail (tabs), new, join, edit/[id]
+│   │   ├── challenge/         # [id] detail + leaderboard, new
+│   │   ├── run/               # [id] detail, new, edit/[id]
+│   │   ├── profile/           # edit
+│   │   ├── schedule.tsx       # personal + club run schedule
+│   │   └── activity/          # GPS run screens (Phase 3, parked)
+│   ├── components/            # Avatar, ChipSelect, CityPicker, Calendar,
+│   │                          # TimePicker, PhotoPicker, ProgressBar, ClubFeeFields…
+│   ├── lib/                   # api (typed fetch client), auth (Context),
+│   │                          # theme (light/dark + tokens), push, clubs,
+│   │                          # challenges, attendance, profile, applyFont…
 │   ├── app.json
 │   └── package.json
+│
+│   # State = React Context + hooks (no Redux/Zustand). HTTP = a small typed
+│   # fetch wrapper in lib/api.ts (no axios). Auth tokens in expo-secure-store.
 │
 ├── ARCHITECTURE.md
 └── README.md
@@ -164,6 +171,15 @@ runmitra/
 - [x] Leaderboard per challenge (Redis sorted sets)
 - [x] Phase 1 proof: runner pastes Strava link or screenshot → admin verifies manually
 - [x] Basic push notifications: run scheduled, join request, approval, challenge created, proof verified *(infra complete — see note)*
+
+#### Mobile app + design (Phase 1)
+- [x] Expo Router (file-based), React Context state, typed `fetch` client, secure-store tokens
+- [x] Tabs: **Home** (club dashboard), **Clubs**, **Challenges**, **Profile**, **Settings**
+- [x] Design system in `lib/theme` — color/space/radius/type tokens, elevated cards, gradient heroes, Ionicons throughout
+- [x] **Light / Dark mode** — instant toggle (Settings), persisted, first-run follows device
+- [x] **Inter** brand font applied app-wide (weight→family patch; splash-gated load)
+- [x] Push registration (Expo token register/unregister) + tap deep-links
+- [x] Photo picker (local), searchable city picker, calendar + time pickers, recurring-run UI
 
 ---
 
@@ -243,51 +259,53 @@ GET    /api/v1/chapters/:id
 PUT    /api/v1/chapters/:id                   # chapter admin
 DELETE /api/v1/chapters/:id                   # soft delete, org admin
 
-# Members
-POST   /api/v1/chapters/join                  # join via invite code
+# Members + membership
+GET    /api/v1/chapters/mine                  # my chapters + my role/status in each
+POST   /api/v1/chapters/join                  # join via invite code -> active | pending | pending_payment
 POST   /api/v1/chapters/:id/members           # admin adds a member
 GET    /api/v1/chapters/:id/members
 GET    /api/v1/chapters/:id/members/:uid      # admin: member detail
 PUT    /api/v1/chapters/:id/members/:uid      # admin: set status
 DELETE /api/v1/chapters/:id/members/:uid      # soft delete, admin
+POST   /api/v1/chapters/:id/members/:uid/approve  # admin approves a pending join
+POST   /api/v1/chapters/:id/pay               # self: pay/renew membership fee (MOCK — Phase 2)
 
 # Attendance
-POST   /api/v1/runs                           # schedule (chapter_id in body; admin)
+POST   /api/v1/runs                           # schedule one run (chapter_id in body; admin)
+POST   /api/v1/runs/bulk                      # schedule a recurring series (admin)
 GET    /api/v1/runs?chapter_id=:id            # a chapter's runs
 GET    /api/v1/runs/:id
+PUT    /api/v1/runs/:id                        # admin: edit a run
 POST   /api/v1/runs/:id/checkin               # self check-in (or admin marks a member)
+POST   /api/v1/runs/:id/checkout              # undo / mark left early
 GET    /api/v1/runs/:id/attendance
 GET    /api/v1/members/:uid/attendance        # member's attendance history
 
 # Challenges
 GET    /api/v1/challenges                      # browse visible (or ?joined=true)
-POST   /api/v1/challenges
+POST   /api/v1/challenges                      # supports join_fee + lock_date
 GET    /api/v1/challenges/:id
-POST   /api/v1/challenges/:id/join             # individual, or {chapter_id} as a club
+POST   /api/v1/challenges/:id/join             # {paid?, chapter_id?} — 402 if fee unpaid; date-gated
+POST   /api/v1/challenges/:id/leave            # before lock_date / start
 GET    /api/v1/challenges/:id/leaderboard
-POST   /api/v1/challenges/:id/proof            # submit Strava link / screenshot
+POST   /api/v1/challenges/:id/proof            # submit Strava link / screenshot (+ proof_date)
 GET    /api/v1/challenges/:id/proof            # creator: review queue
 POST   /api/v1/challenges/:id/proof/:pid/verify # creator: verify -> credits progress
 
-# Inventory (Phase 2)
-GET    /api/v1/chapters/:id/inventory
-POST   /api/v1/chapters/:id/inventory
-PUT    /api/v1/inventory/:id
-POST   /api/v1/inventory/:id/issue
-POST   /api/v1/inventory/:id/return
-POST   /api/v1/inventory/:id/purchase
+# Push notifications
+POST   /api/v1/push/token                      # register this device's Expo token
+DELETE /api/v1/push/token                      # unregister (on logout)
 
-# Finance (Phase 2)
-GET    /api/v1/chapters/:id/transactions
-GET    /api/v1/chapters/:id/finance/summary
-POST   /api/v1/payments/initiate
-POST   /api/v1/payments/webhook           # Razorpay webhook
-
-# Activities (Phase 3)
+# Activities (Phase 3 — code present, unused by the club core)
 GET    /api/v1/activities
 POST   /api/v1/activities
 GET    /api/v1/activities/:id
 GET    /api/v1/activities/:id/geojson
+
+# Inventory (Phase 2 — NOT built yet)
+#   /chapters/:id/inventory, /inventory/:id/{issue,return,purchase}, …
+# Finance (Phase 2 — NOT built; membership/challenge fees are MOCK today)
+#   /payments/initiate, /payments/webhook (Razorpay), /chapters/:id/finance/summary, …
 ```
 
 ---

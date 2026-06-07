@@ -50,6 +50,29 @@
 
 ---
 
+## Mobile Architecture *(Phase 1 — built)*
+
+```
+Expo Router (file-based routes)        app/_layout → ThemeProvider + AuthProvider
+  (auth)/  (tabs)/  club/  challenge/   Inter font loaded at boot (splash-gated)
+  run/  profile/  schedule  activity/
+
+State          React Context + hooks (auth, theme) — no Redux/Zustand
+HTTP           lib/api.ts — small typed fetch wrapper, JWT bearer, auto-refresh
+Tokens         expo-secure-store (access + rotating refresh)
+Theming        lib/theme.tsx — light/dark palettes as LIVE module bindings;
+               ThemeProvider swaps them + screens subscribe via useThemeMode()
+Fonts          Inter, applied globally by patching Text.render (weight→family)
+Push           expo-notifications — register token → POST /push/token; tap deep-links
+Media          expo-image-picker (local), expo-clipboard (invite codes)
+```
+
+> Design system (color/space/radius/type tokens, elevated cards, gradient heroes,
+> Ionicons) lives in `lib/theme`. Tabs: Home (dashboard), Clubs, Challenges,
+> Profile, Settings (light/dark toggle).
+
+---
+
 ## Database Schema
 
 > **Implementation note.** `users.id` is stored as `TEXT` holding a generated
@@ -71,7 +94,8 @@ CREATE TABLE users (
     age             INT,
     tshirt_size     TEXT,                    -- XS / S / M / L / XL / XXL
     city            TEXT,
-    profile_photo   TEXT,                    -- Cloudinary URL
+    running_level   TEXT,                    -- beginner|amateur|intermediate|advanced
+    profile_photo   TEXT,                    -- local URI today; Cloudinary in Phase 2
     is_verified     BOOLEAN DEFAULT false,
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now(),
@@ -117,9 +141,13 @@ CREATE TABLE chapters (
     logo                    TEXT,
     is_public               BOOLEAN DEFAULT true,
     invite_code             TEXT UNIQUE NOT NULL,   -- for invite link
+    -- Join-flow + fee controls (migration 00013). Fees are MOCK until Phase 2.
+    requires_approval       BOOLEAN NOT NULL DEFAULT true,   -- admin approves joins
     membership_fee_enabled  BOOLEAN DEFAULT false,
     membership_fee_amount   NUMERIC(10,2),
-    razorpay_account_id     TEXT,                   -- linked after KYC
+    membership_period       TEXT,                   -- 'monthly' | 'annual'
+    renewal_window_days     INT NOT NULL DEFAULT 5, -- renew this many days before expiry
+    razorpay_account_id     TEXT,                   -- linked after KYC (Phase 2)
     created_at              TIMESTAMPTZ DEFAULT now(),
     updated_at              TIMESTAMPTZ DEFAULT now(),
     deleted_at              TIMESTAMPTZ
@@ -151,9 +179,10 @@ CREATE TABLE chapter_members (
     chapter_id      UUID REFERENCES chapters(id),
     user_id         TEXT REFERENCES users(id),
     status          TEXT NOT NULL DEFAULT 'active',
-    -- 'active' | 'lapsed' | 'suspended'
+    -- 'active' | 'lapsed' | 'suspended' | 'pending' (awaiting approval)
+    -- | 'pending_payment' (approved, awaiting the fee)
     joined_at       TIMESTAMPTZ DEFAULT now(),
-    fee_paid_until  TIMESTAMPTZ,
+    fee_paid_until  TIMESTAMPTZ,            -- set on pay/renew (renew counts from expiry)
     added_by        TEXT REFERENCES users(id),
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now(),
@@ -165,7 +194,11 @@ CREATE TABLE chapter_members (
 
 ---
 
-### Attendance Layer *(Phase 1, upcoming)*
+### Attendance Layer *(Phase 1 — built)*
+
+> Recurring runs are created as one `runs` row per occurrence (bulk schedule);
+> there is no separate recurrence table. `has_time = false` means only the date
+> is meaningful (the app shows "Time TBD").
 
 ```sql
 CREATE TABLE runs (
@@ -174,6 +207,7 @@ CREATE TABLE runs (
     created_by      TEXT REFERENCES users(id),
     title           TEXT NOT NULL,
     scheduled_at    TIMESTAMPTZ NOT NULL,
+    has_time        BOOLEAN NOT NULL DEFAULT true,  -- false = date only
     location        TEXT,
     location_lat    NUMERIC,
     location_lng    NUMERIC,
@@ -218,6 +252,8 @@ CREATE TABLE challenges (
     start_date      TIMESTAMPTZ NOT NULL,
     end_date        TIMESTAMPTZ NOT NULL,
     allow_teams     BOOLEAN DEFAULT true,
+    join_fee        NUMERIC(10,2),  -- optional; MOCK payment until Phase 2
+    lock_date       TIMESTAMPTZ,    -- leaving closes here (else at start)
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now(),
     deleted_at      TIMESTAMPTZ
@@ -231,6 +267,7 @@ CREATE TABLE challenge_participants (
     progress_km     NUMERIC(8,2) DEFAULT 0,
     progress_days   INT DEFAULT 0,
     current_streak  INT DEFAULT 0,
+    fee_paid        BOOLEAN NOT NULL DEFAULT false,  -- join-fee paid (MOCK)
     joined_at       TIMESTAMPTZ DEFAULT now(),
     deleted_at      TIMESTAMPTZ,
 
@@ -245,6 +282,7 @@ CREATE TABLE challenge_proof (
     strava_link     TEXT,
     screenshot_url  TEXT,
     km_claimed      NUMERIC(6,2),
+    proof_date      DATE,           -- the day the run happened
     verified        BOOLEAN DEFAULT false,
     verified_by     TEXT REFERENCES users(id),
     created_at      TIMESTAMPTZ DEFAULT now(),
@@ -257,13 +295,35 @@ CREATE TABLE challenge_proof (
 --   Member: user:{id} or chapter:{id}
 ```
 
-> The current code ships an earlier solo-tracker `challenges` schema
-> (`target_distance_m`, `challenge_members`). It is migrated to the
-> visibility-aware model above as part of the upcoming Phase 1 challenge slice.
+> ✅ Built. The earlier solo-tracker `challenges` schema was migrated to this
+> visibility-aware model (migration 00009) and extended with join fees + lock
+> dates (00013) and proof dates (00012).
 
 ---
 
-### Inventory Layer *(Phase 2)*
+### Notifications Layer *(Phase 1 — built)*
+
+```sql
+-- Expo push tokens, one per device install (migration 00014). The notifier
+-- joins these to chapter_members / org_roles to fan an event to the right users.
+CREATE TABLE device_tokens (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token      TEXT NOT NULL UNIQUE,   -- ExponentPushToken[...]
+    platform   TEXT,                   -- ios | android
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+> Triggers (best-effort, async): run scheduled → chapter members; join request →
+> chapter admins; approval → the member; chapter challenge created → members;
+> proof verified → the submitter. Sends go to the Expo Push API. **Real delivery
+> needs a dev/prod build** (Expo Go can't receive remote push on current SDKs).
+
+---
+
+### Inventory Layer *(Phase 2 — NOT built yet)*
 
 ```sql
 CREATE TABLE inventory_items (
@@ -299,7 +359,10 @@ CREATE TABLE inventory_transactions (
 
 ---
 
-### Finance Layer *(Phase 2)*
+### Finance Layer *(Phase 2 — NOT built; tables below are the planned design)*
+
+> Today membership + challenge fees use a **MOCK** step (confirm → activate); no
+> `transactions`/`subscriptions` tables, Razorpay, or platform cut exist yet.
 
 ```sql
 -- Every money movement. Platform cut stored at transaction time, never derived.
@@ -501,16 +564,18 @@ internal/users/          Account + profile, stats aggregation (Phase 3)
 internal/organisations/  Org + chapter CRUD, invite codes, role assignment,
                          membership (join by invite, list) [Phase 1]
 internal/permissions/    org_roles-backed role middleware (org + chapter scope)
-internal/members/        (future split out of organisations)
-internal/attendance/     Schedule runs, post-run check-in, attendance history
-internal/challenges/     Challenge CRUD, visibility rules, join, proof,
-                         progress updates, leaderboard sync
+internal/attendance/     Schedule runs (single + recurring), edit, check-in/out,
+                         attendance history
+internal/challenges/     Challenge CRUD, visibility rules, join/leave (fee+date
+                         gated), proof, progress updates, leaderboard sync
 internal/leaderboard/    Redis sorted-set operations, self-heal from Postgres
-internal/inventory/      Item CRUD, size breakdown (JSONB), issue/return/purchase
-internal/finance/        Transactions, platform cut, Razorpay order + webhook,
-                         finance dashboards, subscriptions
-internal/notifications/  Expo push tokens, send helpers, event triggers
+internal/notifications/  Expo push tokens, send helpers, event triggers [built]
 internal/activities/     GPS recording (Phase 3), PostGIS routes, challenge credit
+-- NOT built yet --
+internal/members/        (membership currently lives in organisations; may split)
+internal/inventory/      Item CRUD, size breakdown (JSONB), issue/return/purchase  [Phase 2]
+internal/finance/        Transactions, platform cut, Razorpay order + webhook,
+                         finance dashboards, subscriptions                          [Phase 2]
 pkg/middleware/          JWT validation, permission checks, soft-delete, rate limit
 pkg/razorpay/            Razorpay client, Route transfer helpers, webhook verify
 pkg/geo/                 PostGIS distance calc (Phase 3), coordinate validation
