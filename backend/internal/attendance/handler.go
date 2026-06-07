@@ -59,6 +59,7 @@ type scheduleRunRequest struct {
 	ChapterID      string   `json:"chapter_id"`
 	Title          string   `json:"title"`
 	ScheduledAt    string   `json:"scheduled_at"` // RFC3339
+	HasTime        *bool    `json:"has_time"`     // omitted = true; false = date-only
 	Location       *string  `json:"location"`
 	LocationLat    *float64 `json:"location_lat"`
 	LocationLng    *float64 `json:"location_lng"`
@@ -120,12 +121,16 @@ func (h *Handler) scheduleRun(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "scheduled_at must be an RFC3339 timestamp")
 		return
 	}
+	hasTime := true // default: the run has a specific time
+	if req.HasTime != nil {
+		hasTime = *req.HasTime
+	}
 	run, err := h.svc.ScheduleRun(r.Context(), NewRun{
 		ChapterID:      chapterID,
 		CreatedBy:      actorID,
 		Title:          req.Title,
 		ScheduledAt:    scheduledAt,
-		HasTime:        true,
+		HasTime:        hasTime,
 		Location:       req.Location,
 		LocationLat:    req.LocationLat,
 		LocationLng:    req.LocationLng,

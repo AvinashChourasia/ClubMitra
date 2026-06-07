@@ -17,7 +17,14 @@
       "Bash(sed -i '' 's#module github.com/avinash/virtual-run-tracker/backend#module github.com/avinash/clubmitra/backend#' go.mod)",
       "Bash(xargs sed -i '' 's/RunMitra/ClubMitra/g')",
       "Bash(sed -i '' 's/\"name\": \"Virtual Run Tracker\"/\"name\": \"ClubMitra\"/' app.json)",
-      "Bash(sed -i '' 's/\"scheme\": \"virtualrun\"/\"scheme\": \"clubmitra\"/' app.json)"
+      "Bash(sed -i '' 's/\"scheme\": \"virtualrun\"/\"scheme\": \"clubmitra\"/' app.json)",
+      "Bash(grep -niA8 \"bulk\" internal/attendance/handler.go)",
+      "Bash(sed -i '' -e 's/\\\\\\\\\"dates\\\\\\\\\":/\\\\\\\\\"scheduled_ats\\\\\\\\\":/' -e 's#jget \"\\\\[0\\\\]\\\\['\\\\''chapter'\\\\''\\\\]\\\\['\\\\''id'\\\\''\\\\]\"#jget \"[0]['\\\\''id'\\\\'']\"#' scripts/phase1_e2e.sh)",
+      "Bash(sed -i '' -e 's/assert_status \"create org 200\" 200/assert_status_ge \"create org 2xx\" 200/' -e 's/assert_status \"create chapter 200\" 200/assert_status_ge \"create chapter 2xx\" 200/' scripts/phase1_e2e.sh)",
+      "Bash(curl -s http://localhost:8099/api/v1/health)",
+      "Bash(BASE=http://localhost:8099/api/v1 bash scripts/phase1_e2e.sh)",
+      "Bash(grep -niB1 -A12 \"type createRequest\\\\|type scheduleRequest\\\\|func \\(h \\\\*Handler\\) schedule\\\\b\" internal/attendance/handler.go)",
+      "Bash(grep -niA10 \"Request struct\" internal/attendance/handler.go)"
     ]
   }
 }
