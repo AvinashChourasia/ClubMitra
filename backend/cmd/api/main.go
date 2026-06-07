@@ -1,4 +1,4 @@
-// Command api is the entry point for the Virtual Run Tracker backend.
+// Command api is the entry point for the ClubMitra backend.
 //
 // Go convention: code under cmd/<name> builds into an executable. The actual
 // logic lives in internal/ packages so it stays small, testable, and reusable.
@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -147,6 +148,7 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public routes: no token required.
 		r.Get("/health", handleHealth)
+		r.Get("/version", handleVersion)
 		r.Mount("/auth", authHandler.Routes())
 
 		// Protected routes: this Group applies RequireAuth to everything mounted
@@ -175,4 +177,29 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// appVersion is the backend's release version (bump on meaningful releases).
+const appVersion = "1.0.0"
+
+// handleVersion reports the running build so testers can match bug reports to a
+// deploy. commit comes from Render's RENDER_GIT_COMMIT (set automatically), or
+// COMMIT if you pass one; falls back to "dev".
+func handleVersion(w http.ResponseWriter, _ *http.Request) {
+	commit := os.Getenv("RENDER_GIT_COMMIT")
+	if commit == "" {
+		commit = os.Getenv("COMMIT")
+	}
+	if commit == "" {
+		commit = "dev"
+	}
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"version": appVersion,
+		"commit":  commit,
+		"env":     os.Getenv("ENV"),
+	})
 }
