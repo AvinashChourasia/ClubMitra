@@ -1,4 +1,4 @@
-// Package users owns RunMitra's user accounts. RunMitra is now STANDALONE — it
+// Package users owns ClubMitra's user accounts. ClubMitra is now STANDALONE — it
 // is the source of truth for identity, so this table holds the full runner
 // profile and the bcrypt password hash. (Earlier it was a thin cache of
 // MarathonMitra; that dependency is gone.)

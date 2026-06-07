@@ -5,7 +5,7 @@
 services:
   # The Go API, built from the Dockerfile in this directory.
   - type: web
-    name: virtualrun-api
+    name: clubmitra-api
     runtime: docker
     rootDir: backend
     dockerfilePath: ./Dockerfile

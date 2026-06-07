@@ -18,17 +18,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/activities"
-	"github.com/avinash/virtual-run-tracker/backend/internal/attendance"
-	"github.com/avinash/virtual-run-tracker/backend/internal/auth"
-	"github.com/avinash/virtual-run-tracker/backend/internal/challenges"
-	"github.com/avinash/virtual-run-tracker/backend/internal/config"
-	"github.com/avinash/virtual-run-tracker/backend/internal/database"
-	"github.com/avinash/virtual-run-tracker/backend/internal/leaderboard"
-	"github.com/avinash/virtual-run-tracker/backend/internal/notifications"
-	"github.com/avinash/virtual-run-tracker/backend/internal/organisations"
-	"github.com/avinash/virtual-run-tracker/backend/internal/permissions"
-	"github.com/avinash/virtual-run-tracker/backend/internal/users"
+	"github.com/avinash/clubmitra/backend/internal/activities"
+	"github.com/avinash/clubmitra/backend/internal/attendance"
+	"github.com/avinash/clubmitra/backend/internal/auth"
+	"github.com/avinash/clubmitra/backend/internal/challenges"
+	"github.com/avinash/clubmitra/backend/internal/config"
+	"github.com/avinash/clubmitra/backend/internal/database"
+	"github.com/avinash/clubmitra/backend/internal/leaderboard"
+	"github.com/avinash/clubmitra/backend/internal/notifications"
+	"github.com/avinash/clubmitra/backend/internal/organisations"
+	"github.com/avinash/clubmitra/backend/internal/permissions"
+	"github.com/avinash/clubmitra/backend/internal/users"
 )
 
 func main() {
@@ -71,7 +71,7 @@ func main() {
 	refreshRepo := auth.NewRefreshRepository(pool)
 	tokenMgr := auth.NewTokenManager(cfg.JWTSecret, cfg.AccessTokenTTL)
 
-	// RunMitra owns identity now (no external platform): the auth service stores
+	// ClubMitra owns identity now (no external platform): the auth service stores
 	// password hashes and verifies them itself.
 	authSvc := auth.NewService(userRepo, refreshRepo, tokenMgr, cfg.RefreshTokenTTL)
 	authHandler := auth.NewHandler(authSvc)

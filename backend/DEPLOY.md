@@ -35,7 +35,7 @@ values — that's what this guide covers.
 
 1. Go to https://neon.com and sign up (use "Continue with GitHub").
 2. **Create a project** — pick a region close to you (e.g. AWS ap-south-1 for
-   India). Name it `virtualrun`.
+   India). Name it `clubmitra`.
 3. Neon shows a **connection string** like:
    ```
    postgres://USER:PASSWORD@ep-xxxx.region.aws.neon.tech/neondb?sslmode=require
@@ -72,7 +72,7 @@ git push -u origin main
 ## Step 3 — Redis on Render (Key Value)
 
 1. Go to https://render.com, sign up with GitHub.
-2. **New > Key Value**. Name it `virtualrun-redis`, region same as your API,
+2. **New > Key Value**. Name it `clubmitra-redis`, region same as your API,
    plan **Free**. Create it.
 3. Open it and copy the **Internal Connection URL** (`redis://...`). Save it as
    your production `REDIS_URL`.
@@ -113,9 +113,9 @@ and generates the JWT secrets; you still paste `DATABASE_URL` and `REDIS_URL`.
 ## Step 5 — Verify
 
 When the deploy finishes, Render gives you a URL like
-`https://virtualrun-api.onrender.com`. Check it:
+`https://clubmitra-api.onrender.com`. Check it:
 ```bash
-curl https://virtualrun-api.onrender.com/api/v1/health
+curl https://clubmitra-api.onrender.com/api/v1/health
 # => {"status":"ok"}
 ```
 In the Render logs you should see:
@@ -135,7 +135,7 @@ local dev. For a production build, set the base URL to your Render URL. The
 clean way (done later with the EAS build) is an env/config value; for a quick
 test you can temporarily hardcode:
 ```ts
-return "https://virtualrun-api.onrender.com/api/v1";
+return "https://clubmitra-api.onrender.com/api/v1";
 ```
 
 ---

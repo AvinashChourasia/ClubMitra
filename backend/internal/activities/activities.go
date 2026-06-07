@@ -21,7 +21,7 @@ var ErrNotFound = errors.New("activity not found")
 // Activity is the stored run. The route geometry itself isn't echoed back here
 // (it can be large); a later GeoJSON endpoint will serve it on demand.
 type Activity struct {
-	ID             uuid.UUID  `json:"id"`        // RunMitra-generated
+	ID             uuid.UUID  `json:"id"`        // ClubMitra-generated
 	UserID         string     `json:"user_id"`   // MarathonMitra user id
 	StartedAt      time.Time  `json:"started_at"`
 	EndedAt        time.Time  `json:"ended_at"`

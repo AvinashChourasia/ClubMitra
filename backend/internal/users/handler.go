@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/httpx"
+	"github.com/avinash/clubmitra/backend/internal/httpx"
 )
 
 // Handler exposes user endpoints over HTTP. Like the auth handler, it only

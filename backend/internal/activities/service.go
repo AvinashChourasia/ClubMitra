@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/avinash/virtual-run-tracker/backend/pkg/geo"
+	"github.com/avinash/clubmitra/backend/pkg/geo"
 )
 
 // elevationNoiseThresholdM ignores altitude jitter below this many meters when

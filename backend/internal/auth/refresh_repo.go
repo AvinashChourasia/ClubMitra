@@ -13,7 +13,7 @@ import (
 // StoredRefreshToken mirrors a row in the refresh_tokens table.
 // RevokedAt is a pointer so it can represent SQL NULL (nil = not revoked).
 type StoredRefreshToken struct {
-	ID        uuid.UUID // RunMitra-generated; stays a uuid
+	ID        uuid.UUID // ClubMitra-generated; stays a uuid
 	UserID    string    // MarathonMitra user id (ObjectId text)
 	TokenHash string
 	ExpiresAt time.Time

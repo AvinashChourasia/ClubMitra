@@ -1,4 +1,4 @@
-// Package organisations is RunMitra's club core: organisations, their city-level
+// Package organisations is ClubMitra's club core: organisations, their city-level
 // chapters, the admin roles that govern them, and chapter membership. It is the
 // heart of the Phase 1 pivot from a solo run tracker to a club operating system.
 package organisations
@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/permissions"
+	"github.com/avinash/clubmitra/backend/internal/permissions"
 )
 
 // Organisation is the top-level entity (e.g. "XYZ Running Academy").

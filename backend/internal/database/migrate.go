@@ -7,7 +7,7 @@ import (
 	"github.com/pressly/goose/v3"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
 
-	appdb "github.com/avinash/virtual-run-tracker/backend/db"
+	appdb "github.com/avinash/clubmitra/backend/db"
 )
 
 // Migrate applies any pending migrations on startup.

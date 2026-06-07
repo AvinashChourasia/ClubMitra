@@ -1,4 +1,4 @@
-module github.com/avinash/virtual-run-tracker/backend
+module github.com/avinash/clubmitra/backend
 
 go 1.25.7
 

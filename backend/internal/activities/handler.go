@@ -9,8 +9,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/httpx"
-	"github.com/avinash/virtual-run-tracker/backend/pkg/geo"
+	"github.com/avinash/clubmitra/backend/internal/httpx"
+	"github.com/avinash/clubmitra/backend/pkg/geo"
 )
 
 // Handler exposes the activity endpoints. Like the others, it only translates

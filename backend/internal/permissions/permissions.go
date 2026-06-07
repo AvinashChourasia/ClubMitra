@@ -1,4 +1,4 @@
-// Package permissions enforces RunMitra's role-based access control. Every
+// Package permissions enforces ClubMitra's role-based access control. Every
 // admin action is gated by a row in org_roles: a role scoped either to a whole
 // organisation (chapter_id NULL) or to a single chapter. The middleware here is
 // the one place that reads that table on a protected request.
@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/httpx"
+	"github.com/avinash/clubmitra/backend/internal/httpx"
 )
 
 // Roles, named so callers read like the permission table in the README.

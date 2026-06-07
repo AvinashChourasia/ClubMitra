@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/auth"
-	"github.com/avinash/virtual-run-tracker/backend/internal/database"
-	"github.com/avinash/virtual-run-tracker/backend/internal/users"
+	"github.com/avinash/clubmitra/backend/internal/auth"
+	"github.com/avinash/clubmitra/backend/internal/database"
+	"github.com/avinash/clubmitra/backend/internal/users"
 )
 
 func TestAuthFlow(t *testing.T) {

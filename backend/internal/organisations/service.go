@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/permissions"
+	"github.com/avinash/clubmitra/backend/internal/permissions"
 )
 
 // Membership lifecycle states.

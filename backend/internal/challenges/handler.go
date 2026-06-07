@@ -9,8 +9,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/httpx"
-	"github.com/avinash/virtual-run-tracker/backend/internal/permissions"
+	"github.com/avinash/clubmitra/backend/internal/httpx"
+	"github.com/avinash/clubmitra/backend/internal/permissions"
 )
 
 // Handler exposes the challenge endpoints. Mounted behind the auth middleware,

@@ -1,7 +1,7 @@
 -- +goose Up
 
--- RunMitra's pivot: from a solo GPS tracker (identity verified by MarathonMitra)
--- to a STANDALONE running-club operating system. RunMitra now owns identity, so
+-- ClubMitra's pivot: from a solo GPS tracker (identity verified by MarathonMitra)
+-- to a STANDALONE running-club operating system. ClubMitra now owns identity, so
 -- the users table grows real account fields (password, full profile) and we add
 -- the club layer on top: organisations -> chapters -> roles + members.
 --

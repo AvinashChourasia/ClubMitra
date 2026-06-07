@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -q -m 'Mobile: dark mode \\(light/dark themes + appearance toggle\\) *)",
+      "Bash(git commit -q -m 'Mobile: instant theming, light/dark only, Settings screen *)",
+      "Bash(grep -n \"const { user, getAccessToken } = useAuth\" /Users/avinash.chourasia/Documents/Practice/Strava/mobile/app/challenge/\\\\[id\\\\].tsx)",
+      "Bash(git commit -q -m 'Mobile: polish challenge detail \\(gradient header, medal leaderboard\\) *)",
+      "Bash(grep -n \"const { user, getAccessToken } = useAuth\\\\|{/\\\\* Header \\\\*/}\\\\|Avatar name={chapter.name} size={52}\" /Users/avinash.chourasia/Documents/Practice/Strava/mobile/app/club/\\\\[id\\\\].tsx)",
+      "Bash(echo \"EXPORT EXIT=$?\")",
+      "Bash(git commit -q -m 'Mobile: polish club detail + dark-mode color fixes *)",
+      "Bash(python3 -c \"import json;d=json.load\\(open\\('package.json'\\)\\)['dependencies'];print\\('expo-font',d.get\\('expo-font'\\)\\);print\\('inter',d.get\\('@expo-google-fonts/inter'\\)\\);print\\('splash',d.get\\('expo-splash-screen'\\)\\)\")",
+      "Bash(git commit -q -m 'Mobile: Inter brand font \\(global\\) + Settings as a tab *)",
+      "Bash(git commit -q -m 'Mobile: brand header on auth screens + theme-subscribe *)",
+      "Bash(grep -n \"Verified via tsc + full \\\\`expo export\\\\`\\\\.$\" \"/Users/avinash.chourasia/.claude/projects/-Users-avinash-chourasia-Documents-Practice-Strava/memory/project-learning-build.md\")",
+      "Bash(git commit -q -m 'Docs: adopt ClubMitra vision \\(rebrand + Phase 2-4 plan\\) *)",
+      "Bash(xargs sed -i '' 's#avinash/virtual-run-tracker/backend#avinash/clubmitra/backend#g')",
+      "Bash(sed -i '' 's#module github.com/avinash/virtual-run-tracker/backend#module github.com/avinash/clubmitra/backend#' go.mod)",
+      "Bash(xargs sed -i '' 's/RunMitra/ClubMitra/g')",
+      "Bash(sed -i '' 's/\"name\": \"Virtual Run Tracker\"/\"name\": \"ClubMitra\"/' app.json)",
+      "Bash(sed -i '' 's/\"scheme\": \"virtualrun\"/\"scheme\": \"clubmitra\"/' app.json)"
+    ]
+  }
+}

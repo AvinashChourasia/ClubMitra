@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/leaderboard"
+	"github.com/avinash/clubmitra/backend/internal/leaderboard"
 )
 
 // ValidationError carries a client-safe 400 message.

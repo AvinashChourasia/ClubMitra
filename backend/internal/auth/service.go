@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/users"
+	"github.com/avinash/clubmitra/backend/internal/users"
 )
 
 // TokenPair is what we hand back to a client on register/login/refresh.
@@ -42,7 +42,7 @@ var ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
 const minPasswordLen = 8
 const maxPasswordLen = 72
 
-// Service holds the auth business logic. RunMitra owns identity now: it stores a
+// Service holds the auth business logic. ClubMitra owns identity now: it stores a
 // bcrypt password hash, verifies it on login, and issues its own JWT + rotating
 // refresh token.
 type Service struct {

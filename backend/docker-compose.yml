@@ -10,12 +10,12 @@ services:
   db:
     # postgis/postgis bundles PostgreSQL 16 + the PostGIS extension preinstalled.
     image: postgis/postgis:16-3.4
-    container_name: virtualrun_db
+    container_name: clubmitra_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: virtualrun
-      POSTGRES_PASSWORD: virtualrun
-      POSTGRES_DB: virtualrun
+      POSTGRES_USER: clubmitra
+      POSTGRES_PASSWORD: clubmitra
+      POSTGRES_DB: clubmitra
     ports:
       # host:container. We expose on host port 5433 (not 5432) so this container
       # never collides with a local/Homebrew Postgres that may own 5432.
@@ -23,11 +23,11 @@ services:
       - "5433:5432"
     volumes:
       # Named volume so your data survives `docker compose down`.
-      - virtualrun_pgdata:/var/lib/postgresql/data
+      - clubmitra_pgdata:/var/lib/postgresql/data
     healthcheck:
       # Lets other tools (and us) know when Postgres is actually ready
       # to accept connections, not just when the container has started.
-      test: ["CMD-SHELL", "pg_isready -U virtualrun -d virtualrun"]
+      test: ["CMD-SHELL", "pg_isready -U clubmitra -d clubmitra"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -36,7 +36,7 @@ services:
     # Redis powers the challenge leaderboards (sorted sets). It's a fast,
     # in-memory derived view; Postgres remains the durable source of truth.
     image: redis:7-alpine
-    container_name: virtualrun_redis
+    container_name: clubmitra_redis
     restart: unless-stopped
     ports:
       # Host 6380 (not Redis's default 6379) to avoid clashing with any local
@@ -45,7 +45,7 @@ services:
     volumes:
       # Persist to disk so a restart doesn't lose the cache. (Even if it did, we
       # can rebuild every leaderboard from Postgres — see the leaderboard pkg.)
-      - virtualrun_redisdata:/data
+      - clubmitra_redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -53,5 +53,5 @@ services:
       retries: 5
 
 volumes:
-  virtualrun_pgdata:
-  virtualrun_redisdata:
+  clubmitra_pgdata:
+  clubmitra_redisdata:

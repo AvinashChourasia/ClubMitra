@@ -16,13 +16,13 @@ END;
 $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
 
--- RunMitra does NOT own identity — MarathonMitra (MongoDB) is the source of
+-- ClubMitra does NOT own identity — MarathonMitra (MongoDB) is the source of
 -- truth for accounts. This table is a thin PROFILE CACHE: a local copy of the
 -- few MarathonMitra fields we need to label runs/leaderboards, populated on
 -- login. There are no passwords here; MarathonMitra verifies credentials.
 CREATE TABLE users (
     -- The MarathonMitra user id — a Mongo ObjectId (24-char hex string), so the
-    -- column is TEXT, not uuid. Every RunMitra table keys off this id.
+    -- column is TEXT, not uuid. Every ClubMitra table keys off this id.
     id            TEXT PRIMARY KEY,
 
     -- citext + UNIQUE => case-insensitive uniqueness (see migration 00001).

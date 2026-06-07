@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/avinash/virtual-run-tracker/backend/internal/httpx"
+	"github.com/avinash/clubmitra/backend/internal/httpx"
 )
 
 // RequireAuth is HTTP middleware that protects routes: it requires a valid
