@@ -41,14 +41,22 @@ var assignableRoles = map[string]bool{
 	permissions.RoleOrgAdmin:     true,
 }
 
-// Service holds the club-core business logic over the repository.
-type Service struct {
-	repo *Repository
+// notifier fans club events out to members/admins. Local interface so the
+// package stays decoupled from notifications (and nil-safe).
+type notifier interface {
+	NotifyChapterAdmins(ctx context.Context, chapterID uuid.UUID, title, body string, data map[string]string)
+	NotifyUsers(ctx context.Context, userIDs []string, title, body string, data map[string]string)
 }
 
-// NewService wires the service to its repository.
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+// Service holds the club-core business logic over the repository.
+type Service struct {
+	repo   *Repository
+	notify notifier
+}
+
+// NewService wires the service to its repository and (optional) notifier.
+func NewService(repo *Repository, notify notifier) *Service {
+	return &Service{repo: repo, notify: notify}
 }
 
 // CreateOrg validates and creates an organisation owned by its creator.
@@ -241,6 +249,10 @@ func (s *Service) JoinByInvite(ctx context.Context, code, userID string) (*JoinR
 	if err := s.repo.AddMember(ctx, chapter.ID, userID, userID, status); err != nil {
 		return nil, err
 	}
+	if status == StatusPending && s.notify != nil {
+		s.notify.NotifyChapterAdmins(ctx, chapter.ID, "New join request",
+			"A runner asked to join "+chapter.Name, map[string]string{"type": "join_request", "chapter_id": chapter.ID.String()})
+	}
 	return &JoinResult{Chapter: chapter, Status: status}, nil
 }
 
@@ -274,6 +286,14 @@ func (s *Service) ApproveMember(ctx context.Context, chapterID uuid.UUID, userID
 	}
 	if err := s.repo.UpdateMemberStatus(ctx, chapterID, userID, next); err != nil {
 		return "", err
+	}
+	if s.notify != nil {
+		body := "You're now a member of " + chapter.Name + "!"
+		if next == StatusPendingPayment {
+			body = "Approved! Pay the membership fee to activate your spot in " + chapter.Name + "."
+		}
+		s.notify.NotifyUsers(ctx, []string{userID}, "Membership approved", body,
+			map[string]string{"type": "approved", "chapter_id": chapterID.String()})
 	}
 	return next, nil
 }

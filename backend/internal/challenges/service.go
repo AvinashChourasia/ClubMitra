@@ -31,17 +31,24 @@ type nameLookup interface {
 	DisplayNames(ctx context.Context, ids []string) (map[string]string, error)
 }
 
+// notifier fans challenge events to members/users (local interface, nil-safe).
+type notifier interface {
+	NotifyChapterMembers(ctx context.Context, chapterID uuid.UUID, exclude, title, body string, data map[string]string)
+	NotifyUsers(ctx context.Context, userIDs []string, title, body string, data map[string]string)
+}
+
 // Service holds challenge business logic: durable data in Postgres (repo) plus
 // the fast Redis leaderboard (board), with user names resolved via names.
 type Service struct {
-	repo  *Repository
-	board *leaderboard.Leaderboard
-	names nameLookup
+	repo   *Repository
+	board  *leaderboard.Leaderboard
+	names  nameLookup
+	notify notifier
 }
 
 // NewService wires the service together.
-func NewService(repo *Repository, board *leaderboard.Leaderboard, names nameLookup) *Service {
-	return &Service{repo: repo, board: board, names: names}
+func NewService(repo *Repository, board *leaderboard.Leaderboard, names nameLookup, notify notifier) *Service {
+	return &Service{repo: repo, board: board, names: names, notify: notify}
 }
 
 var validTypes = map[string]bool{TypeDistance: true, TypeDays: true, TypeStreak: true}
@@ -94,7 +101,13 @@ func (s *Service) Create(ctx context.Context, c NewChallenge) (*Challenge, error
 		}
 	}
 
-	return s.repo.Create(ctx, c)
+	ch, err := s.repo.Create(ctx, c)
+	if err == nil && s.notify != nil && ch.ChapterID != nil {
+		// Chapter-scoped challenges ping that chapter's members.
+		s.notify.NotifyChapterMembers(ctx, *ch.ChapterID, ch.CreatorID,
+			"New challenge", ch.Title, map[string]string{"type": "challenge", "challenge_id": ch.ID.String()})
+	}
+	return ch, err
 }
 
 // Get returns a challenge with the user's participation state.
@@ -251,6 +264,10 @@ func (s *Service) VerifyProof(ctx context.Context, verifierID string, proofID uu
 
 	if err := s.board.SetScore(ctx, proof.ChallengeID, proof.UserID, newScore); err != nil {
 		log.Printf("challenges: leaderboard SetScore on verify failed: %v", err)
+	}
+	if s.notify != nil {
+		s.notify.NotifyUsers(ctx, []string{proof.UserID}, "Proof verified ✅",
+			"Your submission for “"+ch.Title+"” was verified.", map[string]string{"type": "proof_verified", "challenge_id": proof.ChallengeID.String()})
 	}
 	return proof, nil
 }

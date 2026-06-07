@@ -2,6 +2,7 @@ package attendance
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,14 +14,22 @@ type ValidationError struct{ Msg string }
 
 func (e ValidationError) Error() string { return e.Msg }
 
-// Service holds attendance business logic over the repository.
-type Service struct {
-	repo *Repository
+// notifier pushes a domain event to a chapter's members. Implemented by
+// notifications.Notifier; kept as a local interface so attendance doesn't depend
+// on the concrete package (and stays nil-safe in tests).
+type notifier interface {
+	NotifyChapterMembers(ctx context.Context, chapterID uuid.UUID, exclude, title, body string, data map[string]string)
 }
 
-// NewService wires the service to its repository.
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+// Service holds attendance business logic over the repository.
+type Service struct {
+	repo   *Repository
+	notify notifier
+}
+
+// NewService wires the service to its repository and (optional) notifier.
+func NewService(repo *Repository, notify notifier) *Service {
+	return &Service{repo: repo, notify: notify}
 }
 
 // ScheduleRun validates and creates a run. Authorization (must be a chapter
@@ -36,7 +45,12 @@ func (s *Service) ScheduleRun(ctx context.Context, n NewRun) (*Run, error) {
 	if n.DistanceTarget != nil && *n.DistanceTarget < 0 {
 		return nil, ValidationError{Msg: "distance_target cannot be negative"}
 	}
-	return s.repo.ScheduleRun(ctx, n)
+	run, err := s.repo.ScheduleRun(ctx, n)
+	if err == nil && s.notify != nil {
+		s.notify.NotifyChapterMembers(ctx, run.ChapterID, run.CreatedBy,
+			"New run scheduled", run.Title, map[string]string{"type": "run", "run_id": run.ID.String()})
+	}
+	return run, err
 }
 
 // maxBulkRuns caps how many runs one recurring schedule can create.
@@ -57,7 +71,16 @@ func (s *Service) BulkSchedule(ctx context.Context, base NewRun, times []time.Ti
 	if base.DistanceTarget != nil && *base.DistanceTarget < 0 {
 		return nil, ValidationError{Msg: "distance_target cannot be negative"}
 	}
-	return s.repo.BulkSchedule(ctx, base, times)
+	runs, err := s.repo.BulkSchedule(ctx, base, times)
+	if err == nil && s.notify != nil && len(runs) > 0 {
+		body := base.Title
+		if len(runs) > 1 {
+			body = base.Title + " · " + strconv.Itoa(len(runs)) + " runs"
+		}
+		s.notify.NotifyChapterMembers(ctx, base.ChapterID, base.CreatedBy,
+			"New runs scheduled", body, map[string]string{"type": "run", "chapter_id": base.ChapterID.String()})
+	}
+	return runs, err
 }
 
 // UpdateRun edits a run (organiser action; authorization enforced by handler).

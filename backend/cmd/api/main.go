@@ -25,6 +25,7 @@ import (
 	"github.com/avinash/virtual-run-tracker/backend/internal/config"
 	"github.com/avinash/virtual-run-tracker/backend/internal/database"
 	"github.com/avinash/virtual-run-tracker/backend/internal/leaderboard"
+	"github.com/avinash/virtual-run-tracker/backend/internal/notifications"
 	"github.com/avinash/virtual-run-tracker/backend/internal/organisations"
 	"github.com/avinash/virtual-run-tracker/backend/internal/permissions"
 	"github.com/avinash/virtual-run-tracker/backend/internal/users"
@@ -76,21 +77,26 @@ func main() {
 	authHandler := auth.NewHandler(authSvc)
 	usersHandler := users.NewHandler(userRepo)
 
+	// Push notifications: store device tokens and fan domain events out to the
+	// right users' devices (best-effort, async).
+	notifier := notifications.NewNotifier(pool)
+	notificationsHandler := notifications.NewHandler(notifier)
+
 	// Club core: organisations, chapters, roles, members — gated by the
 	// org_roles-backed permission checker.
 	permChecker := permissions.NewChecker(pool)
-	orgSvc := organisations.NewService(organisations.NewRepository(pool))
+	orgSvc := organisations.NewService(organisations.NewRepository(pool), notifier)
 	orgHandler := organisations.NewHandler(orgSvc, permChecker)
 
 	// Attendance: scheduled group runs + member check-ins.
-	attendanceSvc := attendance.NewService(attendance.NewRepository(pool))
+	attendanceSvc := attendance.NewService(attendance.NewRepository(pool), notifier)
 	attendanceHandler := attendance.NewHandler(attendanceSvc, permChecker)
 
 	activitiesSvc := activities.NewService(activities.NewRepository(pool))
 	activitiesHandler := activities.NewHandler(activitiesSvc)
 
 	board := leaderboard.New(rdb)
-	challengesSvc := challenges.NewService(challenges.NewRepository(pool), board, userRepo)
+	challengesSvc := challenges.NewService(challenges.NewRepository(pool), board, userRepo, notifier)
 	challengesHandler := challenges.NewHandler(challengesSvc, permChecker)
 
 	// Connect the two: when a run is recorded, credit challenge progress. This
@@ -100,7 +106,7 @@ func main() {
 	// 4. Build the HTTP server around the router.
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, tokenMgr),
+		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, tokenMgr),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -130,7 +136,7 @@ func main() {
 }
 
 // newRouter builds the middleware stack and mounts all routes.
-func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, tokenMgr *auth.TokenManager) http.Handler {
+func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, tokenMgr *auth.TokenManager) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID) // tag each request with a unique id
@@ -154,6 +160,7 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 			// member's cross-chapter history under /members.
 			r.Mount("/runs", attendanceHandler.RunRoutes())
 			r.Mount("/members", attendanceHandler.MemberRoutes())
+			r.Mount("/push", notificationsHandler.Routes())
 			// Club core declares its own /organisations and /chapters subtrees,
 			// so it mounts at the group root rather than under a single prefix.
 			r.Mount("/", orgHandler.Routes())
