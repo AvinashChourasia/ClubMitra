@@ -118,6 +118,15 @@ func (s *Service) Join(ctx context.Context, userID string, challengeID uuid.UUID
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
+	if !ch.Joined { // joining is only open before the challenge starts
+		if !now.Before(ch.EndDate) {
+			return nil, ValidationError{Msg: "this challenge has ended"}
+		}
+		if !now.Before(ch.StartDate) {
+			return nil, ValidationError{Msg: "joining has closed — the challenge has already started"}
+		}
+	}
 	hasFee := ch.JoinFee != nil && *ch.JoinFee > 0
 	if hasFee && !paid && !ch.Joined {
 		return nil, ErrPaymentRequired
@@ -138,8 +147,13 @@ func (s *Service) Leave(ctx context.Context, userID string, challengeID uuid.UUI
 	if err != nil {
 		return nil, err
 	}
-	if ch.LockDate != nil && !time.Now().Before(*ch.LockDate) {
-		return nil, ValidationError{Msg: "leaving is locked for this challenge"}
+	// Leaving closes at the organiser's lock date, or at the start if none set.
+	cutoff := ch.StartDate
+	if ch.LockDate != nil {
+		cutoff = *ch.LockDate
+	}
+	if !time.Now().Before(cutoff) {
+		return nil, ValidationError{Msg: "leaving is closed for this challenge"}
 	}
 	if _, err := s.repo.LeaveAsUser(ctx, challengeID, userID); err != nil {
 		return nil, err
