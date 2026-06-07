@@ -2,14 +2,21 @@
 // Calling useThemeMode() subscribes this screen so a theme toggle re-themes it
 // instantly.
 
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { Redirect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
+import * as Updates from "expo-updates";
 
 import { useAuth } from "../../lib/auth";
+import { request } from "../../lib/api";
 import { colors, styles, useThemeMode, type ThemeMode } from "../../lib/theme";
 import { Avatar } from "../../components/Avatar";
+
+// Where tester feedback is sent. Change to a support address when you have one.
+const FEEDBACK_EMAIL = "avinash.chourasia@verse.in";
 
 function Row({
   icon,
@@ -71,6 +78,22 @@ export default function Settings() {
   const router = useRouter();
   useThemeMode(); // subscribe so this screen re-themes instantly on toggle
 
+  // Version info — helps testers report which app + backend they're on.
+  const appVersion = Constants.expoConfig?.version ?? "1.0.0";
+  const buildTag = Updates.updateId ? Updates.updateId.slice(0, 8) : "base";
+  const [backend, setBackend] = useState("…");
+  useEffect(() => {
+    request<{ version: string; commit: string }>("/version")
+      .then((v) => setBackend(`v${v.version} · ${v.commit}`))
+      .catch(() => setBackend("unreachable"));
+  }, []);
+
+  function sendFeedback() {
+    const body = `\n\n\n— — —\nApp: ClubMitra v${appVersion} (${buildTag})\nPlatform: ${Platform.OS}\nBackend: ${backend}\nUser: ${user?.email ?? ""}`;
+    const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent("ClubMitra feedback")}&body=${encodeURIComponent(body)}`;
+    Linking.openURL(url).catch(() => {});
+  }
+
   if (!user) return <Redirect href="/login" />;
 
   return (
@@ -102,13 +125,14 @@ export default function Settings() {
           <AppearanceToggle />
         </View>
 
-        {/* Preferences (stubs for now) */}
+        {/* Preferences */}
         <View style={styles.card}>
           <Text style={[styles.sectionTitle, { marginBottom: 4 }]}>Preferences</Text>
           <Row icon="notifications-outline" label="Notifications" disabled />
           <Row icon="lock-closed-outline" label="Privacy" disabled />
-          <Row icon="help-circle-outline" label="Help & feedback" disabled />
-          <Row icon="information-circle-outline" label="About ClubMitra" value="v1 · Phase 1" />
+          <Row icon="chatbubble-ellipses-outline" label="Send feedback" onPress={sendFeedback} />
+          <Row icon="information-circle-outline" label="App version" value={`v${appVersion} · ${buildTag}`} />
+          <Row icon="server-outline" label="Backend" value={backend} />
         </View>
 
         {/* Logout */}
