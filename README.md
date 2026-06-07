@@ -112,7 +112,7 @@ runmitra/
 
 ## Build Phases
 
-### Phase 1 — Club Core `(Month 1)` ✅ ~COMPLETE (push notifications pending)
+### Phase 1 — Club Core `(Month 1)` ✅ COMPLETE
 
 **Goal: A club admin can create their club, add members, schedule runs, and run challenges.**
 
@@ -129,9 +129,13 @@ runmitra/
 > the club API (Clubs / Challenges / Profile tabs + all flows). Every admin action
 > is role-gated; soft-delete everywhere.
 >
-> **What's left in Phase 1:** basic push notifications (run scheduled / challenge
-> update) — deferred because it needs an EAS dev build + Expo push tokens. The
-> old GPS Home dashboard hasn't been reframed for the club product (cosmetic).
+> **Push notifications:** built — device-token storage + Expo Push sender +
+> event triggers (run scheduled → members; join request → admins; approval →
+> member; chapter challenge → members; proof verified → submitter), and the app
+> registers/​unregisters tokens + deep-links on tap. **Real delivery needs a
+> dev/prod build** (Expo Go can't receive remote push on current SDKs); the
+> pipeline is production-ready for when an EAS build runs. The old GPS Home
+> dashboard hasn't been reframed for the club product (cosmetic, optional).
 >
 > **⚠️ Built AHEAD of schedule (these are Phase 2 features, see below):** optional
 > membership fees + subscriptions (monthly/annual + renewal), a club join-approval
@@ -159,7 +163,7 @@ runmitra/
 - [x] Challenge join: individual runner or club joins
 - [x] Leaderboard per challenge (Redis sorted sets)
 - [x] Phase 1 proof: runner pastes Strava link or screenshot → admin verifies manually
-- [ ] Basic push notifications: run scheduled, challenge update *(deferred — mobile-coupled)*
+- [x] Basic push notifications: run scheduled, join request, approval, challenge created, proof verified *(infra complete — see note)*
 
 ---
 
