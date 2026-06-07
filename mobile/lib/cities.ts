@@ -1,0 +1,32 @@
+// A broad list of Indian cities for the city picker. Not exhaustive — the picker
+// also lets a user enter any custom value if theirs isn't listed.
+
+export const INDIAN_CITIES: string[] = [
+  "Mumbai", "Delhi", "Bengaluru", "Hyderabad", "Ahmedabad", "Chennai", "Kolkata", "Pune", "Jaipur",
+  "Surat", "Lucknow", "Kanpur", "Nagpur", "Indore", "Thane", "Bhopal", "Visakhapatnam", "Patna",
+  "Vadodara", "Ghaziabad", "Ludhiana", "Agra", "Nashik", "Faridabad", "Meerut", "Rajkot",
+  "Kalyan-Dombivli", "Vasai-Virar", "Varanasi", "Srinagar", "Aurangabad", "Dhanbad", "Amritsar",
+  "Navi Mumbai", "Allahabad", "Prayagraj", "Ranchi", "Howrah", "Coimbatore", "Jabalpur", "Gwalior",
+  "Vijayawada", "Jodhpur", "Madurai", "Raipur", "Kota", "Chandigarh", "Guwahati", "Solapur",
+  "Hubballi-Dharwad", "Mysuru", "Mysore", "Tiruchirappalli", "Bareilly", "Aligarh", "Tiruppur",
+  "Gurgaon", "Gurugram", "Moradabad", "Jalandhar", "Bhubaneswar", "Salem", "Mira-Bhayandar",
+  "Warangal", "Thiruvananthapuram", "Guntur", "Bhiwandi", "Saharanpur", "Gorakhpur", "Bikaner",
+  "Amravati", "Noida", "Jamshedpur", "Bhilai", "Cuttack", "Firozabad", "Kochi", "Cochin",
+  "Nellore", "Bhavnagar", "Dehradun", "Durgapur", "Asansol", "Rourkela", "Nanded", "Kolhapur",
+  "Ajmer", "Akola", "Gulbarga", "Kalaburagi", "Jamnagar", "Ujjain", "Loni", "Siliguri", "Jhansi",
+  "Ulhasnagar", "Jammu", "Sangli-Miraj", "Mangalore", "Mangaluru", "Erode", "Belgaum", "Belagavi",
+  "Ambattur", "Tirunelveli", "Malegaon", "Gaya", "Jalgaon", "Udaipur", "Maheshtala", "Davanagere",
+  "Kozhikode", "Calicut", "Kurnool", "Rajpur Sonarpur", "Rajahmundry", "Bokaro", "South Dumdum",
+  "Bellary", "Patiala", "Gopalpur", "Agartala", "Bhagalpur", "Muzaffarnagar", "Bhatpara", "Panihati",
+  "Latur", "Dhule", "Rohtak", "Korba", "Bhilwara", "Berhampur", "Muzaffarpur", "Ahmednagar",
+  "Mathura", "Kollam", "Avadi", "Kadapa", "Kamarhati", "Sambalpur", "Bilaspur", "Shahjahanpur",
+  "Satara", "Bijapur", "Vijayapura", "Rampur", "Shivamogga", "Shimoga", "Chandrapur", "Junagadh",
+  "Thrissur", "Alwar", "Bardhaman", "Kulti", "Nizamabad", "Parbhani", "Tumkur", "Tumakuru",
+  "Hisar", "Ozhukarai", "Bihar Sharif", "Panipat", "Darbhanga", "Bally", "Aizawl", "Dewas",
+  "Ichalkaranji", "Tirupati", "Karnal", "Bathinda", "Rampurhat", "Shimla", "Panaji", "Imphal",
+  "Kohima", "Itanagar", "Gangtok", "Shillong", "Dispur", "Puducherry", "Pondicherry", "Anantapur",
+  "Eluru", "Ongole", "Kakinada", "Vellore", "Thoothukudi", "Dindigul", "Thanjavur", "Ranchi",
+  "Haridwar", "Roorkee", "Haldwani", "Karimnagar", "Khammam", "Ramagundam", "Mahbubnagar",
+  "Sonipat", "Yamunanagar", "Sirsa", "Bahadurgarh", "Anand", "Morbi", "Nadiad", "Gandhinagar",
+  "Porbandar", "Mehsana", "Bhuj", "Navsari", "Veraval", "Sikar", "Pali", "Tonk", "Ganganagar",
+];
