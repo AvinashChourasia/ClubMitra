@@ -112,24 +112,37 @@ runmitra/
 
 ## Build Phases
 
-### Phase 1 — Club Core `(Month 1)` 🚧 IN PROGRESS
+### Phase 1 — Club Core `(Month 1)` ✅ ~COMPLETE (push notifications pending)
 
 **Goal: A club admin can create their club, add members, schedule runs, and run challenges.**
 
-> **Phase 1 backend status:** essentially complete. Standalone auth (register +
-> login with bcrypt, JWT + refresh-token rotation/theft detection — MarathonMitra
-> dependency removed); full runner profile; club core (organisations, chapters
-> with invite codes, the `org_roles` permission model, invite-first join, member
-> management with status + soft-delete); attendance (scheduled runs + check-in +
-> history); and the visibility-aware challenge engine (typed goals, scoping,
-> individual/club join, manual proof + admin verify, Redis leaderboard). Every
-> admin action is role-gated. **Remaining:** push notifications (mobile-coupled,
-> deferred) and the mobile app, which still needs to be rebuilt for the club API.
+> **Phase 1 status — backend + mobile both built and working end-to-end:**
+> standalone auth (register + login, bcrypt, JWT + refresh rotation/theft
+> detection — no external identity dependency); full runner profile (view/edit,
+> running level, searchable city, local-only photo picker); club core
+> (organisations, chapters, invite codes, `org_roles` permissions, invite-first
+> join, member management with status + soft-delete); attendance (recurring run
+> scheduling, optional time, edit, check-in/out with reason, personal + club
+> schedule with weekly list + month calendar); and the visibility-aware challenge
+> engine (typed goals, scoping, individual/club join with date-gated join/leave,
+> manual proof + admin verify, Redis leaderboard). Mobile app fully rebuilt for
+> the club API (Clubs / Challenges / Profile tabs + all flows). Every admin action
+> is role-gated; soft-delete everywhere.
+>
+> **What's left in Phase 1:** basic push notifications (run scheduled / challenge
+> update) — deferred because it needs an EAS dev build + Expo push tokens. The
+> old GPS Home dashboard hasn't been reframed for the club product (cosmetic).
+>
+> **⚠️ Built AHEAD of schedule (these are Phase 2 features, see below):** optional
+> membership fees + subscriptions (monthly/annual + renewal), a club join-approval
+> layer, and challenge join fees — all wired with a **MOCK payment step**. Real
+> money movement (Razorpay Route, platform cut, transactions table) is still
+> Phase 2 and NOT built. Consider these "structure done, real payments pending."
 
 #### Week 1–2: Identity + Organisation
-- [x] User registration — name, age, phone, email, t-shirt size, city, profile photo
+- [x] User registration — name, age, phone, email, t-shirt size, city, running level (photo: local-only until Phase 2 Cloudinary)
 - [x] JWT auth + refresh tokens (rotation + theft detection)
-- [x] Organisation create (update: pending)
+- [x] Organisation create + update
 - [x] Chapter create under org (same admin, multiple cities supported)
 - [x] Admin role assignment: org_admin, chapter_admin, co_admin
 - [x] Invite link per chapter (unique code, runner signs up via link → auto-joins chapter)
@@ -152,12 +165,18 @@ runmitra/
 
 ### Phase 2 — Finance + Inventory `(Month 2)`
 
+> Some of this was started early during Phase 1 with a **MOCK payment** (no real
+> gateway yet). Marked 🟡 = structure/flow done, real money still pending.
+
 - [ ] Razorpay Route setup — KYC flow for chapter admin during onboarding
-- [ ] Membership fee toggle per chapter (on/off, set amount)
-- [ ] In-app payment: runner pays chapter membership fee
+- [x] 🟡 Membership fee toggle per chapter (on/off, set amount, monthly/annual)
+- [x] 🟡 In-app payment: runner pays chapter membership fee — **mock** (confirm → activate)
+- [x] 🟡 Club join-approval layer (request → admin approve → pay) — *new, not in original plan*
+- [x] 🟡 Subscription + renewal: fee_paid_until, renewal window, renew-from-expiry math
+- [x] 🟡 Challenge join fee — **mock** payment to join, date-gated join/leave
 - [ ] Platform cut calculated and stored at transaction time
 - [ ] Automatic split via Razorpay Route (club gets net, RunMitra gets cut)
-- [ ] Transaction history: per runner, per chapter, per org
+- [ ] Transaction history: per runner, per chapter, per org (no `transactions` table yet)
 - [ ] Finance dashboard for chapter admin: collected, pending, platform cut
 - [ ] Subscription billing: org pays RunMitra for base + per-member fee
 - [ ] Inventory CRUD: item name, category, quantity, size breakdown (JSONB)
