@@ -23,8 +23,15 @@ import (
 	"github.com/avinash/clubmitra/backend/internal/httpx"
 )
 
-// avatarFolder namespaces profile photos within the Cloudinary account.
-const avatarFolder = "clubmitra/avatars"
+// folders maps a client-supplied "kind" to the Cloudinary folder it may upload
+// into. The client never names a raw folder — it picks a kind, and the server
+// signs only an allowlisted path. Unknown/empty kinds fall back to avatars.
+var folders = map[string]string{
+	"avatar": "clubmitra/avatars", // profile photos
+	"club":   "clubmitra/clubs",   // club logos + banners
+}
+
+const defaultKind = "avatar"
 
 // Handler signs upload requests.
 type Handler struct {
@@ -45,6 +52,12 @@ func (h *Handler) Routes() http.Handler {
 	return r
 }
 
+// signatureRequest lets the client pick which kind of image it's uploading; the
+// server maps it to an allowlisted folder. Omitted = avatar (back-compat).
+type signatureRequest struct {
+	Kind string `json:"kind"`
+}
+
 func (h *Handler) signature(w http.ResponseWriter, r *http.Request) {
 	if _, ok := httpx.UserIDFromContext(r.Context()); !ok {
 		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
@@ -54,18 +67,31 @@ func (h *Handler) signature(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusServiceUnavailable, "image uploads are not configured")
 		return
 	}
+
+	// Body is optional; an empty/missing one defaults to avatar.
+	var req signatureRequest
+	_ = httpx.Decode(w, r, &req)
+	if req.Kind == "" {
+		req.Kind = defaultKind
+	}
+	folder, ok := folders[req.Kind]
+	if !ok {
+		httpx.Error(w, http.StatusBadRequest, "unknown upload kind")
+		return
+	}
+
 	ts := time.Now().Unix()
 	// These are the params the client will send (besides file/api_key) and that
 	// Cloudinary will therefore verify against the signature.
 	signed := map[string]string{
-		"folder":    avatarFolder,
+		"folder":    folder,
 		"timestamp": strconv.FormatInt(ts, 10),
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"cloud_name": h.cloud,
 		"api_key":    h.apiKey,
 		"timestamp":  ts,
-		"folder":     avatarFolder,
+		"folder":     folder,
 		"signature":  h.sign(signed),
 	})
 }

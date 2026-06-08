@@ -77,8 +77,11 @@ type createOrgRequest struct {
 	Description string `json:"description"`
 }
 
-// chapterSettingsFields are the fee/approval config, embedded in create+update.
+// chapterSettingsFields are the editable club config (media + fee/approval),
+// embedded in create+update.
 type chapterSettingsFields struct {
+	Logo              *string  `json:"logo"`   // Cloudinary URL or null to clear
+	Banner            *string  `json:"banner"` // Cloudinary URL or null to clear
 	RequiresApproval  *bool    `json:"requires_approval"`
 	FeeEnabled        *bool    `json:"membership_fee_enabled"`
 	FeeAmount         *float64 `json:"membership_fee_amount"`
@@ -90,6 +93,8 @@ type chapterSettingsFields struct {
 // fee off, 5-day renewal window) when fields are omitted.
 func (f chapterSettingsFields) toSettings() ChapterSettings {
 	s := ChapterSettings{
+		Logo:              f.Logo,
+		Banner:            f.Banner,
 		RequiresApproval:  f.RequiresApproval == nil || *f.RequiresApproval,
 		FeeEnabled:        f.FeeEnabled != nil && *f.FeeEnabled,
 		FeeAmount:         f.FeeAmount,

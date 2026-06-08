@@ -34,6 +34,8 @@ type Chapter struct {
 	Name        string    `json:"name"`
 	City        string    `json:"city"`
 	Description string    `json:"description"`
+	Logo        *string   `json:"logo,omitempty"`   // Cloudinary URL (circular mark)
+	Banner      *string   `json:"banner,omitempty"` // Cloudinary URL (wide hero)
 	IsPublic    bool      `json:"is_public"`
 	InviteCode  string    `json:"invite_code"`
 
@@ -49,9 +51,11 @@ type Chapter struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// ChapterSettings carries the editable club config (fee + approval). Used on
-// create and update.
+// ChapterSettings carries the editable club config — media (logo/banner) plus
+// fee + approval. Used on create and update.
 type ChapterSettings struct {
+	Logo              *string
+	Banner            *string
 	RequiresApproval  bool
 	FeeEnabled        bool
 	FeeAmount         *float64
@@ -61,7 +65,7 @@ type ChapterSettings struct {
 
 // chapterColumns is the shared SELECT/RETURNING list, kept in sync with
 // scanChapter. (membership_fee_amount is NUMERIC; pgx scans it into *float64.)
-const chapterColumns = `id, org_id, name, city, description, is_public, invite_code,
+const chapterColumns = `id, org_id, name, city, description, logo, banner, is_public, invite_code,
 	requires_approval, membership_fee_enabled, membership_fee_amount,
 	membership_period, renewal_window_days, created_at, updated_at`
 
@@ -69,7 +73,7 @@ const chapterColumns = `id, org_id, name, city, description, is_public, invite_c
 func scanChapterRow(s interface{ Scan(...any) error }) (*Chapter, error) {
 	var c Chapter
 	err := s.Scan(
-		&c.ID, &c.OrgID, &c.Name, &c.City, &c.Description, &c.IsPublic, &c.InviteCode,
+		&c.ID, &c.OrgID, &c.Name, &c.City, &c.Description, &c.Logo, &c.Banner, &c.IsPublic, &c.InviteCode,
 		&c.RequiresApproval, &c.FeeEnabled, &c.FeeAmount, &c.MembershipPeriod, &c.RenewalWindowDays,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
@@ -217,13 +221,13 @@ func (r *Repository) CreateChapter(ctx context.Context, orgID uuid.UUID, name, c
 	defer tx.Rollback(ctx) // no-op once Commit succeeds
 
 	const insertChapter = `
-		INSERT INTO chapters (org_id, name, city, description, invite_code,
+		INSERT INTO chapters (org_id, name, city, description, logo, banner, invite_code,
 		                      requires_approval, membership_fee_enabled, membership_fee_amount,
 		                      membership_period, renewal_window_days)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING ` + chapterColumns
 	chapter, err := scanChapterRow(tx.QueryRow(ctx, insertChapter,
-		orgID, name, city, description, inviteCode,
+		orgID, name, city, description, s.Logo, s.Banner, inviteCode,
 		s.RequiresApproval, s.FeeEnabled, s.FeeAmount, s.MembershipPeriod, s.RenewalWindowDays))
 	if err != nil {
 		return nil, err
@@ -292,12 +296,12 @@ func (r *Repository) GetChapter(ctx context.Context, id uuid.UUID) (*Chapter, er
 // UpdateChapter edits a chapter's editable fields plus its fee/approval settings.
 func (r *Repository) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, description string, isPublic bool, s ChapterSettings) (*Chapter, error) {
 	const q = `
-		UPDATE chapters SET name = $2, city = $3, description = $4, is_public = $5,
-		       requires_approval = $6, membership_fee_enabled = $7, membership_fee_amount = $8,
-		       membership_period = $9, renewal_window_days = $10
+		UPDATE chapters SET name = $2, city = $3, description = $4, logo = $5, banner = $6, is_public = $7,
+		       requires_approval = $8, membership_fee_enabled = $9, membership_fee_amount = $10,
+		       membership_period = $11, renewal_window_days = $12
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING ` + chapterColumns
-	c, err := scanChapterRow(r.db.QueryRow(ctx, q, id, name, city, description, isPublic,
+	c, err := scanChapterRow(r.db.QueryRow(ctx, q, id, name, city, description, s.Logo, s.Banner, isPublic,
 		s.RequiresApproval, s.FeeEnabled, s.FeeAmount, s.MembershipPeriod, s.RenewalWindowDays))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -315,7 +319,7 @@ func (r *Repository) SoftDeleteChapter(ctx context.Context, id uuid.UUID) error 
 // with the user's membership status and most-specific role.
 func (r *Repository) ListUserChapters(ctx context.Context, userID string) ([]MyChapter, error) {
 	const q = `
-		SELECT c.id, c.org_id, c.name, c.city, c.description, c.is_public, c.invite_code,
+		SELECT c.id, c.org_id, c.name, c.city, c.description, c.logo, c.banner, c.is_public, c.invite_code,
 		       c.requires_approval, c.membership_fee_enabled, c.membership_fee_amount,
 		       c.membership_period, c.renewal_window_days, c.created_at, c.updated_at,
 		       (SELECT m.status FROM chapter_members m
@@ -348,7 +352,7 @@ func (r *Repository) ListUserChapters(ctx context.Context, userID string) ([]MyC
 	for rows.Next() {
 		var m MyChapter
 		if err := rows.Scan(
-			&m.ID, &m.OrgID, &m.Name, &m.City, &m.Description, &m.IsPublic, &m.InviteCode,
+			&m.ID, &m.OrgID, &m.Name, &m.City, &m.Description, &m.Logo, &m.Banner, &m.IsPublic, &m.InviteCode,
 			&m.RequiresApproval, &m.FeeEnabled, &m.FeeAmount, &m.MembershipPeriod, &m.RenewalWindowDays,
 			&m.CreatedAt, &m.UpdatedAt, &m.Status, &m.Role,
 			&m.MemberCount, &m.ActiveChallengeCount,
