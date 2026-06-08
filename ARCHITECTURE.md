@@ -866,7 +866,7 @@ RAZORPAY_KEY_SECRET=your-key-secret
 RAZORPAY_WEBHOOK_SECRET=your-webhook-secret
 PLATFORM_CUT_PCT=10
 
-CLOUDINARY_URL=cloudinary://your-cloudinary-url
+<!-- CLOUDINARY_URL=CLOUDINARY_URL=cloudinary://<your_api_key>:<your_api_secret>@dz379pqkp -->
 ```
 
 > Current dev setup still uses `virtualrun` DB / ports 5433 + 6380 until the rename.
