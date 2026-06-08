@@ -1,9 +1,14 @@
 # ClubMitra — System Architecture
 
-> Standalone running-club operating system for India. ClubMitra owns identity —
-> no external auth dependency. A MarathonMitra product with its own backend,
-> database, and app. Phase 1 (club core) is complete; Phase 2 adds real payments,
-> trust scoring, rolling leaderboards, and analytics.
+> Standalone running-club operating system. ClubMitra owns identity — no external
+> auth dependency. A MarathonMitra product with its own backend, database, and app.
+> Phase 1 (club core) is complete; Phase 2 adds real payments, trust scoring,
+> rolling leaderboards, and analytics.
+>
+> **Market:** India first (Razorpay + INR). Global-ready from day one — provider-agnostic
+> payments, multi-currency, country + timezone-aware chapters. Europe expansion Month 7+
+> (Stripe + EUR/USD). The larger Epeak-parity surface (messaging, training sessions, GPX)
+> is **Phase 3**, deliberately split out so Phase 2 stays shippable.
 >
 > **Naming:** the code still ships as `RunMitra` / `virtual-run-tracker`
 > (DB `virtualrun`, ports 8090/5433/6380). The ClubMitra rename is a Phase 2 task.
@@ -45,15 +50,17 @@
 ┌──────┴──────────────────────────────────────┐
 │          External Services                   │
 │                                              │
-│  Razorpay + Route   payment + auto-split     │
+│  Razorpay + Route   INR payment + split (IN) │
+│  Stripe + Connect   EUR/USD payment + split  │
 │  Cloudinary         photos, certs, logos     │
 │  Expo Notifications push notifications       │
 └──────────────────────────────────────────────┘
 ```
 
 > Modules shown in the API box that are **not built yet**: trust, activities,
-> badges, finance/razorpay, inventory, analytics, rolling leaderboards. They are
-> the Phase 2–4 design targets documented below.
+> badges, finance, payments (razorpay + stripe), inventory, analytics, rolling
+> leaderboards. They are the Phase 2–4 design targets documented below. Messaging
+> and the unified sessions refactor are Phase 3.
 
 ---
 
@@ -69,7 +76,8 @@ Tokens         expo-secure-store (access + rotating refresh)
 Theming        lib/theme.tsx — light/dark palettes (live bindings), ThemeProvider
 Fonts          Inter, applied globally (Text.render patch maps weight → family)
 Push           expo-notifications — register token → POST /push/token; tap deep-links
-Media          expo-image-picker (local Phase 1; Cloudinary Phase 2)
+Media          expo-image-picker → Cloudinary signed upload (profile photo built;
+               club logos/banners Phase 2)
 ```
 
 > Design system: color/space/radius/type tokens, elevated cards, gradient heroes,
@@ -96,7 +104,7 @@ CREATE TABLE users (
     tshirt_size     TEXT,                     -- XS/S/M/L/XL/XXL
     city            TEXT,
     running_level   TEXT,                     -- beginner|amateur|intermediate|advanced
-    profile_photo   TEXT,                     -- local URI now; Cloudinary URL (Phase 2)
+    profile_photo   TEXT,                     -- Cloudinary URL (signed upload — built)
     is_verified     BOOLEAN DEFAULT false,
     -- Trust Score (Phase 2 — columns not yet added)
     trust_score     NUMERIC(5,2) DEFAULT 50,  -- 0–100, starts at 50
@@ -137,6 +145,8 @@ CREATE TABLE chapters (
     org_id                  UUID REFERENCES organisations(id),
     name                    TEXT NOT NULL,
     city                    TEXT NOT NULL,
+    country                 TEXT NOT NULL DEFAULT 'IN',  -- ISO 3166-1 alpha-2 (Phase 2)
+    timezone                TEXT NOT NULL DEFAULT 'Asia/Kolkata', -- (Phase 2)
     description             TEXT,
     logo                    TEXT,
     is_public               BOOLEAN DEFAULT true,
@@ -148,9 +158,11 @@ CREATE TABLE chapters (
     membership_period       TEXT,            -- 'monthly'|'annual'
     renewal_window_days     INT NOT NULL DEFAULT 5,
     -- Subscription plan (Phase 2 — not yet added)
-    plan                    TEXT NOT NULL DEFAULT 'starter', -- starter|growth|pro|enterprise
-    -- Razorpay (Phase 2)
-    razorpay_account_id     TEXT,
+    plan                    TEXT NOT NULL DEFAULT 'free', -- free|team|club|club_plus|enterprise
+    -- Payments (Phase 2) — provider chosen by currency
+    payment_currency        TEXT NOT NULL DEFAULT 'INR',  -- 'INR'|'USD'|'EUR'
+    razorpay_account_id     TEXT,            -- India KYC (INR)
+    stripe_account_id       TEXT,            -- Global Connect (USD/EUR)
     created_at              TIMESTAMPTZ DEFAULT now(),
     updated_at              TIMESTAMPTZ DEFAULT now(),
     deleted_at              TIMESTAMPTZ
@@ -572,13 +584,14 @@ CREATE TABLE transactions (
     payer_id            TEXT REFERENCES users(id),
     chapter_id          UUID REFERENCES chapters(id),
     org_id              UUID REFERENCES organisations(id),
-    reference_id        TEXT,           -- Razorpay order/payment ID
-    razorpay_route_id   TEXT,           -- Route transfer ID
+    payment_provider    TEXT NOT NULL,  -- 'razorpay'|'stripe'
+    reference_id        TEXT,           -- Razorpay order ID or Stripe PaymentIntent ID
+    transfer_id         TEXT,           -- Razorpay Route transfer or Stripe transfer ID
     gross_amount        NUMERIC(10,2) NOT NULL,
     platform_cut_pct    NUMERIC(5,2) NOT NULL,
     platform_cut_amount NUMERIC(10,2) NOT NULL,
     net_amount          NUMERIC(10,2) NOT NULL,
-    currency            TEXT DEFAULT 'INR',
+    currency            TEXT NOT NULL DEFAULT 'INR',  -- 'INR'|'USD'|'EUR'
     status              TEXT NOT NULL DEFAULT 'pending',
     -- 'pending'|'completed'|'failed'|'refunded'
     metadata            JSONB,
@@ -591,13 +604,15 @@ CREATE TABLE subscriptions (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id              UUID REFERENCES organisations(id),
     chapter_id          UUID REFERENCES chapters(id),
-    plan                TEXT NOT NULL,            -- 'starter'|'growth'|'pro'|'enterprise'
+    plan                TEXT NOT NULL,            -- 'free'|'team'|'club'|'club_plus'|'enterprise'
     member_limit        INT,                      -- enforced at join time
     amount              NUMERIC(10,2),
+    currency            TEXT NOT NULL DEFAULT 'INR',  -- 'INR'|'USD'|'EUR'
     billing_start       TIMESTAMPTZ,
     billing_end         TIMESTAMPTZ,
     status              TEXT DEFAULT 'active',    -- 'active'|'cancelled'|'expired'
-    razorpay_sub_id     TEXT,
+    payment_provider    TEXT,                     -- 'razorpay'|'stripe'
+    provider_sub_id     TEXT,                     -- Razorpay or Stripe subscription ID
     created_at          TIMESTAMPTZ DEFAULT now(),
     updated_at          TIMESTAMPTZ DEFAULT now(),
     deleted_at          TIMESTAMPTZ
@@ -640,22 +655,49 @@ Members will set their own status to `on_leave` via
 
 ## Payment Architecture *(Phase 2)*
 
-### Razorpay Route — full flow
+### Provider-agnostic design
+
+All payment logic goes through a single Go interface in `pkg/payments/`. The
+provider is selected at initiation from the chapter's `payment_currency` — adding
+a future provider needs only a new implementation, no business-logic changes.
+
+```go
+// pkg/payments/provider.go
+type Provider interface {
+    CreateOrder(ctx context.Context, req OrderRequest) (*Order, error)
+    VerifyWebhook(payload []byte, signature string) (*WebhookEvent, error)
+    InitiateTransfer(ctx context.Context, req TransferRequest) (*Transfer, error)
+    CreateConnectedAccount(ctx context.Context) (*ConnectedAccount, error)
+}
+```
+
+```
+pkg/payments/
+  ├── provider.go      # interface + shared types (amounts in minor units)
+  ├── razorpay/        # India — Razorpay + Razorpay Route (HMAC webhook)
+  └── stripe/          # Global — Stripe + Stripe Connect (signed webhook)
+
+Provider selection at initiation:
+  chapter.payment_currency == 'INR'        → Razorpay
+  chapter.payment_currency == 'USD'|'EUR'  → Stripe
+```
+
+### Razorpay Route — India flow
 
 ```
 Runner pays ₹500 membership fee to Bangalore Runners chapter
 
-Step 1: POST /api/v1/payments/initiate
-        → backend creates Razorpay Order
-        → inserts pending transaction:
-             gross=500, platform_cut_pct=10, platform_cut=50, net=450
+Step 1: POST /api/v1/payments/initiate     (currency=INR → Razorpay)
+        → create Razorpay Order
+        → insert pending transaction:
+             provider=razorpay, gross=500, cut_pct=10, cut=50, net=450, INR
 
-Step 2: Razorpay payment sheet opens on mobile
+Step 2: Razorpay payment sheet opens on mobile (UPI / card / netbanking)
 
-Step 3: Razorpay webhook → POST /api/v1/payments/webhook
+Step 3: POST /api/v1/payments/razorpay/webhook
         → verify HMAC signature
         → Razorpay Route auto-transfers:
-             ₹450 → chapter's linked bank account
+             ₹450 → chapter's linked bank account (razorpay_account_id)
              ₹50  → ClubMitra's Razorpay account
         → transaction.status = 'completed'
 
@@ -663,10 +705,33 @@ Step 4: chapter_members.status = 'active'
         chapter_members.fee_paid_until = now + membership_period
 ```
 
-### KYC gate
+### Stripe Connect — Global flow
 
-`membership_fee_enabled` cannot be set `true` while `razorpay_account_id IS NULL`.
-Enforced at the API layer — not just the DB.
+```
+Runner pays €12 membership fee to a London chapter
+
+Step 1: POST /api/v1/payments/initiate     (currency=EUR → Stripe)
+        → create PaymentIntent with application_fee_amount = 120 (10%)
+        → insert pending transaction:
+             provider=stripe, gross=1200, cut_pct=10, cut=120, net=1080, EUR (cents)
+
+Step 2: Stripe payment sheet opens on mobile
+
+Step 3: POST /api/v1/payments/stripe/webhook
+        → verify webhook signature
+        → Stripe Connect auto-transfers €10.80 → chapter account,
+          €1.20 application fee → ClubMitra
+        → transaction.status = 'completed'
+
+Step 4: Same membership activation as the Razorpay flow.
+```
+
+### KYC / onboarding gate
+
+`membership_fee_enabled` cannot be set `true` until the chapter's payment account
+is linked — `razorpay_account_id` (INR) or `stripe_account_id` (USD/EUR). Enforced
+at the API layer, not just the DB. Stripe uses Connect Express onboarding
+(`POST /api/v1/payments/stripe/connect/onboard` → URL → webhook confirms).
 
 ---
 
@@ -768,12 +833,14 @@ Hard deletes logged to audit_log before execution.
 ## Subscription Plan Enforcement *(Phase 2)*
 
 ```
-Plan limits enforced at chapter join time (not just billing):
+Plan limits enforced at chapter join time (not just billing).
+Prices INR (India) / EUR (Global), Epeak-aligned:
 
-  Starter (free)     → block join when active member count >= 50
-  Growth (₹999/mo)   → block join when active count >= 200
-  Pro (₹2,999/mo)    → block join when active count >= 1,000
-  Enterprise         → custom limit set on subscription record
+  Free                  → block join at active count >= 20    (1 admin)
+  Team  (₹749/€9 mo)    → block join at active count >= 50    (2 admins)
+  Club  (₹2,499/€34 mo) → block join at active count >= 300   (10 admins)
+  Club+ (₹2,499/€34 +)  → unlimited members (+₹800/100), unlimited admins
+  Enterprise            → custom limit set on subscription record
 
 When limit is hit:
   → 403 with error code MEMBER_LIMIT_REACHED
@@ -806,13 +873,16 @@ internal/activities/     GPS recording, GPX upload, trust pipeline,
 internal/members/        Member lifecycle state machine, self-service
                          on_leave endpoint                                [Phase 2]
 internal/inventory/      Item CRUD, size breakdown, issue/return/purchase [Phase 2]
-internal/finance/        Transactions, platform cut, Razorpay + webhook,
-                         dashboards, subscriptions                        [Phase 2]
+internal/finance/        Transactions, platform cut, dashboards,
+                         subscriptions, discount codes                    [Phase 2]
+internal/payments/       Currency-aware routing to pkg/payments provider  [Phase 2]
 internal/analytics/      Drop-off metrics, engagement, volume, cache      [Phase 2]
-internal/badges/         Badge definitions, milestone engine, XP          [Phase 4]
+internal/messaging/      Club + session chats, announcements, broadcasts  [Phase 3]
+internal/schedule/       Training plan builder, pace groups, sessions     [Phase 3]
+internal/badges/         Badge definitions, milestone engine, XP          [Phase 5]
 pkg/middleware/          JWT validation, permission checks, rate limiting
-pkg/razorpay/            Razorpay client, Route transfer, webhook verify   [Phase 2]
-pkg/geo/                 PostGIS distance + elevation, coordinate validation [Phase 3]
+pkg/payments/            Provider interface + razorpay/ + stripe/ impls    [Phase 2]
+pkg/geo/                 PostGIS distance + elevation, coordinate validation [Phase 4]
 ```
 
 ---
@@ -820,13 +890,15 @@ pkg/geo/                 PostGIS distance + elevation, coordinate validation [Ph
 ## Phase 2 Build Sequence
 
 ```
-Week 1 — Real payments
-  Razorpay Route client in pkg/razorpay/
-  payments/initiate + payments/webhook endpoints
-  transactions + subscriptions tables
-  Replace MOCK membership + challenge-fee flows with real Razorpay
+Week 1 — Real payments (provider-agnostic)
+  pkg/payments/ interface + razorpay/ + stripe/ impls
+  internal/payments/initiate (currency → provider routing)
+  payments/razorpay/webhook + payments/stripe/webhook
+  country + timezone + payment_currency + stripe_account_id on chapters
+  transactions + subscriptions + discount_codes tables
+  Replace MOCK membership + challenge-fee flows with real payments
   Finance dashboard API (collected/pending/platform cut)
-  Subscription plan enforcement at join time
+  Subscription plan enforcement at join time (Free/Team/Club/Club+/Enterprise)
 
 Week 2 — Trust + Activity pipeline
   trust_score + trust_tier on users; trust_score_log table
@@ -839,11 +911,35 @@ Week 3 — Rolling leaderboards + Analytics
   Rolling leaderboard API (4 per chapter)
   Analytics cache table + drop-off / engagement / volume endpoints
 
-Week 4 — Extended member states + Inventory + Cloudinary
+Week 4 — Extended member states + Inventory + Cloudinary + Cleanup
   on_leave/injured/alumni + self-service endpoint
   Inventory tables + CRUD + issue/return/purchase + platform cut
-  Cloudinary for profile photos + logos
+  Cloudinary for club logos + banners (profile photo already built)
   ClubMitra rename (module, DB, env) · E2E testing · soft-launch prep
+```
+
+---
+
+## Phase 3 — Epeak Parity *(deferred from Phase 2)*
+
+```
+The big new subsystems, split out of Phase 2 to keep each phase shippable:
+
+Messaging       conversations + messages + message_reads tables;
+                club + session chats, media sharing, pinned messages,
+                announcement broadcast (push + email via SendGrid);
+                desktop admin web panel (admin.clubmitra.in).
+
+Sessions        Unified `sessions` table (session_type = training | community_run),
+                migrated from the built `runs`/`run_attendance` tables — runs stays
+                as-is until this migration. Adds session_groups (pace groups),
+                multi-option workouts, RSVP/waitlist, recurring sessions.
+
+GPX + nav       GPX upload on events → Cloudinary route map + elevation;
+                deep-link to Waze / Google / Apple Maps; GPX download.
+
+Join flows      club rules acceptance, scheduled registration open,
+                bulk invite by CSV.
 ```
 
 ---
@@ -860,13 +956,20 @@ JWT_REFRESH_SECRET=your-refresh-secret-here
 PORT=8090
 ENV=development
 
-# Phase 2
+# Payments — Phase 2
+# India
 RAZORPAY_KEY_ID=your-key-id
 RAZORPAY_KEY_SECRET=your-key-secret
 RAZORPAY_WEBHOOK_SECRET=your-webhook-secret
+# Global
+STRIPE_SECRET_KEY=sk_live_xxxxx
+STRIPE_WEBHOOK_SECRET=whsec_xxxxx
+STRIPE_CONNECT_CLIENT_ID=ca_xxxxx
+# Shared
 PLATFORM_CUT_PCT=10
 
-<!-- CLOUDINARY_URL=CLOUDINARY_URL=cloudinary://<your_api_key>:<your_api_secret>@dz379pqkp -->
+# Storage
+CLOUDINARY_URL=cloudinary://your-cloudinary-url
 ```
 
 > Current dev setup still uses `virtualrun` DB / ports 5433 + 6380 until the rename.
@@ -882,7 +985,8 @@ PLATFORM_CUT_PCT=10
 | Upstash | Redis | Free (10k req/day) |
 | Cloudinary | Photos, certs, logos | Free (25 GB) |
 | Expo EAS | App builds | Free |
+| SendGrid | Email (Phase 3) | Free (100/day) |
 
 ---
 
-*ClubMitra — Built for Indian running clubs.*
+*ClubMitra — Built for running clubs. India first, global-ready.*
