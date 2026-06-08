@@ -41,6 +41,12 @@
           "locationWhenInUsePermission": "ClubMitra uses your location to record your run route, distance, and pace."
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ClubMitra uses your photos so you can set a profile photo and club logo."
+        }
+      ],
       "expo-font"
     ],
     "experiments": {
