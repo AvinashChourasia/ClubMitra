@@ -41,7 +41,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Avatar } from "../../components/Avatar";
 import { RunScheduleView } from "../../components/RunScheduleView";
 
-type Tab = "members" | "schedule" | "challenges" | "leaderboard" | "insights";
+type Tab = "members" | "schedule" | "challenges" | "leaderboard" | "manage";
 
 const MEDAL = ["#FACC15", "#CBD5E1", "#D8965B"]; // gold / silver / bronze
 
@@ -135,27 +135,47 @@ function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId
   );
 }
 
-// InsightsTab — admin-only chapter health: engagement, drop-off, weekly volume.
+// ToolRow — a settings-style row for the admin Manage console.
+function ToolRow({ icon, label, onPress, danger, last }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean; last?: boolean }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14, borderBottomWidth: last ? 0 : 1, borderBottomColor: colors.border }}
+    >
+      <Ionicons name={icon} size={20} color={danger ? colors.danger : colors.accent} />
+      <Text style={{ flex: 1, color: danger ? colors.danger : colors.text, fontWeight: "600" }}>{label}</Text>
+      {!danger && <Ionicons name="chevron-forward" size={18} color={colors.subtle} />}
+    </Pressable>
+  );
+}
+
+// InsightsTab — chapter health: engagement, drop-off, weekly volume. Shown inside
+// the Manage console to roles allowed analytics (org / chapter admin).
 function InsightsTab({ chapterId, getToken }: { chapterId: string; getToken: () => Promise<string | null> }) {
   const [eng, setEng] = useState<Engagement | null>(null);
   const [drop, setDrop] = useState<Dropoff | null>(null);
   const [vol, setVol] = useState<VolumePoint[] | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
       (async () => {
-        const token = await getToken();
-        if (!token) return;
-        const [e, d, v] = await Promise.all([
-          getEngagement(token, chapterId),
-          getDropoff(token, chapterId),
-          getVolume(token, chapterId),
-        ]);
-        if (active) {
-          setEng(e);
-          setDrop(d);
-          setVol(v);
+        try {
+          const token = await getToken();
+          if (!token) return;
+          const [e, d, v] = await Promise.all([
+            getEngagement(token, chapterId),
+            getDropoff(token, chapterId),
+            getVolume(token, chapterId),
+          ]);
+          if (active) {
+            setEng(e);
+            setDrop(d);
+            setVol(v);
+          }
+        } catch {
+          if (active) setFailed(true);
         }
       })();
       return () => {
@@ -164,6 +184,9 @@ function InsightsTab({ chapterId, getToken }: { chapterId: string; getToken: () 
     }, [getToken, chapterId])
   );
 
+  if (failed) {
+    return <Text style={{ color: colors.muted, marginTop: 12 }}>Couldn&apos;t load insights.</Text>;
+  }
   if (!eng || !drop || !vol) {
     return <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />;
   }
@@ -291,6 +314,9 @@ export default function ClubDetail() {
 
   const isAdmin = isChapterAdmin(role);
   const isOwner = role === "org_admin";
+  // Analytics is allowed to org + chapter admins only (not co-admins) — matches
+  // the backend gate, and avoids a co-admin hitting a 403 in the Insights panel.
+  const canViewInsights = role === "org_admin" || role === "chapter_admin";
 
   // Header content (logo avatar + name/city + edit), rendered over the club
   // banner when one is set, otherwise over the brand gradient.
@@ -312,11 +338,6 @@ export default function ClubDetail() {
       <Pressable onPress={() => router.push(`/club/chat/${id}`)} hitSlop={10}>
         <Ionicons name="chatbubbles-outline" size={22} color="#fff" />
       </Pressable>
-      {isAdmin && (
-        <Pressable onPress={() => router.push(`/club/edit/${id}`)} hitSlop={10}>
-          <Ionicons name="create-outline" size={22} color="#fff" />
-        </Pressable>
-      )}
     </>
   );
 
@@ -497,7 +518,7 @@ export default function ClubDetail() {
                   ["schedule", "Schedule"],
                   ["challenges", "Challenges"],
                   ["leaderboard", "Leaders"],
-                  ...(isAdmin ? [["insights", "Insights"] as [Tab, string]] : []),
+                  ...(isAdmin ? [["manage", "Manage"] as [Tab, string]] : []),
                 ] as [Tab, string][]
               ).map(([key, label]) => (
                 <Pressable
@@ -547,23 +568,6 @@ export default function ClubDetail() {
                     </>
                   )}
                 </View>
-                {isAdmin && (
-                  <Pressable
-                    onPress={() => router.push(`/club/inventory/${id}`)}
-                    style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, borderRadius: 14, paddingVertical: 13 }}
-                  >
-                    <Ionicons name="cube-outline" size={18} color={colors.accent} />
-                    <Text style={{ color: colors.accent, fontWeight: "700" }}>Manage inventory</Text>
-                  </Pressable>
-                )}
-                {isOwner && (
-                  <Pressable
-                    onPress={confirmDelete}
-                    style={{ borderWidth: 1, borderColor: colors.danger, backgroundColor: colors.bg, borderRadius: 14, paddingVertical: 13, alignItems: "center" }}
-                  >
-                    <Text style={{ color: colors.danger, fontWeight: "700" }}>Delete club</Text>
-                  </Pressable>
-                )}
               </>
             )}
 
@@ -621,8 +625,18 @@ export default function ClubDetail() {
             {/* --- Leaderboard tab --- */}
             {tab === "leaderboard" && <LeaderboardTab chapterId={id} meId={user.id} getToken={getAccessToken} />}
 
-            {/* --- Insights tab (admin only) --- */}
-            {tab === "insights" && isAdmin && <InsightsTab chapterId={id} getToken={getAccessToken} />}
+            {/* --- Manage tab (admin console: tools + insights) --- */}
+            {tab === "manage" && isAdmin && (
+              <>
+                <View style={styles.card}>
+                  <Text style={styles.sectionTitle}>Club tools</Text>
+                  <ToolRow icon="create-outline" label="Edit club details" onPress={() => router.push(`/club/edit/${id}`)} />
+                  <ToolRow icon="cube-outline" label="Inventory" onPress={() => router.push(`/club/inventory/${id}`)} last={!isOwner} />
+                  {isOwner && <ToolRow icon="trash-outline" label="Delete club" danger last onPress={confirmDelete} />}
+                </View>
+                {canViewInsights && <InsightsTab chapterId={id} getToken={getAccessToken} />}
+              </>
+            )}
           </>
         ) : null}
       </ScrollView>
