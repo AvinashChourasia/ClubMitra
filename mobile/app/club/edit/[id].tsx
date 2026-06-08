@@ -20,7 +20,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../../lib/auth";
 import { ApiError } from "../../../lib/api";
 import { getChapter, updateChapter } from "../../../lib/clubs";
+import { uploadClubImage, isRemote } from "../../../lib/upload";
 import { colors, styles } from "../../../lib/theme";
+import { PhotoPicker } from "../../../components/PhotoPicker";
 import { CityPicker } from "../../../components/CityPicker";
 import { ClubFeeFields, defaultFeeState, feeSettings, type FeeState } from "../../../components/ClubFeeFields";
 
@@ -32,6 +34,8 @@ export default function EditClub() {
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [description, setDescription] = useState("");
+  const [logo, setLogo] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(true);
   const [fee, setFee] = useState<FeeState>(defaultFeeState);
   const [loading, setLoading] = useState(true);
@@ -49,6 +53,8 @@ export default function EditClub() {
             setName(ch.name);
             setCity(ch.city);
             setDescription(ch.description);
+            setLogo(ch.logo ?? null);
+            setBanner(ch.banner ?? null);
             setIsPublic(ch.is_public);
             setFee({
               requiresApproval: ch.requires_approval,
@@ -77,7 +83,18 @@ export default function EditClub() {
     setSaving(true);
     try {
       const token = await getAccessToken();
-      await updateChapter(token!, id, { name: name.trim(), city: city.trim(), description: description.trim(), is_public: isPublic, ...feeSettings(fee) });
+      // Upload freshly-picked images; an unchanged remote URL is reused, null clears it.
+      const logoUrl = logo && !isRemote(logo) ? await uploadClubImage(token!, logo) : logo;
+      const bannerUrl = banner && !isRemote(banner) ? await uploadClubImage(token!, banner) : banner;
+      await updateChapter(token!, id, {
+        name: name.trim(),
+        city: city.trim(),
+        description: description.trim(),
+        is_public: isPublic,
+        logo: logoUrl,
+        banner: bannerUrl,
+        ...feeSettings(fee),
+      });
       router.back();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong");
@@ -99,6 +116,11 @@ export default function EditClub() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Edit club</Text>
+
+          <PhotoPicker uri={logo} onChange={setLogo} label="Add club logo" />
+
+          <Text style={styles.fieldLabel}>Banner (optional)</Text>
+          <PhotoPicker uri={banner} onChange={setBanner} label="Add club banner" shape="banner" size={120} />
 
           <Text style={styles.fieldLabel}>Club name</Text>
           <TextInput style={styles.input} placeholder="Club name" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />

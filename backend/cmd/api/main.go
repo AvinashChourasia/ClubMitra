@@ -43,9 +43,9 @@ func main() {
 
 	// 2. Connect to the database (with a startup timeout so we don't hang
 	//    forever if it's unreachable).
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := database.Connect(ctx, cfg.DatabaseURL)
+	dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer dbCancel()
+	pool, err := database.Connect(dbCtx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("database: %v", err)
 	}
@@ -59,8 +59,13 @@ func main() {
 	}
 	log.Println("migrations up to date")
 
-	// 2b. Connect to Redis (powers the challenge leaderboards).
-	rdb, err := database.ConnectRedis(ctx, cfg.RedisURL)
+	// 2b. Connect to Redis (powers the challenge leaderboards). Use a FRESH
+	//     timeout: sharing one deadline with the DB connect + migrations meant a
+	//     slow (cold) database could exhaust the budget before we got here, making
+	//     this ping fail with a spurious "context deadline exceeded".
+	redisCtx, redisCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer redisCancel()
+	rdb, err := database.ConnectRedis(redisCtx, cfg.RedisURL)
 	if err != nil {
 		log.Fatalf("redis: %v", err)
 	}

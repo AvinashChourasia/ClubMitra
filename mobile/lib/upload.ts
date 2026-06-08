@@ -13,19 +13,23 @@ type SignatureResp = {
   signature: string;
 };
 
+// ImageKind picks which allowlisted Cloudinary folder the server signs.
+type ImageKind = "avatar" | "club";
+
 // isRemote tells an already-uploaded (http/https) URL from a freshly-picked
 // local file URI, so we never re-upload an unchanged photo.
 export function isRemote(uri: string | null | undefined): boolean {
   return !!uri && /^https?:\/\//.test(uri);
 }
 
-// uploadAvatar uploads a local image and returns its Cloudinary secure URL.
-export async function uploadAvatar(token: string, localUri: string): Promise<string> {
-  const sig = await request<SignatureResp>("/uploads/signature", { method: "POST", token, body: {} });
+// uploadImage signs a request for the given kind, then uploads the local file
+// DIRECTLY to Cloudinary and returns the hosted secure URL.
+export async function uploadImage(token: string, localUri: string, kind: ImageKind): Promise<string> {
+  const sig = await request<SignatureResp>("/uploads/signature", { method: "POST", token, body: { kind } });
 
   const form = new FormData();
   // React Native's FormData accepts this {uri,type,name} shape for files.
-  form.append("file", { uri: localUri, type: "image/jpeg", name: "avatar.jpg" } as unknown as Blob);
+  form.append("file", { uri: localUri, type: "image/jpeg", name: `${kind}.jpg` } as unknown as Blob);
   form.append("api_key", sig.api_key);
   form.append("timestamp", String(sig.timestamp));
   form.append("folder", sig.folder);
@@ -41,4 +45,14 @@ export async function uploadAvatar(token: string, localUri: string): Promise<str
   const data = (await res.json()) as { secure_url?: string };
   if (!data.secure_url) throw new Error("Upload succeeded but no URL returned");
   return data.secure_url;
+}
+
+// uploadAvatar uploads a profile photo. Thin wrapper kept for existing callers.
+export function uploadAvatar(token: string, localUri: string): Promise<string> {
+  return uploadImage(token, localUri, "avatar");
+}
+
+// uploadClubImage uploads a club logo or banner.
+export function uploadClubImage(token: string, localUri: string): Promise<string> {
+  return uploadImage(token, localUri, "club");
 }

@@ -4,7 +4,7 @@
 // promote members and soft-delete the club. Role comes from /chapters/mine.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Share, Text, View } from "react-native";
+import { ActivityIndicator, Alert, ImageBackground, Pressable, RefreshControl, ScrollView, Share, Text, View } from "react-native";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
@@ -199,6 +199,31 @@ export default function ClubDetail() {
   const isAdmin = isChapterAdmin(role);
   const isOwner = role === "org_admin";
 
+  // Header content (logo avatar + name/city + edit), rendered over the club
+  // banner when one is set, otherwise over the brand gradient.
+  const headerInner = chapter && (
+    <>
+      <View style={{ borderWidth: 2, borderColor: "rgba(255,255,255,0.5)", borderRadius: 32 }}>
+        <Avatar name={chapter.name} uri={chapter.logo} size={56} bg="rgba(255,255,255,0.18)" />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 21, fontWeight: "800", color: "#fff", letterSpacing: -0.3 }}>{chapter.name}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 3 }}>
+          <Ionicons name="location" size={13} color="rgba(255,255,255,0.9)" />
+          <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 13, fontWeight: "600" }}>
+            {chapter.city}
+            {members ? ` · ${members.length} member${members.length === 1 ? "" : "s"}` : ""}
+          </Text>
+        </View>
+      </View>
+      {isAdmin && (
+        <Pressable onPress={() => router.push(`/club/edit/${id}`)} hitSlop={10}>
+          <Ionicons name="create-outline" size={22} color="#fff" />
+        </Pressable>
+      )}
+    </>
+  );
+
   async function onRefresh() {
     setRefreshing(true);
     try {
@@ -306,32 +331,27 @@ export default function ClubDetail() {
           <Text style={{ color: colors.danger }}>{error}</Text>
         ) : chapter ? (
           <>
-            {/* Gradient header */}
-            <LinearGradient
-              colors={gradients.red}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={{ borderRadius: 22, padding: 20, flexDirection: "row", alignItems: "center", gap: 14, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 5 }}
-            >
-              <View style={{ borderWidth: 2, borderColor: "rgba(255,255,255,0.5)", borderRadius: 32 }}>
-                <Avatar name={chapter.name} size={56} bg="rgba(255,255,255,0.18)" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 21, fontWeight: "800", color: "#fff", letterSpacing: -0.3 }}>{chapter.name}</Text>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 3 }}>
-                  <Ionicons name="location" size={13} color="rgba(255,255,255,0.9)" />
-                  <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 13, fontWeight: "600" }}>
-                    {chapter.city}
-                    {members ? ` · ${members.length} member${members.length === 1 ? "" : "s"}` : ""}
-                  </Text>
+            {/* Header — banner image when set, else the brand gradient */}
+            {chapter.banner ? (
+              <ImageBackground
+                source={{ uri: chapter.banner }}
+                imageStyle={{ borderRadius: 22 }}
+                style={{ borderRadius: 22, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 5 }}
+              >
+                <View style={{ borderRadius: 22, padding: 20, flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: "rgba(11,18,32,0.45)" }}>
+                  {headerInner}
                 </View>
-              </View>
-              {isAdmin && (
-                <Pressable onPress={() => router.push(`/club/edit/${id}`)} hitSlop={10}>
-                  <Ionicons name="create-outline" size={22} color="#fff" />
-                </Pressable>
-              )}
-            </LinearGradient>
+              </ImageBackground>
+            ) : (
+              <LinearGradient
+                colors={gradients.red}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={{ borderRadius: 22, padding: 20, flexDirection: "row", alignItems: "center", gap: 14, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 5 }}
+              >
+                {headerInner}
+              </LinearGradient>
+            )}
 
             {/* Invite code (compact) */}
             <View style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12 }]}>

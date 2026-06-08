@@ -10,6 +10,8 @@ export type Chapter = {
   name: string;
   city: string;
   description: string;
+  logo?: string | null;
+  banner?: string | null;
   is_public: boolean;
   invite_code: string;
   requires_approval: boolean;
@@ -21,8 +23,10 @@ export type Chapter = {
   updated_at: string;
 };
 
-// Fee + approval config, set on create/update.
+// Editable club config (media + fee/approval), set on create/update.
 export type ClubSettings = {
+  logo?: string | null;
+  banner?: string | null;
   requires_approval?: boolean;
   membership_fee_enabled?: boolean;
   membership_fee_amount?: number;

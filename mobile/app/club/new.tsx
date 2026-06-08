@@ -19,6 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../lib/auth";
 import { ApiError } from "../../lib/api";
 import { createOrg, createChapter } from "../../lib/clubs";
+import { uploadClubImage, isRemote } from "../../lib/upload";
 import { colors, styles } from "../../lib/theme";
 import { PhotoPicker } from "../../components/PhotoPicker";
 import { CityPicker } from "../../components/CityPicker";
@@ -33,6 +34,7 @@ export default function NewClub() {
   const [city, setCity] = useState("");
   const [description, setDescription] = useState("");
   const [logo, setLogo] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
   const [fee, setFee] = useState<FeeState>(defaultFeeState);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -46,8 +48,15 @@ export default function NewClub() {
     setSubmitting(true);
     try {
       const token = await getAccessToken();
+      // Upload freshly-picked images first; persist the hosted URLs on the chapter.
+      const logoUrl = logo && !isRemote(logo) ? await uploadClubImage(token!, logo) : logo ?? undefined;
+      const bannerUrl = banner && !isRemote(banner) ? await uploadClubImage(token!, banner) : banner ?? undefined;
       const org = await createOrg(token!, orgName.trim(), description.trim());
-      const chapter = await createChapter(token!, org.id, chapterName.trim(), city.trim(), description.trim(), feeSettings(fee));
+      const chapter = await createChapter(token!, org.id, chapterName.trim(), city.trim(), description.trim(), {
+        ...feeSettings(fee),
+        logo: logoUrl,
+        banner: bannerUrl,
+      });
       router.replace(`/club/${chapter.id}`);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong");
@@ -64,6 +73,9 @@ export default function NewClub() {
           <Text style={styles.subtitle}>You&apos;ll be its admin. Add a city chapter to start.</Text>
 
           <PhotoPicker uri={logo} onChange={setLogo} label="Add club logo" />
+
+          <Text style={styles.fieldLabel}>Banner (optional)</Text>
+          <PhotoPicker uri={banner} onChange={setBanner} label="Add club banner" shape="banner" size={120} />
 
           <Text style={styles.fieldLabel}>Organisation name</Text>
           <TextInput style={styles.input} placeholder="e.g. XYZ Running Academy" placeholderTextColor={colors.muted} value={orgName} onChangeText={setOrgName} />
