@@ -2,13 +2,15 @@
 
 > Standalone running-club operating system. ClubMitra owns identity — no external
 > auth dependency. A MarathonMitra product with its own backend, database, and app.
-> Phase 1 (club core) is complete; Phase 2 adds real payments, trust scoring,
-> rolling leaderboards, and analytics.
+> Phase 1 (club core) is complete; Phase 2 adds trust scoring, rolling leaderboards,
+> analytics, inventory, and in-app messaging — all self-contained, no external setup.
 >
 > **Market:** India first (Razorpay + INR). Global-ready from day one — provider-agnostic
 > payments, multi-currency, country + timezone-aware chapters. Europe expansion Month 7+
-> (Stripe + EUR/USD). The larger Epeak-parity surface (messaging, training sessions, GPX)
-> is **Phase 3**, deliberately split out so Phase 2 stays shippable.
+> (Stripe + EUR/USD). **Real payments are Phase 3** — gated by merchant KYC (Razorpay
+> Route / Stripe Connect), so they're sequenced after the self-contained Phase 2 work.
+> GPX and the desktop admin panel are also Phase 3. The `runs → sessions` refactor is
+> dropped — training-session features extend the built `runs` table in place.
 >
 > **Naming:** the code still ships as `RunMitra` / `virtual-run-tracker`
 > (DB `virtualrun`, ports 8090/5433/6380). The ClubMitra rename is a Phase 2 task.
@@ -59,8 +61,10 @@
 
 > Modules shown in the API box that are **not built yet**: trust, activities,
 > badges, finance, payments (razorpay + stripe), inventory, analytics, rolling
-> leaderboards. They are the Phase 2–4 design targets documented below. Messaging
-> and the unified sessions refactor are Phase 3.
+> leaderboards, messaging. **Phase 2:** trust, rolling leaderboards, analytics,
+> inventory, messaging. **Phase 3:** payments (razorpay + stripe), GPX, desktop
+> admin. There is no unified sessions refactor — training-session fields extend
+> the built `runs` table.
 
 ---
 
@@ -145,8 +149,8 @@ CREATE TABLE chapters (
     org_id                  UUID REFERENCES organisations(id),
     name                    TEXT NOT NULL,
     city                    TEXT NOT NULL,
-    country                 TEXT NOT NULL DEFAULT 'IN',  -- ISO 3166-1 alpha-2 (Phase 2)
-    timezone                TEXT NOT NULL DEFAULT 'Asia/Kolkata', -- (Phase 2)
+    country                 TEXT NOT NULL DEFAULT 'IN',  -- ISO 3166-1 alpha-2 (Phase 3)
+    timezone                TEXT NOT NULL DEFAULT 'Asia/Kolkata', -- (Phase 3)
     description             TEXT,
     logo                    TEXT,
     is_public               BOOLEAN DEFAULT true,
@@ -159,7 +163,7 @@ CREATE TABLE chapters (
     renewal_window_days     INT NOT NULL DEFAULT 5,
     -- Subscription plan (Phase 2 — not yet added)
     plan                    TEXT NOT NULL DEFAULT 'free', -- free|team|club|club_plus|enterprise
-    -- Payments (Phase 2) — provider chosen by currency
+    -- Payments (Phase 3) — provider chosen by currency
     payment_currency        TEXT NOT NULL DEFAULT 'INR',  -- 'INR'|'USD'|'EUR'
     razorpay_account_id     TEXT,            -- India KYC (INR)
     stripe_account_id       TEXT,            -- Global Connect (USD/EUR)
@@ -271,7 +275,7 @@ CREATE TABLE challenges (
     start_date      TIMESTAMPTZ NOT NULL,
     end_date        TIMESTAMPTZ NOT NULL,
     allow_teams     BOOLEAN DEFAULT true,
-    join_fee        NUMERIC(10,2),   -- MOCK payment until Phase 2
+    join_fee        NUMERIC(10,2),   -- MOCK payment until Phase 3
     lock_date       TIMESTAMPTZ,     -- leaving closes here (else at start)
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now(),
@@ -340,6 +344,50 @@ CREATE TABLE device_tokens (
 > admins; approval → member; challenge created → chapter members; proof verified →
 > submitter; rank change → displaced runner (Phase 2); milestone earned → member (Phase 4).
 > Real delivery requires an EAS dev/prod build (Expo Go can't receive remote push).
+
+---
+
+### Messaging Layer *(Phase 2 — new)*
+
+```
+One conversation per context. Chapter chat = one per chapter; event chat = one
+per run (members who attend/RSVP). v1 delivery is pull-on-open (poll), no
+websockets. Media reuses the existing Cloudinary signed-upload flow.
+Announcements set is_announcement = true → fan out via push (and email, SendGrid).
+```
+
+```sql
+CREATE TABLE conversations (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chapter_id  UUID REFERENCES chapters(id),
+    run_id      UUID REFERENCES runs(id),     -- nullable; set for event chat
+    type        TEXT NOT NULL,                -- 'chapter'|'event'
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE messages (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID REFERENCES conversations(id),
+    sender_id       TEXT REFERENCES users(id),
+    body            TEXT,
+    media_url       TEXT,            -- Cloudinary URL (image/video/file)
+    media_type      TEXT,            -- 'image'|'video'|'file'
+    is_pinned       BOOLEAN DEFAULT false,
+    is_announcement BOOLEAN DEFAULT false,  -- broadcast = push (+ email)
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+
+CREATE TABLE message_reads (
+    user_id         TEXT REFERENCES users(id),
+    conversation_id UUID REFERENCES conversations(id),
+    last_read_at    TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, conversation_id)
+);
+```
+
+> Desktop admin web panel (admin.clubmitra.in) is **Phase 3** — a separate
+> frontend surface, kept out of the Phase 2 in-app messaging scope.
 
 ---
 
@@ -570,7 +618,7 @@ CREATE TABLE inventory_transactions (
 
 ---
 
-### Finance Layer *(Phase 2 — NOT built; planned design)*
+### Finance Layer *(Phase 3 — NOT built; planned design)*
 
 > Today membership + challenge fees use a MOCK step (confirm → activate). No
 > `transactions` or `subscriptions` tables, Razorpay, or platform cut exist yet.
@@ -653,7 +701,7 @@ Members will set their own status to `on_leave` via
 
 ---
 
-## Payment Architecture *(Phase 2)*
+## Payment Architecture *(Phase 3)*
 
 ### Provider-agnostic design
 
@@ -830,7 +878,7 @@ Hard deletes logged to audit_log before execution.
 
 ---
 
-## Subscription Plan Enforcement *(Phase 2)*
+## Subscription Plan Enforcement *(Phase 3)*
 
 ```
 Plan limits enforced at chapter join time (not just billing).
@@ -872,16 +920,17 @@ internal/activities/     GPS recording, GPX upload, trust pipeline,
                          challenge + leaderboard auto-credit              [Phase 3]
 internal/members/        Member lifecycle state machine, self-service
                          on_leave endpoint                                [Phase 2]
-internal/inventory/      Item CRUD, size breakdown, issue/return/purchase [Phase 2]
-internal/finance/        Transactions, platform cut, dashboards,
-                         subscriptions, discount codes                    [Phase 2]
-internal/payments/       Currency-aware routing to pkg/payments provider  [Phase 2]
+internal/inventory/      Item CRUD, size breakdown, issue/return         [Phase 2]
+                         (paid purchase + platform cut — Phase 3)
+internal/messaging/      Club + event chats, announcements, broadcasts   [Phase 2]
 internal/analytics/      Drop-off metrics, engagement, volume, cache      [Phase 2]
-internal/messaging/      Club + session chats, announcements, broadcasts  [Phase 3]
-internal/schedule/       Training plan builder, pace groups, sessions     [Phase 3]
+internal/finance/        Transactions, platform cut, dashboards,
+                         subscriptions, discount codes                    [Phase 3]
+internal/payments/       Currency-aware routing to pkg/payments provider  [Phase 3]
+internal/schedule/       Training-session fields on runs, pace groups     [Phase 3]
 internal/badges/         Badge definitions, milestone engine, XP          [Phase 5]
 pkg/middleware/          JWT validation, permission checks, rate limiting
-pkg/payments/            Provider interface + razorpay/ + stripe/ impls    [Phase 2]
+pkg/payments/            Provider interface + razorpay/ + stripe/ impls    [Phase 3]
 pkg/geo/                 PostGIS distance + elevation, coordinate validation [Phase 4]
 ```
 
@@ -889,57 +938,59 @@ pkg/geo/                 PostGIS distance + elevation, coordinate validation [Ph
 
 ## Phase 2 Build Sequence
 
+> All Phase 2 work is self-contained — no external accounts or KYC. Off the build
+> clock, in parallel: open Razorpay Route + Stripe Connect merchant accounts and
+> start KYC so Phase 3 payments aren't blocked.
+
 ```
-Week 1 — Real payments (provider-agnostic)
-  pkg/payments/ interface + razorpay/ + stripe/ impls
-  internal/payments/initiate (currency → provider routing)
-  payments/razorpay/webhook + payments/stripe/webhook
-  country + timezone + payment_currency + stripe_account_id on chapters
-  transactions + subscriptions + discount_codes tables
-  Replace MOCK membership + challenge-fee flows with real payments
-  Finance dashboard API (collected/pending/platform cut)
-  Subscription plan enforcement at join time (Free/Team/Club/Club+/Enterprise)
+Week 1 — Rolling leaderboards
+  Rolling Redis keys (daily/weekly/monthly/alltime) + Lua atomic ZINCRBY
+  Rolling leaderboard API (4 per chapter); self-heal from Postgres
 
 Week 2 — Trust + Activity pipeline
   trust_score + trust_tier on users; trust_score_log table
   submission_method + trust_weight on challenge_proof
   Trust pipeline (Stage 1–5) + admin activity review queue
-  Trust recalculation after each approve/reject
+  Trust recalculation after each approve/reject; leaderboard write applies weight
 
-Week 3 — Rolling leaderboards + Analytics
-  Rolling Redis keys (daily/weekly/monthly/alltime) + Lua atomic ZINCRBY
-  Rolling leaderboard API (4 per chapter)
+Week 3 — Analytics + Extended member states
   Analytics cache table + drop-off / engagement / volume endpoints
+  on_leave/injured/alumni + self-service status endpoint
 
-Week 4 — Extended member states + Inventory + Cloudinary + Cleanup
-  on_leave/injured/alumni + self-service endpoint
-  Inventory tables + CRUD + issue/return/purchase + platform cut
+Week 4 — Inventory + Messaging + Cleanup
+  Inventory tables + CRUD + issue/return (no paid purchase yet)
+  Messaging: conversations + messages + message_reads; chapter + event chat;
+    media via Cloudinary; announcement broadcast (push + SendGrid); pinned
   Cloudinary for club logos + banners (profile photo already built)
-  ClubMitra rename (module, DB, env) · E2E testing · soft-launch prep
+  ClubMitra rename (module, DB, env) · E2E testing
 ```
 
 ---
 
-## Phase 3 — Epeak Parity *(deferred from Phase 2)*
+## Phase 3 Build Sequence — Payments + GPX + Desktop Admin
 
 ```
-The big new subsystems, split out of Phase 2 to keep each phase shippable:
+Real money on both rails (gated by merchant KYC — onboarding started in Phase 2)
+plus the remaining Epeak-parity surface.
 
-Messaging       conversations + messages + message_reads tables;
-                club + session chats, media sharing, pinned messages,
-                announcement broadcast (push + email via SendGrid);
-                desktop admin web panel (admin.clubmitra.in).
+Payments      pkg/payments/ interface + razorpay/ + stripe/ impls;
+              internal/payments/initiate (currency → provider routing);
+              razorpay/webhook + stripe/webhook; country/timezone/payment_currency/
+              stripe_account_id on chapters; transactions + subscriptions +
+              discount_codes tables; replace MOCK membership + challenge-fee flows;
+              finance dashboard; subscription plan enforcement at join time;
+              paid inventory purchases + platform cut.
 
-Sessions        Unified `sessions` table (session_type = training | community_run),
-                migrated from the built `runs`/`run_attendance` tables — runs stays
-                as-is until this migration. Adds session_groups (pace groups),
-                multi-option workouts, RSVP/waitlist, recurring sessions.
+GPX + nav     GPX upload on runs → Cloudinary route map + elevation;
+              deep-link to Waze / Google / Apple Maps; GPX download.
 
-GPX + nav       GPX upload on events → Cloudinary route map + elevation;
-                deep-link to Waze / Google / Apple Maps; GPX download.
+Desktop admin Web admin panel (admin.clubmitra.in) — members, finances, runs.
 
-Join flows      club rules acceptance, scheduled registration open,
-                bulk invite by CSV.
+Training      Training-session fields on the built `runs` table (no schema refactor):
+              sport type, workout summary, duration, pace groups, RSVP, PDF upload.
+
+Join flows    Club rules acceptance, waitlist auto-promote, scheduled registration
+              open, bulk invite by CSV.
 ```
 
 ---
@@ -956,7 +1007,14 @@ JWT_REFRESH_SECRET=your-refresh-secret-here
 PORT=8090
 ENV=development
 
-# Payments — Phase 2
+# Storage
+CLOUDINARY_URL=cloudinary://your-cloudinary-url
+
+# Email — Phase 2 (announcement broadcasts)
+SENDGRID_API_KEY=SG.xxxxx
+EMAIL_FROM=noreply@clubmitra.in
+
+# Payments — Phase 3
 # India
 RAZORPAY_KEY_ID=your-key-id
 RAZORPAY_KEY_SECRET=your-key-secret
@@ -967,9 +1025,6 @@ STRIPE_WEBHOOK_SECRET=whsec_xxxxx
 STRIPE_CONNECT_CLIENT_ID=ca_xxxxx
 # Shared
 PLATFORM_CUT_PCT=10
-
-# Storage
-CLOUDINARY_URL=cloudinary://your-cloudinary-url
 ```
 
 > Current dev setup still uses `virtualrun` DB / ports 5433 + 6380 until the rename.
@@ -985,7 +1040,7 @@ CLOUDINARY_URL=cloudinary://your-cloudinary-url
 | Upstash | Redis | Free (10k req/day) |
 | Cloudinary | Photos, certs, logos | Free (25 GB) |
 | Expo EAS | App builds | Free |
-| SendGrid | Email (Phase 3) | Free (100/day) |
+| SendGrid | Email (Phase 2) | Free (100/day) |
 
 ---
 

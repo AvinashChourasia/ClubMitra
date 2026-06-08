@@ -18,8 +18,8 @@ replaces that stack with:
 - One place to manage all club members, attendance, fees, and inventory
 - Challenges with leaderboards — public, chapter, city-wide, org-wide, and rolling daily/weekly/monthly
 - Trust-scored activity validation — replacing screenshot chaos with a credibility system
-- In-app payment collection with automatic platform split (Razorpay Route in India, Stripe Connect globally)
-- Private group messaging — per-club, per-event chats replacing WhatsApp (Phase 3)
+- Private group messaging — per-club, per-event chats replacing WhatsApp (Phase 2)
+- In-app payment collection with automatic platform split — Razorpay Route in India, Stripe Connect globally (Phase 3)
 - GPS run tracking replacing manual Strava proof
 - Drop-off analytics so admins know who's drifting before they leave
 
@@ -33,8 +33,8 @@ replaces that stack with:
 | Backend API | Go (Chi) | REST API |
 | Primary DB | PostgreSQL + PostGIS | All relational data + GPS routes |
 | Cache / Leaderboard | Redis (Upstash) | Real-time challenge + rolling leaderboards |
-| Payments (India) | Razorpay + Razorpay Route | INR collections + automatic platform split |
-| Payments (Global) | Stripe + Stripe Connect | EUR/USD collections + automatic platform split (Phase 2) |
+| Payments (India) | Razorpay + Razorpay Route | INR collections + automatic platform split (Phase 3) |
+| Payments (Global) | Stripe + Stripe Connect | EUR/USD collections + automatic platform split (Phase 3) |
 | File Storage | Cloudinary | Profile photos, club logos, finisher certs, GPX previews |
 | Push Notifications | Expo Notifications | Run reminders, challenge updates, fee alerts, rank changes |
 | Deployment | Render (API) + Neon (DB) + Upstash (Redis) | Low cost, scalable |
@@ -103,11 +103,11 @@ clubmitra/
 │   │   ├── challenges/        # Challenge engine, visibility rules, proof
 │   │   ├── leaderboard/       # Redis sorted sets — challenge + rolling
 │   │   ├── activities/        # Activity submission, trust pipeline, GPS [Phase 4]
-│   │   ├── inventory/         # Items, stock, issue/return/purchase    [Phase 2]
-│   │   ├── finance/           # Transactions, platform cut, settlements [Phase 2]
-│   │   ├── payments/          # Routes to pkg/payments provider        [Phase 2]
+│   │   ├── inventory/         # Items, stock, issue/return            [Phase 2]
+│   │   ├── messaging/         # Club + event chats, announcements      [Phase 2]
 │   │   ├── analytics/         # Drop-off metrics, engagement dashboard  [Phase 2]
-│   │   ├── messaging/         # Club + event chats, announcements      [Phase 3]
+│   │   ├── finance/           # Transactions, platform cut, settlements [Phase 3]
+│   │   ├── payments/          # Routes to pkg/payments provider        [Phase 3]
 │   │   ├── schedule/          # Training plan builder, pace groups      [Phase 3]
 │   │   ├── racecalendar/      # Race discovery, external events         [Phase 4]
 │   │   ├── badges/            # Milestones, achievement engine          [Phase 5]
@@ -116,7 +116,7 @@ clubmitra/
 │   │   └── migrations/        # goose SQL migrations
 │   ├── pkg/
 │   │   ├── geo/               # PostGIS helpers (Phase 4)
-│   │   ├── payments/          # Provider-agnostic interface            [Phase 2]
+│   │   ├── payments/          # Provider-agnostic interface            [Phase 3]
 │   │   │   ├── razorpay/      #   India — Razorpay + Route
 │   │   │   └── stripe/        #   Global — Stripe + Connect
 │   │   └── middleware/        # Auth, permissions, soft-delete
@@ -155,10 +155,11 @@ clubmitra/
 
 ## Build Phases
 
-> **Scope philosophy:** Phase 2 wires real money and the trust system on top of
-> what's already built. The larger Epeak-parity surface (messaging, training
-> sessions, GPX) is intentionally split into Phase 3 so each phase stays
-> shippable. GPS tracking and the race calendar follow in Phase 4.
+> **Scope philosophy:** order by dependency, not feature area. Phase 2 is
+> self-contained backend + in-app messaging — no external setup, builds today.
+> Real payments wait for Phase 3 because they're gated by merchant KYC (Razorpay
+> Route in India, Stripe Connect globally) — start that paperwork in parallel so
+> Phase 3 isn't blocked. GPS tracking and the race calendar follow in Phase 4.
 
 ### Phase 1 — Club Core ✅ COMPLETE
 
@@ -176,10 +177,10 @@ clubmitra/
 > Redis leaderboard); light/dark mode; Inter brand font; push notification
 > infrastructure.
 >
-> **Built ahead of schedule (Phase 2 structure, MOCK payments):** optional
+> **Built ahead of schedule (Phase 3 structure, MOCK payments):** optional
 > membership fees + subscriptions (monthly/annual + renewal), club join-approval
 > layer, and challenge join fees — all wired with a MOCK payment step. Real money
-> movement (Razorpay/Stripe, platform cut, transactions table) is Phase 2.
+> movement (Razorpay/Stripe, platform cut, transactions table) is Phase 3.
 
 #### Week 1–2: Identity + Organisation
 - [x] User registration — name, age, phone, email, t-shirt size, city, running level
@@ -214,11 +215,62 @@ clubmitra/
 
 ---
 
-### Phase 2 — Payments + Trust + Inventory + Analytics `(Month 2)` 🚧 IN PROGRESS
+### Phase 2 — Trust + Leaderboards + Analytics + Inventory + Messaging `(Month 2)` 🚧 IN PROGRESS
 
-> Wire real money on both rails (India + Global) and add the trust system that
-> makes activity validation scale. Extends what's already built — no large new
-> subsystems.
+> Self-contained work with no external setup — builds immediately. Real payments
+> moved to Phase 3 (gated by Razorpay/Stripe merchant KYC). Start the merchant
+> account + KYC paperwork now, in parallel, so Phase 3 isn't blocked.
+
+#### Rolling Leaderboards
+- [ ] Daily leaderboard: top runners by distance — resets each day
+- [ ] Weekly leaderboard: rolling 7-day — resets every Monday
+- [ ] Monthly leaderboard: full calendar month — primary competitive reference
+- [ ] All-time leaderboard: cumulative lifetime performance
+- [ ] All rolling leaderboards live at chapter level (independent of specific challenges)
+- [ ] Lua script for atomic Redis ZINCRBY across all sets on activity approved
+
+#### Trust Score
+- [ ] Trust score per runner: proof submission rate + approval rate + account age
+- [ ] High trust (80+) → activity auto-approved; low trust → manual review queue
+- [ ] Trust score visible on runner profile (badge tier: Basic / Trusted / Verified)
+- [ ] Activity submission method tiers: Manual → Screenshot → Strava link → GPX file
+- [ ] `trust_score_log` audit table
+
+#### Analytics — Drop-off Dashboard
+- [ ] Members with no activity in 7 / 14 / 30 / 60 days — visible to chapter admin
+- [ ] Weekly engagement rate: % of members who logged at least one activity
+- [ ] Activity volume trend: total km logged per week/month across the club
+- [ ] Analytics cache table — refreshed every 6 hours, not per request
+
+#### Extended Member Lifecycle
+- [ ] On Leave status: self-declared, paused from leaderboards temporarily
+- [ ] Injured status: removed from performance comparisons
+- [ ] Alumni status: departed member, read-only history, no active participation
+
+#### Inventory
+- [ ] Inventory CRUD: item name, category, quantity, size breakdown (JSONB)
+- [ ] Inventory issue / return flow with stock tracking
+- [ ] Inventory dashboard: stock levels, transaction history
+- [ ] _(Paid purchase + platform cut depends on payments → Phase 3)_
+
+#### Messaging
+- [ ] Club-wide group chat (one per chapter)
+- [ ] Event chat (one per run, members who attend/RSVP)
+- [ ] Photo, video, file sharing in chats (Cloudinary)
+- [ ] Club-wide announcement broadcast (push; email via SendGrid)
+- [ ] Pinned messages per chat
+- [ ] _(Desktop admin web panel → Phase 3)_
+
+#### Cleanup
+- [ ] ClubMitra rename (Go module, DB name, env vars, ports) — see naming note
+
+---
+
+### Phase 3 — Payments + GPX + Desktop Admin `(Month 3)`
+
+> Real money on both rails — gated by merchant onboarding (Razorpay Route KYC in
+> India, Stripe Connect onboarding globally), so the account setup should already
+> be underway from Phase 2. Plus the remaining Epeak-parity surface.
 
 #### Payments — Real money (provider-agnostic, replaces MOCK)
 - [ ] `pkg/payments/` — provider-agnostic interface (Provider)
@@ -235,78 +287,26 @@ clubmitra/
 - [ ] Transaction history: per runner, per chapter, per org
 - [ ] Finance dashboard for chapter admin: collected, pending, platform cut
 - [ ] Discount codes: fixed or % off, single-use or multi-use
-
-#### Inventory
-- [ ] Inventory CRUD: item name, category, quantity, size breakdown (JSONB)
-- [ ] Inventory issue / return / purchase flow
-- [ ] Platform cut on inventory purchases
-- [ ] Inventory dashboard: stock levels, transaction history
-
-#### Trust Score
-- [ ] Trust score per runner: proof submission rate + approval rate + account age
-- [ ] High trust (80+) → activity auto-approved; low trust → manual review queue
-- [ ] Trust score visible on runner profile (badge tier: Basic / Trusted / Verified)
-- [ ] Activity submission method tiers: Manual → Screenshot → Strava link → GPX file
-- [ ] `trust_score_log` audit table
-
-#### Extended Member Lifecycle
-- [ ] On Leave status: self-declared, paused from leaderboards temporarily
-- [ ] Injured status: removed from performance comparisons
-- [ ] Alumni status: departed member, read-only history, no active participation
-
-#### Analytics — Drop-off Dashboard
-- [ ] Members with no activity in 7 / 14 / 30 / 60 days — visible to chapter admin
-- [ ] Weekly engagement rate: % of members who logged at least one activity
-- [ ] Activity volume trend: total km logged per week/month across the club
-- [ ] Analytics cache table — refreshed every 6 hours, not per request
-
-#### Rolling Leaderboards
-- [ ] Daily leaderboard: top runners by distance — resets each day
-- [ ] Weekly leaderboard: rolling 7-day — resets every Monday
-- [ ] Monthly leaderboard: full calendar month — primary competitive reference
-- [ ] All-time leaderboard: cumulative lifetime performance
-- [ ] All rolling leaderboards live at chapter level (independent of specific challenges)
-- [ ] Lua script for atomic Redis ZINCRBY across all sets on activity approved
-
-#### Cleanup
-- [ ] ClubMitra rename (Go module, DB name, env vars, ports) — see naming note
-
----
-
-### Phase 3 — Epeak Parity: Messaging + Sessions + GPX `(Month 3)`
-
-> The larger feature surface that brings full parity with Epeak. Split out of
-> Phase 2 to keep each phase shippable.
-
-#### Messaging
-- [ ] Club-wide group chat (one per chapter)
-- [ ] Event / session chat (one per event, members who RSVP'd)
-- [ ] Photo, video, file sharing in chats
-- [ ] Club-wide announcement broadcast (push + email)
-- [ ] Desktop admin access — web admin panel at admin.clubmitra.in
-- [ ] Pinned messages per chat
-
-#### Training Plan Builder + Sessions
-> The built `runs`/`run_attendance` tables stay as-is and are extended in place;
-> the unified `sessions` table (training + community events) is introduced here.
-- [ ] Unified `sessions` table (session_type = training | community_run), migrated from `runs`
-- [ ] Training session create: sport type, workout summary, location, time, duration
-- [ ] Multiple paces / groups per session (e.g. 5:00/km, 6:00/km)
-- [ ] Multi-option workouts: different distances or start times for the same session
-- [ ] PDF file upload per session (e.g. strength training visuals)
-- [ ] Session RSVP: member taps Join or Decline
-- [ ] Session chat attached to each event
-- [ ] Recurring weekly sessions
+- [ ] Paid inventory purchases + platform cut (builds on Phase 2 inventory)
 
 #### GPX + Navigation
-- [ ] GPX file upload on any community event
+- [ ] GPX file upload on any run / community event (attaches to `runs`)
 - [ ] Auto-generate route map + elevation profile from GPX (Cloudinary)
 - [ ] Deep-link to Waze / Google Maps / Apple Maps for meeting-point navigation
 - [ ] GPX download for Garmin / Polar / Suunto sync
 
+#### Desktop Admin
+- [ ] Web admin panel at admin.clubmitra.in (manage members, finances, runs)
+
+#### Training Sessions *(extend `runs` in place — no schema refactor)*
+- [ ] Add training-session fields to runs: sport type, workout summary, duration
+- [ ] Pace / training groups per run (e.g. 5:00/km, 6:00/km)
+- [ ] PDF upload per session (e.g. strength training visuals)
+- [ ] Run RSVP: member taps Join or Decline
+
 #### Join Flows
 - [ ] Club rules: admin sets rules text → member must accept on join
-- [ ] Waitlist: auto-promote when event capacity opens up
+- [ ] Waitlist: auto-promote when capacity opens up
 - [ ] Scheduled registration open: set a future date/time for registration to open
 - [ ] Bulk invite: admin uploads CSV of emails → auto-sends invitations
 
@@ -433,21 +433,6 @@ POST   /api/v1/push/token
 DELETE /api/v1/push/token
 
 # ─── Phase 2 (planned) ────────────────────────────────────────────
-# Payments — provider-aware (Razorpay INR / Stripe EUR-USD)
-POST   /api/v1/payments/initiate
-POST   /api/v1/payments/razorpay/webhook
-POST   /api/v1/payments/stripe/webhook
-GET    /api/v1/chapters/:id/finance/summary
-GET    /api/v1/chapters/:id/transactions
-
-# Inventory
-GET    /api/v1/chapters/:id/inventory
-POST   /api/v1/chapters/:id/inventory
-PUT    /api/v1/inventory/:id
-POST   /api/v1/inventory/:id/issue
-POST   /api/v1/inventory/:id/return
-POST   /api/v1/inventory/:id/purchase
-
 # Rolling leaderboards
 GET    /api/v1/chapters/:id/leaderboard/daily
 GET    /api/v1/chapters/:id/leaderboard/weekly
@@ -459,21 +444,32 @@ GET    /api/v1/chapters/:id/analytics/dropoff
 GET    /api/v1/chapters/:id/analytics/engagement
 GET    /api/v1/chapters/:id/analytics/activity-volume
 
-# ─── Phase 3 (planned) ────────────────────────────────────────────
-# Sessions (unified runs + training sessions)
-POST   /api/v1/sessions                       # single or recurring
-GET    /api/v1/sessions?chapter_id=:id
-GET    /api/v1/sessions/:id
-PUT    /api/v1/sessions/:id
-POST   /api/v1/sessions/:id/rsvp
-POST   /api/v1/sessions/:id/gpx               # upload GPX
+# Inventory (CRUD — paid purchase is Phase 3)
+GET    /api/v1/chapters/:id/inventory
+POST   /api/v1/chapters/:id/inventory
+PUT    /api/v1/inventory/:id
+POST   /api/v1/inventory/:id/issue
+POST   /api/v1/inventory/:id/return
 
 # Messaging
 GET    /api/v1/chapters/:id/messages
 POST   /api/v1/chapters/:id/messages
-GET    /api/v1/sessions/:id/messages
-POST   /api/v1/sessions/:id/messages
-POST   /api/v1/chapters/:id/announce          # broadcast push + email
+GET    /api/v1/runs/:id/messages              # per-run event chat
+POST   /api/v1/runs/:id/messages
+POST   /api/v1/chapters/:id/announce          # broadcast push (+ email)
+
+# ─── Phase 3 (planned) ────────────────────────────────────────────
+# Payments — provider-aware (Razorpay INR / Stripe EUR-USD)
+POST   /api/v1/payments/initiate
+POST   /api/v1/payments/razorpay/webhook
+POST   /api/v1/payments/stripe/webhook
+GET    /api/v1/chapters/:id/finance/summary
+GET    /api/v1/chapters/:id/transactions
+POST   /api/v1/inventory/:id/purchase         # paid purchase + platform cut
+
+# GPX (attaches to runs)
+POST   /api/v1/runs/:id/gpx                   # upload GPX
+GET    /api/v1/runs/:id/gpx
 
 # ─── Phase 4 (planned) ────────────────────────────────────────────
 # Activities — GPS
@@ -542,8 +538,8 @@ GET    /api/v1/races/similar/:id
 - PostgreSQL 15+ with PostGIS
 - Redis (local or Upstash)
 - Expo CLI: `npm install -g expo`
-- Razorpay account with Route enabled (Phase 2, India)
-- Stripe account with Connect enabled (Phase 2, Global)
+- Razorpay account with Route enabled (Phase 3, India)
+- Stripe account with Connect enabled (Phase 3, Global)
 
 ### Backend setup
 
@@ -577,7 +573,14 @@ JWT_REFRESH_SECRET=your-refresh-secret-here
 PORT=8090
 ENV=development
 
-# Payments — Phase 2
+# Storage
+CLOUDINARY_URL=cloudinary://your-cloudinary-url
+
+# Email — Phase 2 (announcement broadcasts)
+SENDGRID_API_KEY=SG.xxxxx
+EMAIL_FROM=noreply@clubmitra.in
+
+# Payments — Phase 3
 # India
 RAZORPAY_KEY_ID=your-key-id
 RAZORPAY_KEY_SECRET=your-key-secret
@@ -588,13 +591,6 @@ STRIPE_WEBHOOK_SECRET=whsec_xxxxx
 STRIPE_CONNECT_CLIENT_ID=ca_xxxxx
 # Shared
 PLATFORM_CUT_PCT=10
-
-# Storage
-CLOUDINARY_URL=cloudinary://your-cloudinary-url
-
-# Email — Phase 3 (announcements + bulk invites)
-SENDGRID_API_KEY=SG.xxxxx
-EMAIL_FROM=noreply@clubmitra.in
 ```
 
 > The current dev setup still uses the `virtualrun` DB / ports 5433 + 6380 and
@@ -611,7 +607,7 @@ EMAIL_FROM=noreply@clubmitra.in
 | Upstash | Redis | Free (10k req/day) |
 | Cloudinary | File storage | Free (25 GB) |
 | Expo EAS | App builds | Free |
-| SendGrid | Email (Phase 3) | Free (100/day) |
+| SendGrid | Email (Phase 2) | Free (100/day) |
 
 **Estimated monthly cost at launch: $0–$7**
 
@@ -622,8 +618,8 @@ EMAIL_FROM=noreply@clubmitra.in
 | Phase | Focus | Timeline |
 |---|---|---|
 | 1 | Club core — members, attendance, challenges | Month 1 ✅ |
-| 2 | Payments (Razorpay + Stripe), trust score, inventory, analytics, rolling leaderboards | Month 2 |
-| 3 | Epeak parity — messaging, training sessions, GPX, desktop admin | Month 3 |
+| 2 | Trust score, rolling leaderboards, analytics, inventory, messaging | Month 2 |
+| 3 | Payments (Razorpay + Stripe), GPX, desktop admin, paid inventory | Month 3 |
 | 4 | GPS tracking, race calendar, finisher certificates, city leaderboard | Month 4 |
 | 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 |
 | 6+ | Europe launch, leagues, coaches, physical events, white-label | Month 7+ |
