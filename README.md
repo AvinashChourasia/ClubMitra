@@ -168,7 +168,7 @@ clubmitra/
 > **Phase 1 status — backend + mobile both built and working end-to-end:**
 > Standalone auth (register + login, bcrypt, JWT + refresh rotation/theft
 > detection); full runner profile (view/edit, running level, searchable city,
-> profile photo via Cloudinary); club core (organisations, chapters, invite codes,
+> profile photo, club logo + banner via Cloudinary); club core (organisations, chapters, invite codes,
 > org_roles permissions, invite-first join, member management with status +
 > soft-delete); attendance (recurring run scheduling, optional time, edit,
 > check-in/out with reason, personal + club schedule with weekly list + month
@@ -221,13 +221,12 @@ clubmitra/
 > moved to Phase 3 (gated by Razorpay/Stripe merchant KYC). Start the merchant
 > account + KYC paperwork now, in parallel, so Phase 3 isn't blocked.
 
-#### Rolling Leaderboards
-- [ ] Daily leaderboard: top runners by distance — resets each day
-- [ ] Weekly leaderboard: rolling 7-day — resets every Monday
-- [ ] Monthly leaderboard: full calendar month — primary competitive reference
-- [ ] All-time leaderboard: cumulative lifetime performance
-- [ ] All rolling leaderboards live at chapter level (independent of specific challenges)
-- [ ] Lua script for atomic Redis ZINCRBY across all sets on activity approved
+#### Rolling Leaderboards — built ahead (Postgres-computed from run logs)
+- [x] Members log a run (km) → `run_logs`, the data source for the boards
+- [x] Daily / weekly / monthly / all-time boards per chapter (IST), in the club screen
+- [x] Boards live at chapter level, independent of specific challenges
+- [ ] Apply `trust_weight` to scores — currently raw km; lands with Trust Score below
+- [ ] _(Deferred)_ Redis sorted-set + Lua ZINCRBY — Postgres aggregation is fine at current scale; revisit if it gets slow
 
 #### Trust Score
 - [ ] Trust score per runner: proof submission rate + approval rate + account age

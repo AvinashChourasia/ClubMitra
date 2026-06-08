@@ -80,8 +80,8 @@ Tokens         expo-secure-store (access + rotating refresh)
 Theming        lib/theme.tsx — light/dark palettes (live bindings), ThemeProvider
 Fonts          Inter, applied globally (Text.render patch maps weight → family)
 Push           expo-notifications — register token → POST /push/token; tap deep-links
-Media          expo-image-picker → Cloudinary signed upload (profile photo built;
-               club logos/banners Phase 2)
+Media          expo-image-picker → Cloudinary signed upload (profile photo,
+               club logo + banner — all built)
 ```
 
 > Design system: color/space/radius/type tokens, elevated cards, gradient heroes,
@@ -152,7 +152,8 @@ CREATE TABLE chapters (
     country                 TEXT NOT NULL DEFAULT 'IN',  -- ISO 3166-1 alpha-2 (Phase 3)
     timezone                TEXT NOT NULL DEFAULT 'Asia/Kolkata', -- (Phase 3)
     description             TEXT,
-    logo                    TEXT,
+    logo                    TEXT,                          -- Cloudinary URL (circular mark) — built
+    banner                  TEXT,                          -- Cloudinary URL (wide hero) — built (00016)
     is_public               BOOLEAN DEFAULT true,
     invite_code             TEXT UNIQUE NOT NULL,
     -- Join + fee controls (built)
@@ -463,7 +464,13 @@ CREATE TABLE trust_score_log (
 
 ---
 
-### Rolling Leaderboard System *(Phase 2 — new)*
+### Rolling Leaderboard System
+
+> **Shipped (built ahead):** the four rolling boards (daily/weekly/monthly/all-time)
+> exist and run at chapter level — but computed on the fly from the `run_logs`
+> table with IST-aware date ranges (`internal/runlog`), **not** the Redis/Lua design
+> below, and scored by raw km. Trust-weighting and the Redis sorted-set + Lua
+> optimisation below are deferred — adopt them only if Postgres aggregation gets slow.
 
 ```
 Independent of challenges. Runs at chapter level. Four rolling periods in Redis.
@@ -961,7 +968,7 @@ Week 4 — Inventory + Messaging + Cleanup
   Inventory tables + CRUD + issue/return (no paid purchase yet)
   Messaging: conversations + messages + message_reads; chapter + event chat;
     media via Cloudinary; announcement broadcast (push + SendGrid); pinned
-  Cloudinary for club logos + banners (profile photo already built)
+  (Cloudinary media all built: profile photo, club logo + banner)
   ClubMitra rename (module, DB, env) · E2E testing
 ```
 
