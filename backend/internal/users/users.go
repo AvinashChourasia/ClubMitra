@@ -54,6 +54,7 @@ type ProfileUpdate struct {
 	City         *string
 	TshirtSize   *string
 	RunningLevel *string
+	ProfilePhoto *string // nil = leave unchanged (see COALESCE in UpdateProfile)
 }
 
 // ValidRunningLevels is the allowed set (mirrors the DB CHECK constraint).
@@ -103,12 +104,13 @@ func (r *Repository) Create(ctx context.Context, n NewUser) (*User, error) {
 func (r *Repository) UpdateProfile(ctx context.Context, id string, p ProfileUpdate) (*User, error) {
 	const q = `
 		UPDATE users
-		SET name = $2, phone = $3, age = $4, tshirt_size = $5, city = $6, running_level = $7
+		SET name = $2, phone = $3, age = $4, tshirt_size = $5, city = $6, running_level = $7,
+		    profile_photo = COALESCE($8, profile_photo)
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING ` + userColumns
 	var u User
 	err := r.db.QueryRow(ctx, q,
-		id, p.Name, nullable(p.Phone), p.Age, p.TshirtSize, p.City, p.RunningLevel,
+		id, p.Name, nullable(p.Phone), p.Age, p.TshirtSize, p.City, p.RunningLevel, p.ProfilePhoto,
 	).Scan(scanDest(&u)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

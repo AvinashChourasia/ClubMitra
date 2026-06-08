@@ -65,6 +65,7 @@ type updateProfileRequest struct {
 	City         *string `json:"city"`
 	TshirtSize   *string `json:"tshirt_size"`
 	RunningLevel *string `json:"running_level"`
+	ProfilePhoto *string `json:"profile_photo"` // Cloudinary URL; nil = unchanged
 }
 
 // updateMe edits the authenticated user's own profile.
@@ -107,6 +108,7 @@ func (h *Handler) updateMe(w http.ResponseWriter, r *http.Request) {
 		City:         req.City,
 		TshirtSize:   req.TshirtSize,
 		RunningLevel: req.RunningLevel,
+		ProfilePhoto: req.ProfilePhoto,
 	})
 	if err != nil {
 		switch {

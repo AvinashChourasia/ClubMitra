@@ -8,6 +8,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -22,6 +23,12 @@ type Config struct {
 	JWTRefreshSecret string
 	Port             string
 	Env              string
+
+	// Cloudinary (optional — image uploads). Parsed from CLOUDINARY_URL,
+	// which looks like cloudinary://<api_key>:<api_secret>@<cloud_name>.
+	CloudinaryCloud  string
+	CloudinaryKey    string
+	CloudinarySecret string
 
 	// How long tokens stay valid. Access tokens are deliberately short
 	// (small damage window if stolen); refresh tokens are long (so users
@@ -63,6 +70,16 @@ func Load() (*Config, error) {
 	}
 	if cfg.JWTRefreshSecret == "" {
 		return nil, fmt.Errorf("JWT_REFRESH_SECRET is required")
+	}
+
+	// Cloudinary is optional: parse it if present, ignore if not (uploads stay
+	// disabled and the signature endpoint returns 503).
+	if cu := os.Getenv("CLOUDINARY_URL"); cu != "" {
+		if u, err := url.Parse(cu); err == nil {
+			cfg.CloudinaryCloud = u.Host
+			cfg.CloudinaryKey = u.User.Username()
+			cfg.CloudinarySecret, _ = u.User.Password()
+		}
 	}
 
 	return cfg, nil
