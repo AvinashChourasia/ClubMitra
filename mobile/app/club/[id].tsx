@@ -33,13 +33,106 @@ import {
   challengeTarget,
   type Challenge,
 } from "../../lib/challenges";
+import { leaderboard, type BoardEntry, type Period } from "../../lib/runlog";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Avatar } from "../../components/Avatar";
 import { RunScheduleView } from "../../components/RunScheduleView";
 
-type Tab = "members" | "schedule" | "challenges";
+type Tab = "members" | "schedule" | "challenges" | "leaderboard";
+
+const MEDAL = ["#FACC15", "#CBD5E1", "#D8965B"]; // gold / silver / bronze
+
+// LeaderboardTab — the club's rolling board with a period switcher.
+function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId: string; getToken: () => Promise<string | null> }) {
+  const PERIODS: [Period, string][] = [
+    ["daily", "Today"],
+    ["weekly", "Week"],
+    ["monthly", "Month"],
+    ["alltime", "All-time"],
+  ];
+  const [period, setPeriod] = useState<Period>("weekly");
+  const [entries, setEntries] = useState<BoardEntry[] | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        const token = await getToken();
+        if (!token) return;
+        const data = await leaderboard(token, chapterId, period);
+        if (active) setEntries(data);
+      })();
+      return () => {
+        active = false;
+      };
+    }, [getToken, chapterId, period])
+  );
+
+  return (
+    <View style={{ gap: 12 }}>
+      <View style={{ flexDirection: "row", backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 3 }}>
+        {PERIODS.map(([key, label]) => (
+          <Pressable
+            key={key}
+            onPress={() => setPeriod(key)}
+            style={{ flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: "center", backgroundColor: period === key ? colors.primary : "transparent" }}
+          >
+            <Text style={{ color: period === key ? "#fff" : colors.muted, fontWeight: "700", fontSize: 12 }}>{label}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <View style={styles.card}>
+        {entries === null ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : entries.length === 0 ? (
+          <View style={{ alignItems: "center", paddingVertical: 20 }}>
+            <Ionicons name="podium-outline" size={28} color={colors.subtle} />
+            <Text style={{ color: colors.muted, marginTop: 8, textAlign: "center" }}>No runs logged for this period yet.</Text>
+          </View>
+        ) : (
+          entries.map((e, i) => {
+            const me = e.user_id === meId;
+            const medal = e.rank <= 3 ? MEDAL[e.rank - 1] : null;
+            return (
+              <View
+                key={e.user_id}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 12,
+                  paddingVertical: 10,
+                  paddingHorizontal: me ? 8 : 0,
+                  marginHorizontal: me ? -8 : 0,
+                  borderRadius: 12,
+                  backgroundColor: me ? colors.primarySoft : "transparent",
+                  borderBottomWidth: i === entries.length - 1 || me ? 0 : 1,
+                  borderBottomColor: colors.border,
+                }}
+              >
+                <View style={{ width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: medal ?? colors.bgSecondary }}>
+                  <Text style={{ color: medal ? "#0B1220" : colors.muted, fontWeight: "800", fontSize: 12 }}>{e.rank}</Text>
+                </View>
+                <Avatar name={e.display_name || "?"} size={34} bg={colors.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: me ? colors.primary : colors.text, fontWeight: me ? "800" : "600" }}>
+                    {e.display_name || "Unknown"} {me ? "(you)" : ""}
+                  </Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{e.runs} {e.runs === 1 ? "run" : "runs"}</Text>
+                </View>
+                <Text style={{ color: colors.text, fontWeight: "800" }}>
+                  {e.km.toFixed(1)} <Text style={{ color: colors.muted, fontWeight: "600", fontSize: 12 }}>km</Text>
+                </Text>
+              </View>
+            );
+          })
+        )}
+      </View>
+    </View>
+  );
+}
 
 export default function ClubDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -287,6 +380,7 @@ export default function ClubDetail() {
                   ["members", "Members"],
                   ["schedule", "Schedule"],
                   ["challenges", "Challenges"],
+                  ["leaderboard", "Leaders"],
                 ] as [Tab, string][]
               ).map(([key, label]) => (
                 <Pressable
@@ -294,7 +388,7 @@ export default function ClubDetail() {
                   onPress={() => setTab(key)}
                   style={{ flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: "center", backgroundColor: tab === key ? colors.primary : "transparent" }}
                 >
-                  <Text style={{ color: tab === key ? "#fff" : colors.muted, fontWeight: "700", fontSize: 13 }}>{label}</Text>
+                  <Text style={{ color: tab === key ? "#fff" : colors.muted, fontWeight: "700", fontSize: 11 }}>{label}</Text>
                 </Pressable>
               ))}
             </View>
@@ -397,6 +491,9 @@ export default function ClubDetail() {
                 )}
               </>
             )}
+
+            {/* --- Leaderboard tab --- */}
+            {tab === "leaderboard" && <LeaderboardTab chapterId={id} meId={user.id} getToken={getAccessToken} />}
           </>
         ) : null}
       </ScrollView>

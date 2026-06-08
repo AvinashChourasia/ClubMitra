@@ -105,6 +105,15 @@ export default function Home() {
           </View>
         </LinearGradient>
 
+        {/* Log a run — feeds the club leaderboards */}
+        <Pressable
+          onPress={() => router.push("/runlog/new")}
+          style={[styles.button, { flexDirection: "row", justifyContent: "center", gap: 8 }]}
+        >
+          <Ionicons name="add-circle" size={20} color="#fff" />
+          <Text style={styles.buttonText}>Log a run</Text>
+        </Pressable>
+
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />
         ) : (
