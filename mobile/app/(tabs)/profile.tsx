@@ -12,10 +12,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/auth";
 import { myChapters, isChapterAdmin, type MyChapter } from "../../lib/clubs";
 import { myRuns, type MyRun } from "../../lib/attendance";
+import { getTrustScore, TIER_META, type TrustSnapshot } from "../../lib/trust";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { runningLevelLabel } from "../../lib/profile";
 import { formatRunWhen, isPast } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
+
+// tierColor maps a trust tier to its accent colour (basic → muted, trusted →
+// brand accent, verified → success green).
+function tierColor(tier: "basic" | "trusted" | "verified"): string {
+  return tier === "verified" ? colors.success : tier === "trusted" ? colors.accent : colors.muted;
+}
 
 function Pill({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
   return (
@@ -51,6 +58,7 @@ export default function Profile() {
   useThemeMode(); // subscribe so a theme toggle re-themes this screen instantly
   const [clubs, setClubs] = useState<MyChapter[] | null>(null);
   const [runs, setRuns] = useState<MyRun[]>([]);
+  const [trust, setTrust] = useState<TrustSnapshot | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -60,6 +68,8 @@ export default function Profile() {
         const [c, r] = await Promise.all([myChapters(token), myRuns(token)]);
         setClubs(c);
         setRuns(r);
+        // Trust score is non-critical — never let it fail the whole screen.
+        getTrustScore(token).then(setTrust).catch(() => {});
       }
     } catch {
       setClubs([]);
@@ -130,6 +140,28 @@ export default function Profile() {
           <DetailRow label="Running level" value={runningLevelLabel(user.running_level)} />
           <DetailRow label="T-shirt size" value={user.tshirt_size} last />
         </View>
+
+        {/* Trust score */}
+        {trust && (
+          <View style={styles.card}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <Text style={styles.sectionTitle}>Trust score</Text>
+              <View style={{ backgroundColor: tierColor(trust.trust_tier) + "22", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 }}>
+                <Text style={{ color: tierColor(trust.trust_tier), fontWeight: "800", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  {TIER_META[trust.trust_tier].label}
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 4 }}>
+              <Text style={{ color: colors.text, fontSize: 34, fontWeight: "800", letterSpacing: -1 }}>{Math.round(trust.trust_score)}</Text>
+              <Text style={{ color: colors.muted, fontSize: 14, fontWeight: "600", marginBottom: 6 }}>/ 100</Text>
+            </View>
+            <View style={{ height: 8, borderRadius: 4, backgroundColor: colors.bgSecondary, overflow: "hidden", marginTop: 6 }}>
+              <View style={{ width: `${Math.max(0, Math.min(100, trust.trust_score))}%`, height: "100%", backgroundColor: tierColor(trust.trust_tier) }} />
+            </View>
+            <Text style={{ color: colors.muted, fontSize: 12, marginTop: 10 }}>{TIER_META[trust.trust_tier].explain}</Text>
+          </View>
+        )}
 
         {/* Clubs (shown before schedule) */}
         <View style={styles.card}>

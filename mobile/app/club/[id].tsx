@@ -34,13 +34,14 @@ import {
   type Challenge,
 } from "../../lib/challenges";
 import { leaderboard, type BoardEntry, type Period } from "../../lib/runlog";
+import { getDropoff, getEngagement, getVolume, type Dropoff, type Engagement, type VolumePoint } from "../../lib/analytics";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Avatar } from "../../components/Avatar";
 import { RunScheduleView } from "../../components/RunScheduleView";
 
-type Tab = "members" | "schedule" | "challenges" | "leaderboard";
+type Tab = "members" | "schedule" | "challenges" | "leaderboard" | "insights";
 
 const MEDAL = ["#FACC15", "#CBD5E1", "#D8965B"]; // gold / silver / bronze
 
@@ -134,6 +135,98 @@ function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId
   );
 }
 
+// InsightsTab — admin-only chapter health: engagement, drop-off, weekly volume.
+function InsightsTab({ chapterId, getToken }: { chapterId: string; getToken: () => Promise<string | null> }) {
+  const [eng, setEng] = useState<Engagement | null>(null);
+  const [drop, setDrop] = useState<Dropoff | null>(null);
+  const [vol, setVol] = useState<VolumePoint[] | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        const token = await getToken();
+        if (!token) return;
+        const [e, d, v] = await Promise.all([
+          getEngagement(token, chapterId),
+          getDropoff(token, chapterId),
+          getVolume(token, chapterId),
+        ]);
+        if (active) {
+          setEng(e);
+          setDrop(d);
+          setVol(v);
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }, [getToken, chapterId])
+  );
+
+  if (!eng || !drop || !vol) {
+    return <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />;
+  }
+
+  const maxKm = Math.max(1, ...vol.map((p) => p.km));
+  const dropRows: [string, number][] = [
+    ["7+ days quiet", drop.inactive_7d],
+    ["14+ days quiet", drop.inactive_14d],
+    ["30+ days quiet", drop.inactive_30d],
+    ["60+ days quiet", drop.inactive_60d],
+  ];
+
+  return (
+    <View style={{ gap: 12 }}>
+      {/* Engagement */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Weekly engagement</Text>
+        <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6, marginTop: 6 }}>
+          <Text style={{ color: colors.text, fontSize: 32, fontWeight: "800", letterSpacing: -1 }}>{eng.engagement_rate}%</Text>
+          <Text style={{ color: colors.muted, fontSize: 13, fontWeight: "600", marginBottom: 6 }}>
+            {eng.weekly_active}/{eng.total_members} active this week
+          </Text>
+        </View>
+      </View>
+
+      {/* Drop-off */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Drop-off</Text>
+        <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 4 }}>Active members with no run logged / no check-in.</Text>
+        {dropRows.map(([label, n], i) => (
+          <View
+            key={label}
+            style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 9, borderBottomWidth: i === dropRows.length - 1 ? 0 : 1, borderBottomColor: colors.border }}
+          >
+            <Text style={{ color: colors.text }}>{label}</Text>
+            <Text style={{ color: n > 0 ? colors.warning : colors.muted, fontWeight: "800" }}>{n}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Volume */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Weekly volume</Text>
+        {vol.length === 0 ? (
+          <Text style={{ color: colors.muted, marginTop: 6 }}>No runs logged in the last 8 weeks.</Text>
+        ) : (
+          <View style={{ gap: 8, marginTop: 8 }}>
+            {vol.map((p) => (
+              <View key={p.week_start} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Text style={{ color: colors.muted, fontSize: 11, width: 64 }}>{p.week_start.slice(5)}</Text>
+                <View style={{ flex: 1, height: 10, backgroundColor: colors.bgSecondary, borderRadius: 5, overflow: "hidden" }}>
+                  <View style={{ width: `${(p.km / maxKm) * 100}%`, height: "100%", backgroundColor: colors.primary }} />
+                </View>
+                <Text style={{ color: colors.text, fontSize: 12, fontWeight: "700", width: 56, textAlign: "right" }}>{p.km.toFixed(1)} km</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
 export default function ClubDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user, getAccessToken } = useAuth();
@@ -216,6 +309,9 @@ export default function ClubDetail() {
           </Text>
         </View>
       </View>
+      <Pressable onPress={() => router.push(`/club/chat/${id}`)} hitSlop={10}>
+        <Ionicons name="chatbubbles-outline" size={22} color="#fff" />
+      </Pressable>
       {isAdmin && (
         <Pressable onPress={() => router.push(`/club/edit/${id}`)} hitSlop={10}>
           <Ionicons name="create-outline" size={22} color="#fff" />
@@ -401,6 +497,7 @@ export default function ClubDetail() {
                   ["schedule", "Schedule"],
                   ["challenges", "Challenges"],
                   ["leaderboard", "Leaders"],
+                  ...(isAdmin ? [["insights", "Insights"] as [Tab, string]] : []),
                 ] as [Tab, string][]
               ).map(([key, label]) => (
                 <Pressable
@@ -450,6 +547,15 @@ export default function ClubDetail() {
                     </>
                   )}
                 </View>
+                {isAdmin && (
+                  <Pressable
+                    onPress={() => router.push(`/club/inventory/${id}`)}
+                    style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, borderRadius: 14, paddingVertical: 13 }}
+                  >
+                    <Ionicons name="cube-outline" size={18} color={colors.accent} />
+                    <Text style={{ color: colors.accent, fontWeight: "700" }}>Manage inventory</Text>
+                  </Pressable>
+                )}
                 {isOwner && (
                   <Pressable
                     onPress={confirmDelete}
@@ -514,6 +620,9 @@ export default function ClubDetail() {
 
             {/* --- Leaderboard tab --- */}
             {tab === "leaderboard" && <LeaderboardTab chapterId={id} meId={user.id} getToken={getAccessToken} />}
+
+            {/* --- Insights tab (admin only) --- */}
+            {tab === "insights" && isAdmin && <InsightsTab chapterId={id} getToken={getAccessToken} />}
           </>
         ) : null}
       </ScrollView>
