@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/avinash/clubmitra/backend/internal/leaderboard"
+	"github.com/avinash/clubmitra/backend/internal/trust"
 )
 
 // ValidationError carries a client-safe 400 message.
@@ -37,6 +38,14 @@ type notifier interface {
 	NotifyUsers(ctx context.Context, userIDs []string, title, body string, data map[string]string)
 }
 
+// trustService reads a runner's trust score (to route proof at submit time) and
+// recomputes it after a proof is decided. A narrow interface so challenges
+// depends on trust's behaviour, not its concrete type (and there's no cycle).
+type trustService interface {
+	Score(ctx context.Context, userID string) (float64, error)
+	Recompute(ctx context.Context, userID, reason, triggeredBy string) error
+}
+
 // Service holds challenge business logic: durable data in Postgres (repo) plus
 // the fast Redis leaderboard (board), with user names resolved via names.
 type Service struct {
@@ -44,11 +53,13 @@ type Service struct {
 	board  *leaderboard.Leaderboard
 	names  nameLookup
 	notify notifier
+	trust  trustService
 }
 
-// NewService wires the service together.
-func NewService(repo *Repository, board *leaderboard.Leaderboard, names nameLookup, notify notifier) *Service {
-	return &Service{repo: repo, board: board, names: names, notify: notify}
+// NewService wires the service together. trust may be nil (trust recompute +
+// auto-approve are then skipped — useful in tests).
+func NewService(repo *Repository, board *leaderboard.Leaderboard, names nameLookup, notify notifier, trust trustService) *Service {
+	return &Service{repo: repo, board: board, names: names, notify: notify, trust: trust}
 }
 
 var validTypes = map[string]bool{TypeDistance: true, TypeDays: true, TypeStreak: true}
@@ -184,22 +195,87 @@ func (s *Service) JoinAsChapter(ctx context.Context, challengeID, chapterID uuid
 	return err
 }
 
+// validProofMethods are the accepted submission methods (see the trust package
+// for their weights).
+var validProofMethods = map[string]bool{"manual": true, "screenshot": true, "strava": true, "gpx": true}
+
+// inferMethod picks a submission method from whichever evidence was supplied,
+// used when the client doesn't send one explicitly (back-compat).
+func inferMethod(stravaLink, screenshotURL, gpxURL *string) string {
+	switch {
+	case nonEmpty(stravaLink):
+		return "strava"
+	case nonEmpty(gpxURL):
+		return "gpx"
+	case nonEmpty(screenshotURL):
+		return "screenshot"
+	default:
+		return "manual"
+	}
+}
+
+func nonEmpty(s *string) bool { return s != nil && strings.TrimSpace(*s) != "" }
+
 // SubmitProof records a Phase 1 proof. The challenge must exist (and be visible
-// enough to fetch); progress isn't credited until an admin verifies it.
-func (s *Service) SubmitProof(ctx context.Context, userID string, challengeID uuid.UUID, stravaLink, screenshotURL *string, kmClaimed *float64, proofDate *string) (*Proof, error) {
-	if (stravaLink == nil || strings.TrimSpace(*stravaLink) == "") &&
-		(screenshotURL == nil || strings.TrimSpace(*screenshotURL) == "") {
-		return nil, ValidationError{Msg: "a strava_link or screenshot_url is required"}
+// enough to fetch); progress isn't credited until an admin verifies it. The
+// submission method sets the proof's trust weight; if omitted it's inferred from
+// the evidence supplied.
+func (s *Service) SubmitProof(ctx context.Context, userID string, challengeID uuid.UUID, method string, stravaLink, screenshotURL, gpxURL *string, kmClaimed *float64, proofDate *string) (*Proof, error) {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		method = inferMethod(stravaLink, screenshotURL, gpxURL)
+	}
+	if !validProofMethods[method] {
+		return nil, ValidationError{Msg: "submission_method must be manual, screenshot, strava or gpx"}
+	}
+	// Every method except manual entry needs a piece of evidence.
+	if method != "manual" && !nonEmpty(stravaLink) && !nonEmpty(screenshotURL) && !nonEmpty(gpxURL) {
+		return nil, ValidationError{Msg: "a strava_link, screenshot_url or gpx_url is required"}
 	}
 	// Without a Strava link to read the date from, the proof's date is required.
-	if (stravaLink == nil || strings.TrimSpace(*stravaLink) == "") &&
-		(proofDate == nil || strings.TrimSpace(*proofDate) == "") {
+	if !nonEmpty(stravaLink) && (proofDate == nil || strings.TrimSpace(*proofDate) == "") {
 		return nil, ValidationError{Msg: "a date is required when there's no Strava link"}
 	}
 	if _, err := s.repo.Get(ctx, userID, challengeID); err != nil {
 		return nil, err // ErrNotFound bubbles up
 	}
-	return s.repo.SubmitProof(ctx, challengeID, userID, stravaLink, screenshotURL, kmClaimed, proofDate)
+	proof, err := s.repo.SubmitProof(ctx, challengeID, userID, method, stravaLink, screenshotURL, gpxURL, kmClaimed, proofDate, trust.Weight(method))
+	if err != nil {
+		return nil, err
+	}
+
+	// Trust routing (pipeline stage 3): a high-trust runner's proof skips the
+	// admin queue and is credited immediately. Best-effort — if the trust lookup
+	// fails we just leave the proof pending for normal admin review.
+	if s.trust != nil {
+		if score, err := s.trust.Score(ctx, userID); err != nil {
+			log.Printf("challenges: trust score lookup for auto-approve failed: %v", err)
+		} else if autoApprove(trust.Tier(score), method) {
+			if verified, firstTime, err := s.repo.MarkProofVerified(ctx, proof.ID, nil); err != nil {
+				log.Printf("challenges: auto-approve mark failed: %v", err)
+			} else if firstTime {
+				if err := s.creditVerifiedProof(ctx, verified); err != nil {
+					log.Printf("challenges: auto-approve credit failed: %v", err)
+				}
+				proof = verified
+			}
+		}
+	}
+	return proof, nil
+}
+
+// autoApprove implements the trust-tier routing: verified runners skip review
+// for every method; trusted runners skip it for everything but bare manual
+// entry; basic runners are always queued.
+func autoApprove(tier, method string) bool {
+	switch tier {
+	case "verified":
+		return true
+	case "trusted":
+		return method != "manual"
+	default: // basic
+		return false
+	}
 }
 
 // ListProof returns a challenge's proof submissions (admin review queue).
@@ -207,21 +283,38 @@ func (s *Service) ListProof(ctx context.Context, challengeID uuid.UUID) ([]Proof
 	return s.repo.ListProof(ctx, challengeID)
 }
 
-// VerifyProof marks a proof verified and, the first time, credits the submitter's
-// progress (km for distance challenges, +1 day otherwise) and updates the board.
-// Re-verifying an already-verified proof is a no-op (no double credit).
+// VerifyProof is the admin path: mark a proof verified and, the first time,
+// credit the submitter. Re-verifying an already-verified proof is a no-op.
 func (s *Service) VerifyProof(ctx context.Context, verifierID string, proofID uuid.UUID) (*Proof, error) {
-	proof, firstTime, err := s.repo.MarkProofVerified(ctx, proofID, verifierID)
+	proof, firstTime, err := s.repo.MarkProofVerified(ctx, proofID, &verifierID)
 	if err != nil {
 		return nil, err
 	}
 	if !firstTime {
 		return proof, nil // already verified earlier; nothing to credit
 	}
+	if err := s.creditVerifiedProof(ctx, proof); err != nil {
+		return nil, err
+	}
+	return proof, nil
+}
 
+// proofWeight is the trust weight to apply to a proof's credit — the stored
+// per-proof weight, falling back to the method's base weight for older rows.
+func proofWeight(p *Proof) float64 {
+	if p.TrustWeight != nil {
+		return *p.TrustWeight
+	}
+	return trust.Weight(p.SubmissionMethod)
+}
+
+// creditVerifiedProof credits a just-verified proof: km × trust weight for
+// distance challenges, +1 day otherwise; updates the leaderboard; recomputes the
+// submitter's trust; and notifies them. Shared by admin verify and auto-approve.
+func (s *Service) creditVerifiedProof(ctx context.Context, proof *Proof) error {
 	ch, err := s.repo.Get(ctx, proof.UserID, proof.ChallengeID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	var newScore float64
@@ -229,34 +322,34 @@ func (s *Service) VerifyProof(ctx context.Context, verifierID string, proofID uu
 	case TypeDistance:
 		km := 0.0
 		if proof.KMClaimed != nil {
-			km = *proof.KMClaimed
+			km = *proof.KMClaimed * proofWeight(proof) // weight harder-to-fake evidence higher
 		}
 		total, ok, err := s.repo.AddProgressKM(ctx, proof.ChallengeID, proof.UserID, km)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !ok { // submitter hadn't joined — verifying a proof implies participation
 			if _, err := s.repo.JoinAsUser(ctx, proof.ChallengeID, proof.UserID, true); err != nil {
-				return nil, err
+				return err
 			}
 			total, _, err = s.repo.AddProgressKM(ctx, proof.ChallengeID, proof.UserID, km)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
 		newScore = total
 	default: // days / streak
 		days, ok, err := s.repo.AddProgressDay(ctx, proof.ChallengeID, proof.UserID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !ok {
 			if _, err := s.repo.JoinAsUser(ctx, proof.ChallengeID, proof.UserID, true); err != nil {
-				return nil, err
+				return err
 			}
 			days, _, err = s.repo.AddProgressDay(ctx, proof.ChallengeID, proof.UserID)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
 		newScore = float64(days)
@@ -265,11 +358,18 @@ func (s *Service) VerifyProof(ctx context.Context, verifierID string, proofID uu
 	if err := s.board.SetScore(ctx, proof.ChallengeID, proof.UserID, newScore); err != nil {
 		log.Printf("challenges: leaderboard SetScore on verify failed: %v", err)
 	}
+	// Approving a proof feeds the submitter's trust score (best-effort — a trust
+	// hiccup shouldn't fail the verification just performed).
+	if s.trust != nil {
+		if err := s.trust.Recompute(ctx, proof.UserID, "activity_approved", proof.ID.String()); err != nil {
+			log.Printf("challenges: trust recompute on verify failed: %v", err)
+		}
+	}
 	if s.notify != nil {
 		s.notify.NotifyUsers(ctx, []string{proof.UserID}, "Proof verified ✅",
 			"Your submission for “"+ch.Title+"” was verified.", map[string]string{"type": "proof_verified", "challenge_id": proof.ChallengeID.String()})
 	}
-	return proof, nil
+	return nil
 }
 
 // RecordRunProgress is the GPS hook (Phase 3): a saved run credits its distance

@@ -71,10 +71,12 @@ type joinRequest struct {
 }
 
 type submitProofRequest struct {
-	StravaLink    *string  `json:"strava_link"`
-	ScreenshotURL *string  `json:"screenshot_url"`
-	KMClaimed     *float64 `json:"km_claimed"`
-	ProofDate     *string  `json:"proof_date"` // "YYYY-MM-DD", optional
+	SubmissionMethod string   `json:"submission_method"` // optional; inferred from evidence if omitted
+	StravaLink       *string  `json:"strava_link"`
+	ScreenshotURL    *string  `json:"screenshot_url"`
+	GpxURL           *string  `json:"gpx_url"`
+	KMClaimed        *float64 `json:"km_claimed"`
+	ProofDate        *string  `json:"proof_date"` // "YYYY-MM-DD", optional
 }
 
 // --- handlers ---
@@ -245,7 +247,7 @@ func (h *Handler) submitProof(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	proof, err := h.svc.SubmitProof(r.Context(), userID, id, req.StravaLink, req.ScreenshotURL, req.KMClaimed, req.ProofDate)
+	proof, err := h.svc.SubmitProof(r.Context(), userID, id, req.SubmissionMethod, req.StravaLink, req.ScreenshotURL, req.GpxURL, req.KMClaimed, req.ProofDate)
 	if err != nil {
 		writeErr(w, err)
 		return

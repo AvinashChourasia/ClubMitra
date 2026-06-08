@@ -83,16 +83,19 @@ type NewChallenge struct {
 // Proof is a Phase 1 manual submission (Strava link / screenshot) awaiting or
 // having received admin verification.
 type Proof struct {
-	ID            uuid.UUID  `json:"id"`
-	ChallengeID   uuid.UUID  `json:"challenge_id"`
-	UserID        string     `json:"user_id"`
-	StravaLink    *string    `json:"strava_link,omitempty"`
-	ScreenshotURL *string    `json:"screenshot_url,omitempty"`
-	KMClaimed     *float64   `json:"km_claimed,omitempty"`
-	ProofDate     *string    `json:"proof_date,omitempty"` // "YYYY-MM-DD"
-	Verified      bool       `json:"verified"`
-	VerifiedBy    *string    `json:"verified_by,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID               uuid.UUID `json:"id"`
+	ChallengeID      uuid.UUID `json:"challenge_id"`
+	UserID           string    `json:"user_id"`
+	SubmissionMethod string    `json:"submission_method"` // manual|screenshot|strava|gpx
+	StravaLink       *string   `json:"strava_link,omitempty"`
+	ScreenshotURL    *string   `json:"screenshot_url,omitempty"`
+	GpxURL           *string   `json:"gpx_url,omitempty"`
+	KMClaimed        *float64  `json:"km_claimed,omitempty"`
+	ProofDate        *string   `json:"proof_date,omitempty"` // "YYYY-MM-DD"
+	TrustWeight      *float64  `json:"trust_weight,omitempty"`
+	Verified         bool      `json:"verified"`
+	VerifiedBy       *string   `json:"verified_by,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // Repository is the data-access layer for challenges, participants, and proof.
@@ -266,17 +269,18 @@ func (r *Repository) JoinAsChapter(ctx context.Context, challengeID, chapterID u
 
 // proofColumns is the shared column list, kept in sync with scanProof. ::text on
 // proof_date so it comes back as "YYYY-MM-DD" (date only, no time/zone).
-const proofColumns = `id, challenge_id, user_id, strava_link, screenshot_url, km_claimed,
-	proof_date::text, verified, verified_by, created_at`
+const proofColumns = `id, challenge_id, user_id, submission_method, strava_link, screenshot_url,
+	gpx_url, km_claimed, proof_date::text, trust_weight, verified, verified_by, created_at`
 
 // SubmitProof records a Phase 1 proof submission. proofDate ("YYYY-MM-DD") is
-// optional — relevant for day/streak challenges.
-func (r *Repository) SubmitProof(ctx context.Context, challengeID uuid.UUID, userID string, stravaLink, screenshotURL *string, kmClaimed *float64, proofDate *string) (*Proof, error) {
+// optional — relevant for day/streak challenges. trustWeight is the base weight
+// for the submission method (set by the service from the trust package).
+func (r *Repository) SubmitProof(ctx context.Context, challengeID uuid.UUID, userID, method string, stravaLink, screenshotURL, gpxURL *string, kmClaimed *float64, proofDate *string, trustWeight float64) (*Proof, error) {
 	const q = `
-		INSERT INTO challenge_proof (challenge_id, user_id, strava_link, screenshot_url, km_claimed, proof_date)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO challenge_proof (challenge_id, user_id, submission_method, strava_link, screenshot_url, gpx_url, km_claimed, proof_date, trust_weight)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING ` + proofColumns
-	return scanProof(r.db.QueryRow(ctx, q, challengeID, userID, stravaLink, screenshotURL, kmClaimed, proofDate))
+	return scanProof(r.db.QueryRow(ctx, q, challengeID, userID, method, stravaLink, screenshotURL, gpxURL, kmClaimed, proofDate, trustWeight))
 }
 
 // ListProof returns a challenge's proof submissions, newest first.
@@ -305,7 +309,8 @@ func (r *Repository) ListProof(ctx context.Context, challengeID uuid.UUID) ([]Pr
 // MarkProofVerified flips a proof to verified (idempotent on re-verify of an
 // already-verified row, which it reports via the second return value so the
 // caller can avoid double-crediting progress).
-func (r *Repository) MarkProofVerified(ctx context.Context, proofID uuid.UUID, verifierID string) (proof *Proof, firstTime bool, err error) {
+// verifierID is nil for trust auto-approval (verified_by = NULL = system).
+func (r *Repository) MarkProofVerified(ctx context.Context, proofID uuid.UUID, verifierID *string) (proof *Proof, firstTime bool, err error) {
 	const q = `
 		UPDATE challenge_proof
 		SET verified = true, verified_by = $2
@@ -414,8 +419,8 @@ func (r *Repository) Scores(ctx context.Context, challengeID uuid.UUID) (map[str
 func scanProof(s interface{ Scan(...any) error }) (*Proof, error) {
 	var p Proof
 	err := s.Scan(
-		&p.ID, &p.ChallengeID, &p.UserID, &p.StravaLink, &p.ScreenshotURL,
-		&p.KMClaimed, &p.ProofDate, &p.Verified, &p.VerifiedBy, &p.CreatedAt,
+		&p.ID, &p.ChallengeID, &p.UserID, &p.SubmissionMethod, &p.StravaLink, &p.ScreenshotURL,
+		&p.GpxURL, &p.KMClaimed, &p.ProofDate, &p.TrustWeight, &p.Verified, &p.VerifiedBy, &p.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
