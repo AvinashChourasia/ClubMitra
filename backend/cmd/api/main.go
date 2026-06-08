@@ -29,6 +29,7 @@ import (
 	"github.com/avinash/clubmitra/backend/internal/notifications"
 	"github.com/avinash/clubmitra/backend/internal/organisations"
 	"github.com/avinash/clubmitra/backend/internal/permissions"
+	"github.com/avinash/clubmitra/backend/internal/runlog"
 	"github.com/avinash/clubmitra/backend/internal/uploads"
 	"github.com/avinash/clubmitra/backend/internal/users"
 )
@@ -104,6 +105,9 @@ func main() {
 	challengesSvc := challenges.NewService(challenges.NewRepository(pool), board, userRepo, notifier)
 	challengesHandler := challenges.NewHandler(challengesSvc, permChecker)
 
+	// Run logging + chapter rolling leaderboards (daily/weekly/monthly/all-time).
+	runlogHandler := runlog.NewHandler(runlog.NewService(runlog.NewRepository(pool)))
+
 	// Connect the two: when a run is recorded, credit challenge progress. This
 	// callback is how activities stays unaware of the challenges package.
 	activitiesSvc.SetRecordedHook(challengesSvc.RecordRunProgress)
@@ -111,7 +115,7 @@ func main() {
 	// 4. Build the HTTP server around the router.
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, tokenMgr),
+		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, runlogHandler, tokenMgr),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -141,7 +145,7 @@ func main() {
 }
 
 // newRouter builds the middleware stack and mounts all routes.
-func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, tokenMgr *auth.TokenManager) http.Handler {
+func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, runlogHandler *runlog.Handler, tokenMgr *auth.TokenManager) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID) // tag each request with a unique id
@@ -168,6 +172,7 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 			r.Mount("/members", attendanceHandler.MemberRoutes())
 			r.Mount("/push", notificationsHandler.Routes())
 			r.Mount("/uploads", uploadsHandler.Routes())
+			r.Mount("/runlog", runlogHandler.Routes())
 			// Club core declares its own /organisations and /chapters subtrees,
 			// so it mounts at the group root rather than under a single prefix.
 			r.Mount("/", orgHandler.Routes())
