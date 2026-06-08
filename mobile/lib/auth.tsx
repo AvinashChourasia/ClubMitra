@@ -56,6 +56,7 @@ export type ProfileInput = {
   city: string;
   running_level: string;
   tshirt_size?: string;
+  profile_photo?: string; // Cloudinary URL; omit to leave unchanged
 };
 
 // The server's response shape for register/login (mirrors the Go authResponse).

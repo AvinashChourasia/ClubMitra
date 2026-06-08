@@ -18,6 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../lib/auth";
 import { ApiError } from "../../lib/api";
+import { uploadAvatar, isRemote } from "../../lib/upload";
 import { colors, styles } from "../../lib/theme";
 import { ChipSelect } from "../../components/ChipSelect";
 import { PhotoPicker } from "../../components/PhotoPicker";
@@ -25,7 +26,7 @@ import { CityPicker } from "../../components/CityPicker";
 import { RUNNING_LEVELS, TSHIRT_SIZES } from "../../lib/profile";
 
 export default function EditProfile() {
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, getAccessToken } = useAuth();
   const router = useRouter();
 
   const [name, setName] = useState(user?.name ?? "");
@@ -50,6 +51,12 @@ export default function EditProfile() {
 
     setSaving(true);
     try {
+      // Upload a freshly-picked photo first; an unchanged remote URL is reused.
+      let photoUrl: string | undefined;
+      if (photo && !isRemote(photo)) {
+        const token = await getAccessToken();
+        if (token) photoUrl = await uploadAvatar(token, photo);
+      }
       await updateProfile({
         name: name.trim(),
         phone: phone.trim(),
@@ -57,10 +64,11 @@ export default function EditProfile() {
         age: ageNum,
         running_level: level,
         tshirt_size: tshirt ?? undefined,
+        profile_photo: photoUrl,
       });
       router.back();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Something went wrong");
+      setError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setSaving(false);
     }

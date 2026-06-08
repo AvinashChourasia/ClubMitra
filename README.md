@@ -509,3 +509,13 @@ CLOUDINARY_URL=cloudinary://your-cloudinary-url
 | 3 | GPS tracking, GPX upload, city leaderboard, streak freeze | Month 3 |
 | 4 | Social, badges, XP, achievements, public profiles | Month 4–5 |
 | 5+ | League system, coaches, physical events, white-label | Post soft launch |
+
+
+
+
+<!-- # JS / styles / logic / new screens / bug fixes  → OTA, ~20s, no rebuild:
+npx eas-cli update --branch preview -m "what changed"
+#   testers get it on next app open
+
+# native/config only (app.json perms/plugins/icon, new native lib, SDK bump):
+npx eas-cli build -p android --profile preview -->

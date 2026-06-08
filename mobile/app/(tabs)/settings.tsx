@@ -16,7 +16,7 @@ import { colors, styles, useThemeMode, type ThemeMode } from "../../lib/theme";
 import { Avatar } from "../../components/Avatar";
 
 // Where tester feedback is sent. Change to a support address when you have one.
-const FEEDBACK_EMAIL = "avinash.chourasia@verse.in";
+const FEEDBACK_EMAIL = "chourasiaavinash80@gmail.com";
 
 function Row({
   icon,

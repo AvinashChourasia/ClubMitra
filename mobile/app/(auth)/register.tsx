@@ -17,6 +17,7 @@ import {
 import { useRouter } from "expo-router";
 
 import { useAuth } from "../../lib/auth";
+import { uploadAvatar, isRemote } from "../../lib/upload";
 import { ApiError } from "../../lib/api";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 import { ChipSelect } from "../../components/ChipSelect";
@@ -25,7 +26,7 @@ import { CityPicker } from "../../components/CityPicker";
 import { RUNNING_LEVELS, TSHIRT_SIZES } from "../../lib/profile";
 
 export default function Register() {
-  const { register } = useAuth();
+  const { register, updateProfile, getAccessToken } = useAuth();
   const router = useRouter();
   useThemeMode();
 
@@ -67,6 +68,27 @@ export default function Register() {
         running_level: level,
         tshirt_size: tshirt ?? undefined,
       });
+      // Account exists now — upload the photo (if any) and attach it. Best-effort:
+      // a failure here shouldn't block sign-up (they can set it in Profile later).
+      if (photo && !isRemote(photo)) {
+        try {
+          const token = await getAccessToken();
+          if (token) {
+            const url = await uploadAvatar(token, photo);
+            await updateProfile({
+              name: name.trim(),
+              phone: phone.trim(),
+              city: city.trim(),
+              age: ageNum,
+              running_level: level,
+              tshirt_size: tshirt ?? undefined,
+              profile_photo: url,
+            });
+          }
+        } catch {
+          /* non-fatal */
+        }
+      }
       router.replace("/home");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong");
