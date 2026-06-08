@@ -229,17 +229,18 @@ clubmitra/
 - [ ] _(Deferred)_ Redis sorted-set + Lua ZINCRBY — Postgres aggregation is fine at current scale; revisit if it gets slow
 
 #### Trust Score
-- [ ] Trust score per runner: proof submission rate + approval rate + account age
-- [ ] High trust (80+) → activity auto-approved; low trust → manual review queue
-- [ ] Trust score visible on runner profile (badge tier: Basic / Trusted / Verified)
-- [ ] Activity submission method tiers: Manual → Screenshot → Strava link → GPX file
-- [ ] `trust_score_log` audit table
+- [x] Trust score per runner: proof submission rate + approval rate + account age
+- [x] High trust (80+) → activity auto-approved; low trust → manual review queue
+- [x] Trust score visible on runner profile (badge tier: Basic / Trusted / Verified)
+- [x] Activity submission method tiers: Manual → Screenshot → Strava link → GPX file
+- [x] `trust_score_log` audit table
+- [ ] Apply `trust_weight` to the rolling run-log board (challenge credit already weighted)
 
 #### Analytics — Drop-off Dashboard
-- [ ] Members with no activity in 7 / 14 / 30 / 60 days — visible to chapter admin
-- [ ] Weekly engagement rate: % of members who logged at least one activity
-- [ ] Activity volume trend: total km logged per week/month across the club
-- [ ] Analytics cache table — refreshed every 6 hours, not per request
+- [x] Members with no activity in 7 / 14 / 30 / 60 days — visible to chapter admin
+- [x] Weekly engagement rate: % of members who logged at least one activity
+- [x] Activity volume trend: total km logged per week across the club
+- [ ] Analytics cache table — refreshed every 6 hours (computed live for now; cheap at this scale)
 
 #### Extended Member Lifecycle
 - [ ] On Leave status: self-declared, paused from leaderboards temporarily
@@ -247,17 +248,18 @@ clubmitra/
 - [ ] Alumni status: departed member, read-only history, no active participation
 
 #### Inventory
-- [ ] Inventory CRUD: item name, category, quantity, size breakdown (JSONB)
-- [ ] Inventory issue / return flow with stock tracking
-- [ ] Inventory dashboard: stock levels, transaction history
+- [x] Inventory CRUD: item name, category, quantity, size breakdown (JSONB)
+- [x] Inventory issue / return / restock flow with atomic stock tracking
+- [x] Inventory dashboard: stock levels (mobile manage screen) + transaction history (API)
 - [ ] _(Paid purchase + platform cut depends on payments → Phase 3)_
 
 #### Messaging
-- [ ] Club-wide group chat (one per chapter)
-- [ ] Event chat (one per run, members who attend/RSVP)
-- [ ] Photo, video, file sharing in chats (Cloudinary)
-- [ ] Club-wide announcement broadcast (push; email via SendGrid)
-- [ ] Pinned messages per chat
+- [x] Club-wide group chat (one per chapter)
+- [x] Event chat (one per run, members of the chapter)
+- [x] Club-wide announcement broadcast (push; email via SendGrid → Phase 3)
+- [x] Read markers (`message_reads`) for unread badges later
+- [ ] Photo, video, file sharing in chats (schema ready; UI is text-only)
+- [ ] Pinned messages per chat (schema ready; no UI yet)
 - [ ] _(Desktop admin web panel → Phase 3)_
 
 #### Cleanup

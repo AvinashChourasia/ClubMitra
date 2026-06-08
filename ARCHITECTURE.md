@@ -348,7 +348,11 @@ CREATE TABLE device_tokens (
 
 ---
 
-### Messaging Layer *(Phase 2 — new)*
+### Messaging Layer *(Phase 2 — built)*
+
+> Built: chapter + per-run chat, member-gated, admin announcements (also pushed),
+> read markers. Media attachments + pinning have columns but no UI yet.
+
 
 ```
 One conversation per context. Chapter chat = one per chapter; event chat = one
@@ -421,7 +425,7 @@ CREATE INDEX idx_activities_chapter ON activities (chapter_id, started_at DESC);
 
 ---
 
-### Trust Score System *(Phase 2 — new)*
+### Trust Score System *(Phase 2 — built)*
 
 ```
 Trust score is a per-runner credibility metric (0–100, starts at 50).
@@ -521,7 +525,12 @@ CREATE TABLE streak_freezes (
 
 ---
 
-### Analytics Layer *(Phase 2 — new)*
+### Analytics Layer *(Phase 2 — built; live queries, cache deferred)*
+
+> Built: drop-off / engagement / volume computed on the fly from run_logs +
+> run_attendance. The `chapter_analytics_cache` table below is a future
+> optimisation — not yet created (live queries are cheap at current scale).
+
 
 ```
 Drop-off metrics — queried from chapter_members + activities + run_attendance.
@@ -589,7 +598,7 @@ CREATE TABLE user_badges (
 
 ---
 
-### Inventory Layer *(Phase 2 — NOT built yet)*
+### Inventory Layer *(Phase 2 — built; paid purchase Phase 3)*
 
 ```sql
 CREATE TABLE inventory_items (
