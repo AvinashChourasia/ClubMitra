@@ -28,6 +28,7 @@ export function useRunRecorder() {
   const [elapsedS, setElapsedS] = useState(0);
   const [distanceM, setDistanceM] = useState(0);
   const [route, setRoute] = useState<LatLng[]>([]); // live trace for the HUD map
+  const [times, setTimes] = useState<number[]>([]); // epoch ms per vertex (pace gradient)
 
   const points = useRef<RunPoint[]>([]); // foreground engine only
   const lastAccepted = useRef<GpsSample | null>(null);
@@ -58,6 +59,7 @@ export function useRunRecorder() {
     setElapsedS(0);
     setDistanceM(0);
     setRoute([]);
+    setTimes([]);
     startMs.current = Date.now();
 
     if (isExpoGo) {
@@ -79,6 +81,7 @@ export function useRunRecorder() {
           lastAccepted.current = sample;
           points.current.push({ lat: sample.lat, lng: sample.lng, altitude: sample.altitude, timestamp: new Date(sample.timestamp).toISOString() });
           setRoute((prev) => [...prev, { latitude: sample.lat, longitude: sample.lng }]);
+          setTimes((prev) => [...prev, sample.timestamp]);
           if (d > 0) setDistanceM((prev) => prev + d);
         }
       );
@@ -94,6 +97,7 @@ export function useRunRecorder() {
           setElapsedS(Math.floor((Date.now() - s.startMs) / 1000));
           setDistanceM(s.distanceM);
           setRoute(s.points.map((p) => ({ latitude: p.lat, longitude: p.lng })));
+          setTimes(s.points.map((p) => Date.parse(p.timestamp)));
         }
       }, 1000);
     }
@@ -111,5 +115,5 @@ export function useRunRecorder() {
 
   const livePaceSPerKm = distanceM > 0 ? elapsedS / (distanceM / 1000) : null;
 
-  return { status, elapsedS, distanceM, livePaceSPerKm, route, start, stop };
+  return { status, elapsedS, distanceM, livePaceSPerKm, route, times, start, stop };
 }

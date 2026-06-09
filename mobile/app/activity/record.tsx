@@ -22,7 +22,7 @@ import { colors } from "../../lib/theme";
 export default function RecordRun() {
   const { getAccessToken } = useAuth();
   const router = useRouter();
-  const { status, elapsedS, distanceM, livePaceSPerKm, route, start, stop } = useRunRecorder();
+  const { status, elapsedS, distanceM, livePaceSPerKm, route, times, start, stop } = useRunRecorder();
   const [uploading, setUploading] = useState(false);
   // Whether this run should count toward joined challenges. Default yes; the
   // user can flip it off for a warm-up / test run before finishing.
@@ -114,8 +114,8 @@ export default function RecordRun() {
           <StatCard label="Speed" value={formatSpeed(distanceM, elapsedS)} />
         </StatRow>
 
-        {/* Live route trace (grows as you run) */}
-        {recording && <RouteTrace coords={route} height={180} live />}
+        {/* Live route trace (grows as you run), coloured by pace */}
+        {recording && <RouteTrace coords={route} times={times} height={180} live />}
 
         {/* Controls */}
         <View style={{ gap: 12 }}>
