@@ -86,7 +86,7 @@ export const gradients = {
   ink: ["#1E293B", "#0B1220"] as const,
   cool: ["#6366F1", "#4F46E5"] as const,
   sunset: ["#FB7185", "#F59E0B"] as const,
-  gloss: ["rgba(255,255,255,0.28)", "rgba(255,255,255,0.04)", "rgba(255,255,255,0)"] as const,
+  gloss: ["rgba(255,255,255,0.14)", "rgba(255,255,255,0.03)", "rgba(255,255,255,0)"] as const,
 };
 
 // Soft, layered elevation tiers (bigger radius + softer falloff = more depth).
@@ -100,9 +100,10 @@ export const shadow = {
   raised: { shadowColor: "#0B1220", shadowOpacity: 0.12, shadowRadius: 30, shadowOffset: { width: 0, height: 16 }, elevation: 8 },
 };
 
-// glow returns a colored shadow that makes gradient heroes feel lit from within.
-export function glow(color: string, opacity = 0.4) {
-  return { shadowColor: color, shadowOpacity: opacity, shadowRadius: 26, shadowOffset: { width: 0, height: 14 }, elevation: 12 };
+// glow returns a soft colored shadow under gradient heroes — kept subtle so it
+// reads as quiet depth, not a neon halo.
+export function glow(color: string, opacity = 0.22) {
+  return { shadowColor: color, shadowOpacity: opacity, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 8 };
 }
 
 // makeStyles builds the shared stylesheet for a palette. In dark mode cards get a
@@ -130,10 +131,10 @@ function makeStyles(c: Palette, isDark: boolean) {
       paddingVertical: 16,
       alignItems: "center",
       shadowColor: c.primary,
-      shadowOpacity: 0.32,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 10 },
-      elevation: 4,
+      shadowOpacity: 0.2,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 3,
     },
     buttonDisabled: { opacity: 0.6 },
     buttonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700", letterSpacing: 0.2 },

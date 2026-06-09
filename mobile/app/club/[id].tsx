@@ -37,7 +37,7 @@ import {
 import { leaderboard, type BoardEntry, type Period } from "../../lib/runlog";
 import { getDropoff, getEngagement, getVolume, type Dropoff, type Engagement, type VolumePoint } from "../../lib/analytics";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
-import { LinearGradient } from "expo-linear-gradient";
+import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
 import { Avatar } from "../../components/Avatar";
 import { RunScheduleView } from "../../components/RunScheduleView";
@@ -458,14 +458,9 @@ export default function ClubDetail() {
                 </View>
               </ImageBackground>
             ) : (
-              <LinearGradient
-                colors={gradients.red}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={{ borderRadius: 22, padding: 20, flexDirection: "row", alignItems: "center", gap: 14, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 5 }}
-              >
+              <GradientCard colors={gradients.red} glowColor={colors.primary} radius={22} style={{ padding: 20, flexDirection: "row", alignItems: "center", gap: 14 }}>
                 {headerInner}
-              </LinearGradient>
+              </GradientCard>
             )}
 
             {/* Invite code (compact) */}

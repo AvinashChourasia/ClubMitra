@@ -13,6 +13,7 @@ import { myChapters, type MyChapter } from "../../lib/clubs";
 import { logRun } from "../../lib/runlog";
 import { Calendar, toDateStr } from "../../components/Calendar";
 import { ChipSelect } from "../../components/ChipSelect";
+import { Button } from "../../components/Button";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 
 export default function LogRun() {
@@ -128,9 +129,7 @@ export default function LogRun() {
 
               {error && <Text style={styles.error}>{error}</Text>}
 
-              <Pressable style={[styles.button, saving && styles.buttonDisabled]} onPress={onSave} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log run</Text>}
-              </Pressable>
+              <Button label="Log run" onPress={onSave} loading={saving} />
             </>
           )}
         </ScrollView>

@@ -10,6 +10,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../lib/auth";
 import { ApiError } from "../../lib/api";
+import { Tap } from "../../components/Tap";
+import { Button } from "../../components/Button";
 import { scheduleRuns, expandOccurrences, FREQUENCY_OPTIONS, type Frequency } from "../../lib/attendance";
 import { colors, styles } from "../../lib/theme";
 import { ChipSelect } from "../../components/ChipSelect";
@@ -159,12 +161,8 @@ export default function NewRun() {
 
         {error && <Text style={styles.error}>{error}</Text>}
 
-        <Pressable style={[styles.button, submitting && styles.buttonDisabled]} onPress={onSubmit} disabled={submitting}>
-          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Schedule</Text>}
-        </Pressable>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.link}>Cancel</Text>
-        </Pressable>
+        <Button label="Schedule" onPress={onSubmit} loading={submitting} />
+        <Tap onPress={() => router.back()} haptic={false}><Text style={styles.link}>Cancel</Text></Tap>
       </ScrollView>
     </SafeAreaView>
   );

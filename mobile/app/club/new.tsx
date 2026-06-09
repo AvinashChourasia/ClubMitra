@@ -18,6 +18,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../lib/auth";
 import { ApiError } from "../../lib/api";
+import { Tap } from "../../components/Tap";
+import { Button } from "../../components/Button";
 import { createOrg, createChapter } from "../../lib/clubs";
 import { uploadClubImage, isRemote } from "../../lib/upload";
 import { colors, styles } from "../../lib/theme";
@@ -100,12 +102,8 @@ export default function NewClub() {
 
           {error && <Text style={styles.error}>{error}</Text>}
 
-          <Pressable style={[styles.button, submitting && styles.buttonDisabled]} onPress={onSubmit} disabled={submitting}>
-            {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Create club</Text>}
-          </Pressable>
-          <Pressable onPress={() => router.back()}>
-            <Text style={styles.link}>Cancel</Text>
-          </Pressable>
+          <Button label="Create club" onPress={onSubmit} loading={submitting} />
+          <Tap onPress={() => router.back()} haptic={false}><Text style={styles.link}>Cancel</Text></Tap>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

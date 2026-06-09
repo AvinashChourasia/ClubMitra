@@ -41,9 +41,9 @@ export function Button({ label, onPress, loading, disabled, variant = "primary",
           gap: 8,
           borderWidth: variant === "primary" ? 0 : 1,
           borderColor: isDanger ? colors.danger : colors.border,
-          // brand glow only on the primary CTA
+          // a quiet brand glow only on the primary CTA
           ...(isPrimary
-            ? { shadowColor: colors.primary, shadowOpacity: 0.32, shadowRadius: 16, shadowOffset: { width: 0, height: 10 }, elevation: 4 }
+            ? { shadowColor: colors.primary, shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 3 }
             : null),
         }}
       >

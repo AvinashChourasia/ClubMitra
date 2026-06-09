@@ -18,6 +18,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../lib/auth";
 import { ApiError } from "../../lib/api";
+import { Tap } from "../../components/Tap";
+import { Button } from "../../components/Button";
 import { uploadAvatar, isRemote } from "../../lib/upload";
 import { colors, styles } from "../../lib/theme";
 import { ChipSelect } from "../../components/ChipSelect";
@@ -100,12 +102,8 @@ export default function EditProfile() {
 
           {error && <Text style={styles.error}>{error}</Text>}
 
-          <Pressable style={[styles.button, saving && styles.buttonDisabled]} onPress={onSave} disabled={saving}>
-            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Update profile</Text>}
-          </Pressable>
-          <Pressable onPress={() => router.back()}>
-            <Text style={styles.link}>Cancel</Text>
-          </Pressable>
+          <Button label="Update profile" onPress={onSave} loading={saving} />
+          <Tap onPress={() => router.back()} haptic={false}><Text style={styles.link}>Cancel</Text></Tap>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

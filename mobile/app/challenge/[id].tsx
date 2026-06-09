@@ -36,7 +36,7 @@ import {
   type LeaderboardEntry,
   type Proof,
 } from "../../lib/challenges";
-import { LinearGradient } from "expo-linear-gradient";
+import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
 
 import { ProgressBar } from "../../components/ProgressBar";
@@ -196,12 +196,7 @@ export default function ChallengeDetail() {
         ) : challenge ? (
           <>
             {/* Gradient header */}
-            <LinearGradient
-              colors={gradients.red}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={{ borderRadius: 22, padding: 20, gap: 12, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 5 }}
-            >
+            <GradientCard colors={gradients.red} glowColor={colors.primary} radius={22} style={{ padding: 20, gap: 12 }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                 <Text style={{ flex: 1, fontSize: 23, fontWeight: "800", color: "#fff", letterSpacing: -0.3 }}>{challenge.title}</Text>
                 <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" }}>
@@ -218,7 +213,7 @@ export default function ChallengeDetail() {
                 <HeroStat icon="flag" label="Goal" value={`${target} ${unit}`} />
                 <HeroStat icon="calendar-clear" label="Window" value={`${fmtDate(challenge.start_date)} – ${fmtDate(challenge.end_date)}`} />
               </View>
-            </LinearGradient>
+            </GradientCard>
 
             {/* Join / progress (gated by the challenge phase) */}
             {challenge.joined ? (
