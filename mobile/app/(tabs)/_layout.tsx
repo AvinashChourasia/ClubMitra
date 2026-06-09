@@ -36,7 +36,8 @@ export default function TabsLayout() {
       <Tabs.Screen name="clubs" options={{ title: "Clubs", tabBarIcon: tab("people", "people-outline") }} />
       <Tabs.Screen name="challenges" options={{ title: "Challenges", tabBarIcon: tab("trophy", "trophy-outline") }} />
       <Tabs.Screen name="profile" options={{ title: "Profile", tabBarIcon: tab("person-circle", "person-circle-outline") }} />
-      <Tabs.Screen name="settings" options={{ title: "Settings", tabBarIcon: tab("settings", "settings-outline") }} />
+      {/* Settings is reached from the gear icon on the Profile tab (app/settings.tsx),
+          so it's intentionally not a bottom-bar tab. */}
     </Tabs>
   );
 }

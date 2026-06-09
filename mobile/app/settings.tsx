@@ -1,6 +1,7 @@
-// Settings tab: account, appearance (light/dark), and other preferences.
-// Calling useThemeMode() subscribes this screen so a theme toggle re-themes it
-// instantly.
+// Settings screen: account, appearance (light/dark), and other preferences.
+// Reached from the settings icon on the Profile tab (pushed over the tabs, not a
+// tab itself). Calling useThemeMode() subscribes it so a theme toggle re-themes
+// it instantly.
 
 import { useEffect, useState } from "react";
 import { Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
@@ -10,10 +11,10 @@ import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import * as Updates from "expo-updates";
 
-import { useAuth } from "../../lib/auth";
-import { request } from "../../lib/api";
-import { colors, styles, useThemeMode, type ThemeMode } from "../../lib/theme";
-import { Avatar } from "../../components/Avatar";
+import { useAuth } from "../lib/auth";
+import { request } from "../lib/api";
+import { colors, styles, useThemeMode, type ThemeMode } from "../lib/theme";
+import { Avatar } from "../components/Avatar";
 
 // Where tester feedback is sent. Change to a support address when you have one.
 const FEEDBACK_EMAIL = "chourasiaavinash80@gmail.com";
@@ -99,7 +100,12 @@ export default function Settings() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }}>
-        <Text style={{ fontSize: 26, fontWeight: "800", color: colors.text }}>Settings</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Pressable onPress={() => router.back()} hitSlop={10} style={{ marginLeft: -4 }}>
+            <Ionicons name="chevron-back" size={28} color={colors.text} />
+          </Pressable>
+          <Text style={{ fontSize: 26, fontWeight: "800", color: colors.text }}>Settings</Text>
+        </View>
 
         {/* Account */}
         <View style={styles.card}>
