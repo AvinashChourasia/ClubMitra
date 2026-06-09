@@ -86,7 +86,8 @@ export async function stopRun(): Promise<RunPoint[]> {
 }
 
 // activeStats is the live HUD source while recording (polled by the screen).
-export async function activeStats(): Promise<{ startMs: number; distanceM: number; points: number } | null> {
+// Returns the full point track so the screen can draw the live route trace.
+export async function activeStats(): Promise<{ startMs: number; distanceM: number; points: RunPoint[] } | null> {
   const a = await readActive();
-  return a ? { startMs: a.startMs, distanceM: a.distanceM, points: a.points.length } : null;
+  return a ? { startMs: a.startMs, distanceM: a.distanceM, points: a.points } : null;
 }

@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as Location from "expo-location";
 import Constants from "expo-constants";
 
-import type { RunPoint } from "./activities";
+import type { LatLng, RunPoint } from "./activities";
 import { evaluateSample, type GpsSample } from "./gpsFilter";
 import { startRun, stopRun, activeStats } from "./locationTask";
 
@@ -27,6 +27,7 @@ export function useRunRecorder() {
   const [status, setStatus] = useState<RunStatus>("idle");
   const [elapsedS, setElapsedS] = useState(0);
   const [distanceM, setDistanceM] = useState(0);
+  const [route, setRoute] = useState<LatLng[]>([]); // live trace for the HUD map
 
   const points = useRef<RunPoint[]>([]); // foreground engine only
   const lastAccepted = useRef<GpsSample | null>(null);
@@ -56,6 +57,7 @@ export function useRunRecorder() {
     lastAccepted.current = null;
     setElapsedS(0);
     setDistanceM(0);
+    setRoute([]);
     startMs.current = Date.now();
 
     if (isExpoGo) {
@@ -76,6 +78,7 @@ export function useRunRecorder() {
           if (!accept) return;
           lastAccepted.current = sample;
           points.current.push({ lat: sample.lat, lng: sample.lng, altitude: sample.altitude, timestamp: new Date(sample.timestamp).toISOString() });
+          setRoute((prev) => [...prev, { latitude: sample.lat, longitude: sample.lng }]);
           if (d > 0) setDistanceM((prev) => prev + d);
         }
       );
@@ -90,6 +93,7 @@ export function useRunRecorder() {
         if (s) {
           setElapsedS(Math.floor((Date.now() - s.startMs) / 1000));
           setDistanceM(s.distanceM);
+          setRoute(s.points.map((p) => ({ latitude: p.lat, longitude: p.lng })));
         }
       }, 1000);
     }
@@ -107,5 +111,5 @@ export function useRunRecorder() {
 
   const livePaceSPerKm = distanceM > 0 ? elapsedS / (distanceM / 1000) : null;
 
-  return { status, elapsedS, distanceM, livePaceSPerKm, start, stop };
+  return { status, elapsedS, distanceM, livePaceSPerKm, route, start, stop };
 }

@@ -88,7 +88,7 @@ export function getRouteGeoJSON(token: string, id: string): Promise<RouteGeoJSON
 }
 
 // A map-friendly coordinate. We convert GeoJSON's [lng, lat] into the named
-// {latitude, longitude} shape react-native-maps expects, in one place.
+// {latitude, longitude} shape the RouteTrace expects, in one place.
 export type LatLng = { latitude: number; longitude: number };
 
 export function geoJSONToLatLng(route: RouteGeoJSON): LatLng[] {

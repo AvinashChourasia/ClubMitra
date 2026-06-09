@@ -1,13 +1,12 @@
 // Activity detail screen. The route segment "[id]" makes this a dynamic route:
 // navigating to /activity/<uuid> lands here, and useLocalSearchParams gives us
-// the id. We fetch the run + its route GeoJSON, draw the route on a map, and
-// show the full stat breakdown.
+// the id. We fetch the run + its route GeoJSON, draw the route as an SVG trace
+// (no map tiles / API key), and show the full stat breakdown.
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import MapView, { Polyline, Marker, PROVIDER_DEFAULT } from "react-native-maps";
 
 import { useAuth } from "../../lib/auth";
 import {
@@ -18,7 +17,7 @@ import {
   type Activity,
   type LatLng,
 } from "../../lib/activities";
-import { regionForRoute } from "../../lib/mapRegion";
+import { RouteTrace } from "../../components/RouteTrace";
 import { ElevationChart } from "../../components/ElevationChart";
 import {
   formatDistance,
@@ -33,7 +32,6 @@ import { colors } from "../../lib/theme";
 export default function ActivityDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getAccessToken } = useAuth();
-  const router = useRouter();
 
   const [activity, setActivity] = useState<Activity | null>(null);
   const [route, setRoute] = useState<LatLng[]>([]);
@@ -67,8 +65,6 @@ export default function ActivityDetail() {
     };
   }, [id, getAccessToken]);
 
-  const region = regionForRoute(route);
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["bottom"]}>
       {/* A native header with a back button, titled "Run". */}
@@ -84,32 +80,8 @@ export default function ActivityDetail() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ gap: 16, padding: 16 }}>
-          {/* Map with the route polyline + start/end markers */}
-          {region && route.length >= 2 ? (
-            <MapView
-              provider={PROVIDER_DEFAULT}
-              style={{ height: 260, borderRadius: 16 }}
-              initialRegion={region}
-              scrollEnabled
-              zoomEnabled
-            >
-              <Polyline coordinates={route} strokeColor={colors.primary} strokeWidth={4} />
-              <Marker coordinate={route[0]} title="Start" pinColor="green" />
-              <Marker coordinate={route[route.length - 1]} title="Finish" pinColor="red" />
-            </MapView>
-          ) : (
-            <View
-              style={{
-                height: 160,
-                borderRadius: 16,
-                backgroundColor: colors.bgSecondary,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text style={{ color: colors.muted }}>No route to display</Text>
-            </View>
-          )}
+          {/* Route trace (SVG — no map tiles, no API key) */}
+          <RouteTrace coords={route} height={260} />
 
           {/* Date + headline distance */}
           <View>
