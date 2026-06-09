@@ -28,7 +28,7 @@ export default function RecordRun() {
   const [countToward, setCountToward] = useState(true);
 
   async function onFinish() {
-    const points = stop();
+    const points = await stop();
     if (points.length < 2) {
       Alert.alert("Run too short", "We didn't capture enough GPS points. Try moving around a bit.");
       return;

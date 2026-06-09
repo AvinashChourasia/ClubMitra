@@ -17,6 +17,7 @@ import {
 } from "@expo-google-fonts/inter";
 
 import "../lib/applyFont"; // patch Text -> Inter (by weight), before any render
+import "../lib/locationTask"; // register the background run-tracking task at launch
 import { AuthProvider } from "../lib/auth";
 import { ThemeProvider, useThemeMode, colors } from "../lib/theme";
 

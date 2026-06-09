@@ -38,7 +38,10 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "ClubMitra uses your location to record your run route, distance, and pace."
+          "locationWhenInUsePermission": "ClubMitra uses your location to record your run route, distance, and pace.",
+          "locationAlwaysAndWhenInUsePermission": "ClubMitra keeps recording your run in the background so your route and distance are accurate even with the screen off.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
         }
       ],
       [

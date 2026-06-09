@@ -17,6 +17,7 @@ import { runningLevelLabel } from "../../lib/profile";
 import { formatRunWhen, isPast } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
 import { GradientCard } from "../../components/GradientCard";
+import { Tap } from "../../components/Tap";
 
 // tierColor maps a trust tier to its accent colour (basic → muted, trusted →
 // brand accent, verified → success green).
@@ -157,6 +158,18 @@ export default function Profile() {
             <Text style={{ color: colors.muted, fontSize: 12, marginTop: 10 }}>{TIER_META[trust.trust_tier].explain}</Text>
           </View>
         )}
+
+        {/* Your runs (GPS history) */}
+        <Tap onPress={() => router.push("/activity")} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
+          <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="map" size={22} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Your runs</Text>
+            <Text style={{ color: colors.muted, fontSize: 13 }}>GPS history, routes &amp; stats</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
+        </Tap>
 
         {/* Clubs (shown before schedule) */}
         <View style={styles.card}>
