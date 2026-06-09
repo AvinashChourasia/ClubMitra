@@ -82,9 +82,24 @@ export function elevationSeries(route: RouteGeoJSON): number[] {
   return out;
 }
 
-// getRouteGeoJSON fetches the run's route geometry for drawing on a map.
-export function getRouteGeoJSON(token: string, id: string): Promise<RouteGeoJSON> {
-  return request<RouteGeoJSON>(`/activities/${id}/geojson`, { token });
+// The route endpoint's body: the GeoJSON geometry plus per-vertex
+// seconds-from-start offsets (null for runs recorded before offsets existed),
+// aligned 1:1 with the geometry's coordinates so we can colour by pace.
+export type RouteResponse = {
+  geometry: RouteGeoJSON;
+  offsets_s: number[] | null;
+};
+
+// getRoute fetches the run's route geometry + per-vertex pace offsets.
+export function getRoute(token: string, id: string): Promise<RouteResponse> {
+  return request<RouteResponse>(`/activities/${id}/geojson`, { token });
+}
+
+// offsetsToTimes converts seconds-from-start offsets into the per-vertex "times"
+// (ms) that RouteTrace/RunMap want. Only the deltas matter, so a zero base is
+// fine. Returns undefined when the run has no offsets (older runs).
+export function offsetsToTimes(offsets: number[] | null): number[] | undefined {
+  return offsets ? offsets.map((s) => s * 1000) : undefined;
 }
 
 // A map-friendly coordinate. We convert GeoJSON's [lng, lat] into the named

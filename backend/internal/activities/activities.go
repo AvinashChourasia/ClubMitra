@@ -40,7 +40,8 @@ type NewActivity struct {
 	EndedAt        time.Time
 	DurationS      int
 	ElevationGainM float64
-	RouteEWKT      string // "SRID=4326;LINESTRING(...)" from geo.LineStringEWKT
+	RouteEWKT      string    // "SRID=4326;LINESTRING(...)" from geo.LineStringEWKT
+	PointOffsets   []float64 // seconds-from-start per route vertex, aligned 1:1
 }
 
 // Repository is the data-access layer for activities.
@@ -69,7 +70,7 @@ func (r *Repository) Create(ctx context.Context, a NewActivity) (*Activity, erro
 		)
 		INSERT INTO activities (
 			user_id, started_at, ended_at, duration_s,
-			distance_m, avg_pace_s_per_km, elevation_gain_m, route
+			distance_m, avg_pace_s_per_km, elevation_gain_m, route, point_offsets
 		)
 		SELECT
 			$1, $2, $3, $4::int,
@@ -79,7 +80,8 @@ func (r *Repository) Create(ctx context.Context, a NewActivity) (*Activity, erro
 			-- point. NULLIF guards divide-by-zero (zero-distance run -> NULL pace).
 			$4::double precision / NULLIF(ST_Length(input.route), 0) * 1000.0,
 			$5,
-			input.route
+			input.route,
+			$7
 		FROM input
 		RETURNING id, user_id, started_at, ended_at, duration_s,
 		          distance_m, avg_pace_s_per_km, elevation_gain_m, created_at`
@@ -87,7 +89,7 @@ func (r *Repository) Create(ctx context.Context, a NewActivity) (*Activity, erro
 	var act Activity
 	err := r.db.QueryRow(ctx, q,
 		a.UserID, a.StartedAt, a.EndedAt, a.DurationS,
-		a.ElevationGainM, a.RouteEWKT,
+		a.ElevationGainM, a.RouteEWKT, a.PointOffsets,
 	).Scan(
 		&act.ID, &act.UserID, &act.StartedAt, &act.EndedAt, &act.DurationS,
 		&act.DistanceM, &act.AvgPaceSPerKM, &act.ElevationGainM, &act.CreatedAt,
@@ -156,24 +158,27 @@ func (r *Repository) GetByID(ctx context.Context, userID string, id uuid.UUID) (
 	return &act, nil
 }
 
-// RouteGeoJSON returns the run's route as a GeoJSON geometry string, computed by
-// PostGIS (ST_AsGeoJSON). GeoJSON is the lingua franca for web/mobile maps, so
-// the client can hand it almost directly to a map library. Ownership-checked.
-func (r *Repository) RouteGeoJSON(ctx context.Context, userID string, id uuid.UUID) (string, error) {
+// RouteWithMeta returns the run's route as a GeoJSON geometry string (computed by
+// PostGIS via ST_AsGeoJSON) plus the per-vertex seconds-from-start offsets,
+// aligned 1:1 with the geometry's coordinates so the client can colour the route
+// by pace. offsets is nil for runs recorded before offsets were stored.
+// Ownership-checked.
+func (r *Repository) RouteWithMeta(ctx context.Context, userID string, id uuid.UUID) (string, []float64, error) {
 	const q = `
-		SELECT ST_AsGeoJSON(route)
+		SELECT ST_AsGeoJSON(route), point_offsets
 		FROM activities
 		WHERE id = $1 AND user_id = $2`
 
 	var geojson string
-	err := r.db.QueryRow(ctx, q, id, userID).Scan(&geojson)
+	var offsets []float64
+	err := r.db.QueryRow(ctx, q, id, userID).Scan(&geojson, &offsets)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
+		return "", nil, ErrNotFound
 	}
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return geojson, nil
+	return geojson, offsets, nil
 }
 
 // Stats holds aggregate numbers for the profile/home dashboard. Pointers are

@@ -74,6 +74,14 @@ func (s *Service) Record(ctx context.Context, userID string, points []geo.Point,
 		return nil, ValidationError{Msg: "run duration must be positive"}
 	}
 
+	// Seconds-from-start of each point, aligned 1:1 with the route's vertices —
+	// the client uses these to colour the route by pace.
+	start := points[0].Timestamp
+	offsets := make([]float64, len(points))
+	for i, p := range points {
+		offsets[i] = p.Timestamp.Sub(start).Seconds()
+	}
+
 	na := NewActivity{
 		UserID:         userID,
 		StartedAt:      points[0].Timestamp,
@@ -81,6 +89,7 @@ func (s *Service) Record(ctx context.Context, userID string, points []geo.Point,
 		DurationS:      int(duration / time.Second),
 		ElevationGainM: geo.ElevationGain(points, elevationNoiseThresholdM),
 		RouteEWKT:      geo.LineStringEWKT(points),
+		PointOffsets:   offsets,
 	}
 	act, err := s.repo.Create(ctx, na)
 	if err != nil {
@@ -116,7 +125,8 @@ func (s *Service) Stats(ctx context.Context, userID string) (*Stats, error) {
 	return s.repo.Stats(ctx, userID)
 }
 
-// RouteGeoJSON returns the run's route as a GeoJSON geometry string.
-func (s *Service) RouteGeoJSON(ctx context.Context, userID string, id uuid.UUID) (string, error) {
-	return s.repo.RouteGeoJSON(ctx, userID, id)
+// RouteWithMeta returns the run's route GeoJSON geometry plus per-vertex
+// seconds-from-start offsets (nil for older runs).
+func (s *Service) RouteWithMeta(ctx context.Context, userID string, id uuid.UUID) (string, []float64, error) {
+	return s.repo.RouteWithMeta(ctx, userID, id)
 }

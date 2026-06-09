@@ -7,11 +7,13 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Constants from "expo-constants";
 
 import { useAuth } from "../../lib/auth";
 import {
   getActivity,
-  getRouteGeoJSON,
+  getRoute,
+  offsetsToTimes,
   geoJSONToLatLng,
   elevationSeries,
   type Activity,
@@ -19,6 +21,13 @@ import {
 } from "../../lib/activities";
 import { RouteTrace } from "../../components/RouteTrace";
 import { ElevationChart } from "../../components/ElevationChart";
+
+// react-native-maps is a native module absent from Expo Go, so we only pull it
+// in (and render the interactive map) in a dev/standalone build. Expo Go gets
+// the SVG RouteTrace fallback — which still draws the pace-coloured route.
+const isExpoGo = Constants.appOwnership === "expo";
+const RunMap: React.ComponentType<{ coords: LatLng[]; times?: number[]; height?: number }> | null =
+  isExpoGo ? null : require("../../components/RunMap").RunMap;
 import {
   formatDistance,
   formatDuration,
@@ -35,6 +44,7 @@ export default function ActivityDetail() {
 
   const [activity, setActivity] = useState<Activity | null>(null);
   const [route, setRoute] = useState<LatLng[]>([]);
+  const [times, setTimes] = useState<number[] | undefined>(undefined);
   const [elevation, setElevation] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,14 +56,15 @@ export default function ActivityDetail() {
         const token = await getAccessToken();
         if (!token) throw new Error("Not logged in");
         // Fetch the run and its route in parallel — they're independent.
-        const [act, geo] = await Promise.all([
+        const [act, routeRes] = await Promise.all([
           getActivity(token, id),
-          getRouteGeoJSON(token, id),
+          getRoute(token, id),
         ]);
         if (!active) return;
         setActivity(act);
-        setRoute(geoJSONToLatLng(geo));
-        setElevation(elevationSeries(geo));
+        setRoute(geoJSONToLatLng(routeRes.geometry));
+        setTimes(offsetsToTimes(routeRes.offsets_s));
+        setElevation(elevationSeries(routeRes.geometry));
       } catch {
         if (active) setError("Couldn't load this run.");
       } finally {
@@ -80,8 +91,12 @@ export default function ActivityDetail() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ gap: 16, padding: 16 }}>
-          {/* Route trace (SVG — no map tiles, no API key) */}
-          <RouteTrace coords={route} height={260} />
+          {/* Interactive native map in a dev build; SVG trace fallback in Expo Go */}
+          {RunMap ? (
+            <RunMap coords={route} times={times} height={260} />
+          ) : (
+            <RouteTrace coords={route} times={times} height={260} />
+          )}
 
           {/* Date + headline distance */}
           <View>

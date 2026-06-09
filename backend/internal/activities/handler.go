@@ -1,6 +1,7 @@
 package activities
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -160,9 +161,10 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, act)
 }
 
-// geojson returns the route as a GeoJSON geometry. PostGIS already produced a
-// valid JSON string, so we write it through directly with the right content type
-// rather than decoding and re-encoding it.
+// geojson returns the route as a GeoJSON geometry plus per-vertex pace data.
+// PostGIS already produced a valid GeoJSON geometry string; we embed it as raw
+// JSON (no decode/re-encode) under "geometry" and attach the seconds-from-start
+// offsets so the client can colour the route by pace.
 func (h *Handler) geojson(w http.ResponseWriter, r *http.Request) {
 	userID, ok := httpx.UserIDFromContext(r.Context())
 	if !ok {
@@ -174,7 +176,7 @@ func (h *Handler) geojson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	geo, err := h.svc.RouteGeoJSON(r.Context(), userID, id)
+	geometry, offsets, err := h.svc.RouteWithMeta(r.Context(), userID, id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "activity not found")
@@ -183,7 +185,16 @@ func (h *Handler) geojson(w http.ResponseWriter, r *http.Request) {
 		httpx.InternalError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/geo+json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(geo))
+	httpx.JSON(w, http.StatusOK, routeResponse{
+		Geometry: json.RawMessage(geometry),
+		OffsetsS: offsets,
+	})
+}
+
+// routeResponse is the route endpoint's body: the GeoJSON geometry plus the
+// per-vertex seconds-from-start offsets (null for runs recorded before offsets
+// were stored).
+type routeResponse struct {
+	Geometry json.RawMessage `json:"geometry"`
+	OffsetsS []float64       `json:"offsets_s"`
 }

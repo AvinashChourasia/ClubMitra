@@ -15,6 +15,7 @@ import { Text, View, type ViewStyle } from "react-native";
 import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 
 import type { LatLng } from "../lib/activities";
+import { haversine, paceColorRamp } from "../lib/pace";
 import { colors } from "../lib/theme";
 
 type Props = {
@@ -37,9 +38,9 @@ export function RouteTrace({ coords, height = 220, times, weight = 5, live = fal
   const fitted = useMemo(() => project(coords, height), [coords, height]);
   const kmMarks = useMemo(() => (fitted ? kmMarkers(coords, fitted) : []), [coords, fitted]);
   const segments = useMemo(() => {
-    if (!fitted || !times || times.length !== coords.length) return null;
-    const paces = paceFromTimes(coords, times);
-    return paces.some((p) => p != null) ? paceSegments(fitted.pts, paces) : null;
+    if (!fitted || !times) return null;
+    const ramp = paceColorRamp(coords, times);
+    return ramp ? paceSegments(fitted.pts, ramp) : null;
   }, [fitted, coords, times]);
 
   if (!fitted || coords.length < 2) {
@@ -178,68 +179,13 @@ function kmMarkers(coords: LatLng[], fitted: { pts: { x: number; y: number }[] }
   return out;
 }
 
-// paceFromTimes derives a per-vertex pace (sec/km) from coordinates + per-vertex
-// timestamps, then lightly smooths it with a rolling window so GPS jitter doesn't
-// make the colour flicker segment-to-segment.
-function paceFromTimes(coords: LatLng[], times: number[]): (number | null)[] {
-  const raw: (number | null)[] = [null];
-  for (let i = 1; i < coords.length; i++) {
-    const d = haversine(coords[i - 1], coords[i]);
-    const dt = (times[i] - times[i - 1]) / 1000;
-    raw.push(d > 1 && dt > 0 ? dt / (d / 1000) : null);
-  }
-  // Rolling average over ±2 neighbours (ignoring nulls).
-  return raw.map((_, i) => {
-    let sum = 0, n = 0;
-    for (let j = Math.max(0, i - 2); j <= Math.min(raw.length - 1, i + 2); j++) {
-      if (raw[j] != null) { sum += raw[j] as number; n++; }
-    }
-    return n ? sum / n : null;
-  });
-}
-
-// paceSegments builds coloured line segments from per-vertex pace. Pace is
-// normalised to the run's own 10th–90th percentile so the ramp reads well for
-// any runner, then mapped green (fast) → amber → red (slow). Downsampled so a
-// long run doesn't emit thousands of SVG nodes.
-function paceSegments(pts: { x: number; y: number }[], paces: (number | null)[]) {
-  const valid = paces.filter((p): p is number => p != null && isFinite(p) && p > 0).sort((a, b) => a - b);
-  if (valid.length < 2) return null;
-  const lo = valid[Math.floor(valid.length * 0.1)];
-  const hi = valid[Math.floor(valid.length * 0.9)] || lo + 1;
-
+// paceSegments connects consecutive (downsampled) points with the pace colour
+// from the ramp, so a long run doesn't emit thousands of SVG nodes.
+function paceSegments(pts: { x: number; y: number }[], ramp: string[]) {
   const step = Math.max(1, Math.ceil(pts.length / MAX_SEG));
   const segs: { x1: number; y1: number; x2: number; y2: number; color: string }[] = [];
   for (let i = step; i < pts.length; i += step) {
-    const p = paces[i] ?? paces[i - 1];
-    const t = p == null ? 0.5 : clamp01((p - lo) / (hi - lo || 1)); // 0 fast → 1 slow
-    segs.push({ x1: pts[i - step].x, y1: pts[i - step].y, x2: pts[i].x, y2: pts[i].y, color: paceColor(t) });
+    segs.push({ x1: pts[i - step].x, y1: pts[i - step].y, x2: pts[i].x, y2: pts[i].y, color: ramp[i] ?? ramp[i - step] });
   }
   return segs;
-}
-
-// paceColor ramps 0 (fast) → green, 0.5 → amber, 1 (slow) → red.
-function paceColor(t: number): string {
-  const c = t < 0.5
-    ? mix([22, 163, 74], [245, 158, 11], t / 0.5) // green → amber
-    : mix([245, 158, 11], [220, 38, 38], (t - 0.5) / 0.5); // amber → red
-  return `rgb(${c[0]},${c[1]},${c[2]})`;
-}
-
-function mix(a: number[], b: number[], t: number): number[] {
-  return [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t));
-}
-function clamp01(n: number): number {
-  return n < 0 ? 0 : n > 1 ? 1 : n;
-}
-
-// haversine — great-circle distance between two coords, in metres.
-function haversine(a: LatLng, b: LatLng): number {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(b.latitude - a.latitude);
-  const dLng = toRad(b.longitude - a.longitude);
-  const lat1 = toRad(a.latitude), lat2 = toRad(b.latitude);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
