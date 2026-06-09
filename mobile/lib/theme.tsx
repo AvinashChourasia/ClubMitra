@@ -77,12 +77,33 @@ const dark: Palette = {
 
 // Theme-independent tokens.
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, x2: 24, x3: 32, x4: 40 };
-export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 };
-export const gradients = { red: ["#FF4D67", "#E11D2E"] as const, ink: ["#1E293B", "#0B1220"] as const };
-export const shadow = {
-  card: { shadowColor: "#0B1220", shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
-  raised: { shadowColor: "#0B1220", shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
+export const radius = { sm: 10, md: 14, lg: 20, xl: 26, x2: 32, pill: 999 };
+
+// Gradients. `red`/`ink` kept for back-compat; `gloss` is the white top-highlight
+// overlay that gives heroes a lit, glassy look; `cool`/`sunset` add variety.
+export const gradients = {
+  red: ["#FF4D67", "#E11D2E"] as const,
+  ink: ["#1E293B", "#0B1220"] as const,
+  cool: ["#6366F1", "#4F46E5"] as const,
+  sunset: ["#FB7185", "#F59E0B"] as const,
+  gloss: ["rgba(255,255,255,0.28)", "rgba(255,255,255,0.04)", "rgba(255,255,255,0)"] as const,
 };
+
+// Soft, layered elevation tiers (bigger radius + softer falloff = more depth).
+// card/raised kept as aliases so existing callers don't break.
+export const shadow = {
+  sm: { shadowColor: "#0B1220", shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  md: { shadowColor: "#0B1220", shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
+  lg: { shadowColor: "#0B1220", shadowOpacity: 0.12, shadowRadius: 30, shadowOffset: { width: 0, height: 16 }, elevation: 8 },
+  xl: { shadowColor: "#0B1220", shadowOpacity: 0.18, shadowRadius: 44, shadowOffset: { width: 0, height: 24 }, elevation: 14 },
+  card: { shadowColor: "#0B1220", shadowOpacity: 0.07, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
+  raised: { shadowColor: "#0B1220", shadowOpacity: 0.12, shadowRadius: 30, shadowOffset: { width: 0, height: 16 }, elevation: 8 },
+};
+
+// glow returns a colored shadow that makes gradient heroes feel lit from within.
+export function glow(color: string, opacity = 0.4) {
+  return { shadowColor: color, shadowOpacity: opacity, shadowRadius: 26, shadowOffset: { width: 0, height: 14 }, elevation: 12 };
+}
 
 // makeStyles builds the shared stylesheet for a palette. In dark mode cards get a
 // hairline border (shadows are invisible on dark surfaces).
@@ -105,14 +126,14 @@ function makeStyles(c: Palette, isDark: boolean) {
     },
     button: {
       backgroundColor: c.primary,
-      borderRadius: radius.md,
+      borderRadius: radius.lg,
       paddingVertical: 16,
       alignItems: "center",
       shadowColor: c.primary,
-      shadowOpacity: 0.28,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 3,
+      shadowOpacity: 0.32,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 4,
     },
     buttonDisabled: { opacity: 0.6 },
     buttonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700", letterSpacing: 0.2 },
@@ -121,18 +142,18 @@ function makeStyles(c: Palette, isDark: boolean) {
     fieldLabel: { fontSize: 13, fontWeight: "700", color: c.text, marginTop: 6, marginBottom: 2 },
     card: {
       backgroundColor: c.bg,
-      borderRadius: radius.lg,
+      borderRadius: radius.xl,
       padding: 18,
       borderWidth: isDark ? 1 : 0,
       borderColor: c.border,
       shadowColor: "#0B1220",
-      shadowOpacity: isDark ? 0 : 0.06,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: isDark ? 0 : 2,
+      shadowOpacity: isDark ? 0 : 0.08,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: isDark ? 0 : 3,
     },
     sectionTitle: { fontSize: 17, fontWeight: "800", color: c.text, letterSpacing: -0.2 },
-    statCard: { backgroundColor: c.bgSecondary, borderRadius: radius.md, paddingVertical: 12, paddingHorizontal: 8, alignItems: "center", minWidth: 0, flex: 1 },
+    statCard: { backgroundColor: c.bgSecondary, borderRadius: radius.lg, paddingVertical: 14, paddingHorizontal: 8, alignItems: "center", minWidth: 0, flex: 1 },
     statValue: { fontSize: 17, fontWeight: "800", color: c.text },
     statLabel: { fontSize: 10, fontWeight: "700", color: c.muted, marginTop: 3, textTransform: "uppercase", letterSpacing: 0.5 },
   });

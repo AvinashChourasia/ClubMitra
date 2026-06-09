@@ -6,7 +6,6 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native"
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
@@ -17,6 +16,7 @@ import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { runningLevelLabel } from "../../lib/profile";
 import { formatRunWhen, isPast } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
+import { GradientCard } from "../../components/GradientCard";
 
 // tierColor maps a trust tier to its accent colour (basic → muted, trusted →
 // brand accent, verified → success green).
@@ -106,25 +106,20 @@ export default function Profile() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {/* Hero */}
-        <LinearGradient
-          colors={gradients.red}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{ borderRadius: 24, padding: 24, alignItems: "center", gap: 10, shadowColor: colors.primary, shadowOpacity: 0.35, shadowRadius: 20, shadowOffset: { width: 0, height: 12 }, elevation: 6 }}
-        >
-          <Pressable onPress={() => router.push("/settings")} hitSlop={10} style={{ position: "absolute", top: 16, right: 16 }}>
+        <GradientCard colors={gradients.red} glowColor={colors.primary} style={{ padding: 24, alignItems: "center", gap: 10 }}>
+          <Pressable onPress={() => router.push("/settings")} hitSlop={10} style={{ position: "absolute", top: 16, right: 16, zIndex: 1 }}>
             <Ionicons name="settings-outline" size={22} color="#fff" />
           </Pressable>
           <View style={{ borderWidth: 3, borderColor: "rgba(255,255,255,0.55)", borderRadius: 50 }}>
             <Avatar name={user.name} uri={user.profile_photo} size={88} bg="rgba(255,255,255,0.18)" />
           </View>
-          <Text style={{ color: "#fff", fontSize: 23, fontWeight: "800", letterSpacing: -0.3 }}>{user.name}</Text>
+          <Text style={{ color: "#fff", fontSize: 24, fontWeight: "800", letterSpacing: -0.3 }}>{user.name}</Text>
           <Text style={{ color: "rgba(255,255,255,0.88)", fontSize: 13 }}>{user.email}</Text>
           <View style={{ flexDirection: "row", gap: 8, marginTop: 2, flexWrap: "wrap", justifyContent: "center" }}>
             <Pill icon="flash" text={runningLevelLabel(user.running_level)} />
             {user.city ? <Pill icon="location" text={user.city} /> : null}
           </View>
-        </LinearGradient>
+        </GradientCard>
 
         {/* Details */}
         <View style={styles.card}>
