@@ -3,7 +3,7 @@
 // start a new DM. Tapping a row opens that conversation.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/auth";
 import { inbox, type InboxItem } from "../../lib/messaging";
 import { Avatar } from "../../components/Avatar";
+import { Tap } from "../../components/Tap";
 import { colors, useThemeMode } from "../../lib/theme";
 
 // Short, WhatsApp-ish timestamp: time if today, else a day/month.
@@ -75,9 +76,9 @@ export default function Chat() {
       {/* Header */}
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 }}>
         <Text style={{ fontSize: 28, fontWeight: "800", color: colors.text }}>Chats</Text>
-        <Pressable onPress={() => router.push("/thread/new")} hitSlop={8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
+        <Tap onPress={() => router.push("/thread/new")} hitSlop={8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="create-outline" size={20} color="#fff" />
-        </Pressable>
+        </Tap>
       </View>
 
       {items === null ? (
@@ -96,9 +97,10 @@ export default function Chat() {
             </View>
           ) : (
             items.map((it, i) => (
-              <Pressable
+              <Tap
                 key={`${it.kind}-${it.chapter_id ?? it.user_id ?? i}`}
                 onPress={() => open(it)}
+                haptic={false}
                 style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: i === items.length - 1 ? 0 : 1, borderBottomColor: colors.border }}
               >
                 <View>
@@ -125,7 +127,7 @@ export default function Chat() {
                     )}
                   </View>
                 </View>
-              </Pressable>
+              </Tap>
             ))
           )}
         </ScrollView>

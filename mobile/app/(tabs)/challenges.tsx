@@ -3,11 +3,12 @@
 // joined challenges.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
+import { Tap } from "../../components/Tap";
 
 import { useAuth } from "../../lib/auth";
 import {
@@ -72,13 +73,13 @@ export default function Challenges() {
       >
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
           <Text style={{ fontSize: 26, fontWeight: "800", color: colors.text }}>Challenges</Text>
-          <Pressable
+          <Tap
             onPress={() => router.push("/challenge/new")}
             style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9 }}
           >
             <Ionicons name="add" size={16} color="#fff" />
             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>New</Text>
-          </Pressable>
+          </Tap>
         </View>
 
         <View style={{ flexDirection: "row", gap: 8 }}>
@@ -110,12 +111,13 @@ export default function Challenges() {
 
 function FilterChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable
+    <Tap
       onPress={onPress}
+      haptic={false}
       style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, backgroundColor: active ? colors.primary : colors.bg, borderWidth: 1, borderColor: active ? colors.primary : colors.border }}
     >
       <Text style={{ color: active ? "#fff" : colors.muted, fontWeight: "700", fontSize: 13 }}>{label}</Text>
-    </Pressable>
+    </Tap>
   );
 }
 
@@ -139,7 +141,7 @@ function ChallengeCard({ item, onPress }: { item: Challenge; onPress: () => void
   const timeLabel = daysLeft > 0 ? `${daysLeft}d left` : "Ended";
 
   return (
-    <Pressable onPress={onPress} style={[styles.card, { gap: 10, padding: 18 }]}>
+    <Tap onPress={onPress} style={[styles.card, { gap: 10, padding: 18 }]}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
         <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
           <Ionicons name={TYPE_ICON[item.type]} size={22} color={colors.primary} />
@@ -178,7 +180,7 @@ function ChallengeCard({ item, onPress }: { item: Challenge; onPress: () => void
           </Text>
         </View>
       )}
-    </Pressable>
+    </Tap>
   );
 }
 

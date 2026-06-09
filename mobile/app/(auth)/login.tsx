@@ -3,13 +3,15 @@
 // user home. New runners create an account on the register screen.
 
 import { useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
 import { ApiError } from "../../lib/api";
+import { Tap } from "../../components/Tap";
+import { Button } from "../../components/Button";
+import { GradientCard } from "../../components/GradientCard";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 
 export default function Login() {
@@ -40,14 +42,9 @@ export default function Login() {
       <View style={styles.screen}>
         {/* Brand */}
         <View style={{ alignItems: "center", gap: 12, marginBottom: 12 }}>
-          <LinearGradient
-            colors={gradients.red}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={{ width: 76, height: 76, borderRadius: 24, alignItems: "center", justifyContent: "center", shadowColor: colors.primary, shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 6 }}
-          >
+          <GradientCard colors={gradients.red} glowColor={colors.primary} radius={26} style={{ width: 80, height: 80, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="walk" size={38} color="#fff" />
-          </LinearGradient>
+          </GradientCard>
           <Text style={{ fontSize: 30, fontWeight: "800", color: colors.text, letterSpacing: -0.6 }}>ClubMitra</Text>
           <Text style={{ color: colors.muted, fontSize: 15 }}>Your running club, in your pocket.</Text>
         </View>
@@ -73,13 +70,11 @@ export default function Login() {
 
         {error && <Text style={styles.error}>{error}</Text>}
 
-        <Pressable style={[styles.button, submitting && styles.buttonDisabled]} onPress={onSubmit} disabled={submitting}>
-          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log in</Text>}
-        </Pressable>
+        <Button label="Log in" onPress={onSubmit} loading={submitting} />
 
-        <Pressable onPress={() => router.push("/register")}>
+        <Tap onPress={() => router.push("/register")} haptic={false}>
           <Text style={styles.link}>New here? Create an account</Text>
-        </Pressable>
+        </Tap>
       </View>
     </KeyboardAvoidingView>
   );

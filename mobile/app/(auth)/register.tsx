@@ -4,16 +4,7 @@
 // required — the backend enforces the same.
 
 import { useState } from "react";
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { useAuth } from "../../lib/auth";
@@ -23,6 +14,8 @@ import { colors, styles, useThemeMode } from "../../lib/theme";
 import { ChipSelect } from "../../components/ChipSelect";
 import { PhotoPicker } from "../../components/PhotoPicker";
 import { CityPicker } from "../../components/CityPicker";
+import { Tap } from "../../components/Tap";
+import { Button } from "../../components/Button";
 import { RUNNING_LEVELS, TSHIRT_SIZES } from "../../lib/profile";
 
 export default function Register() {
@@ -153,13 +146,11 @@ export default function Register() {
 
         {error && <Text style={styles.error}>{error}</Text>}
 
-        <Pressable style={[styles.button, submitting && styles.buttonDisabled]} onPress={onSubmit} disabled={submitting}>
-          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Create account</Text>}
-        </Pressable>
+        <Button label="Create account" onPress={onSubmit} loading={submitting} />
 
-        <Pressable onPress={() => router.back()}>
+        <Tap onPress={() => router.back()} haptic={false}>
           <Text style={styles.link}>Already have an account? Log in</Text>
-        </Pressable>
+        </Tap>
       </ScrollView>
     </KeyboardAvoidingView>
   );

@@ -2,7 +2,7 @@
 // invite code, or create your own.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -12,6 +12,8 @@ import { useAuth } from "../../lib/auth";
 import { myChapters, isChapterAdmin, type MyChapter } from "../../lib/clubs";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 import { Avatar } from "../../components/Avatar";
+import { Tap } from "../../components/Tap";
+import { Button } from "../../components/Button";
 
 function CountPill({ icon, value, label }: { icon: keyof typeof Ionicons.glyphMap; value: number; label: string }) {
   return (
@@ -81,29 +83,17 @@ export default function Clubs() {
         <Text style={{ fontSize: 26, fontWeight: "800", color: colors.text }}>Your clubs</Text>
 
         <View style={{ flexDirection: "row", gap: 10 }}>
-          <Pressable
-            onPress={() => router.push("/club/join")}
-            style={{ flex: 1, flexDirection: "row", justifyContent: "center", gap: 7, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, borderRadius: 14, paddingVertical: 14, alignItems: "center" }}
-          >
-            <Ionicons name="enter-outline" size={18} color={colors.text} />
-            <Text style={{ color: colors.text, fontWeight: "700" }}>Join</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => router.push("/club/new")}
-            style={{ flex: 1, flexDirection: "row", justifyContent: "center", gap: 7, backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 14, alignItems: "center" }}
-          >
-            <Ionicons name="add" size={20} color="#fff" />
-            <Text style={{ color: "#fff", fontWeight: "700" }}>Create club</Text>
-          </Pressable>
+          <Button label="Join" icon="enter-outline" variant="secondary" onPress={() => router.push("/club/join")} style={{ flex: 1 }} />
+          <Button label="Create club" icon="add" onPress={() => router.push("/club/new")} style={{ flex: 1 }} />
         </View>
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
         ) : clubs && clubs.length > 0 ? (
           clubs.map((c) => (
-            <Pressable key={c.id} onPress={() => router.push(`/club/${c.id}`)} style={[styles.card, { gap: 12, padding: 16 }]}>
+            <Tap key={c.id} onPress={() => router.push(`/club/${c.id}`)} style={[styles.card, { gap: 12, padding: 16 }]}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-                <Avatar name={c.name} size={52} bg={colors.accent} />
+                <Avatar name={c.name} uri={c.logo} size={52} bg={colors.accent} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 17, fontWeight: "800", color: colors.text }}>{c.name}</Text>
                   <Text style={{ color: colors.muted, fontSize: 13 }}>📍 {c.city}</Text>
@@ -118,7 +108,7 @@ export default function Clubs() {
                 <CountPill icon="people" value={c.member_count} label={c.member_count === 1 ? "member" : "members"} />
                 <CountPill icon="trophy" value={c.active_challenge_count} label={c.active_challenge_count === 1 ? "challenge" : "challenges"} />
               </View>
-            </Pressable>
+            </Tap>
           ))
         ) : (
           <View style={[styles.card, { alignItems: "center", paddingVertical: 32, marginTop: 8 }]}>
