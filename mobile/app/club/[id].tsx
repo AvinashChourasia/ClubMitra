@@ -335,9 +335,6 @@ export default function ClubDetail() {
           </Text>
         </View>
       </View>
-      <Pressable onPress={() => router.push(`/club/chat/${id}`)} hitSlop={10}>
-        <Ionicons name="chatbubbles-outline" size={22} color="#fff" />
-      </Pressable>
     </>
   );
 

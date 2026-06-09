@@ -23,11 +23,14 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 // Routes mounts under /messaging.
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
+	r.Get("/conversations", h.inbox) // the chat list (club groups + DMs)
 	r.Get("/chapter/{chapterID}", h.chapterList)
 	r.Post("/chapter/{chapterID}", h.chapterPost)
 	r.Post("/chapter/{chapterID}/announce", h.announce)
 	r.Get("/run/{runID}", h.runList)
 	r.Post("/run/{runID}", h.runPost)
+	r.Get("/dm/{userID}", h.dmList)  // open/start a 1:1 chat
+	r.Post("/dm/{userID}", h.dmPost) // send to a 1:1 chat
 	return r
 }
 
@@ -98,6 +101,41 @@ func (h *Handler) runPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg, err := h.svc.PostRun(r.Context(), uid, rid, req.Body, req.MediaURL, req.MediaType)
+	h.respondCreated(w, msg, err)
+}
+
+func (h *Handler) inbox(w http.ResponseWriter, r *http.Request) {
+	uid, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	items, err := h.svc.Inbox(r.Context(), uid)
+	h.respond(w, items, err)
+}
+
+func (h *Handler) dmList(w http.ResponseWriter, r *http.Request) {
+	uid, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	thread, err := h.svc.DirectThread(r.Context(), uid, chi.URLParam(r, "userID"))
+	h.respond(w, thread, err)
+}
+
+func (h *Handler) dmPost(w http.ResponseWriter, r *http.Request) {
+	uid, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var req postRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	msg, err := h.svc.PostDirect(r.Context(), uid, chi.URLParam(r, "userID"), req.Body, req.MediaURL, req.MediaType)
 	h.respondCreated(w, msg, err)
 }
 

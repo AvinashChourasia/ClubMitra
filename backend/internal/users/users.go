@@ -169,6 +169,38 @@ func (r *Repository) DisplayNames(ctx context.Context, ids []string) (map[string
 	return out, rows.Err()
 }
 
+// SearchResult is a lightweight user hit for the chat people-search (no email
+// or phone — just what's needed to start a conversation).
+type SearchResult struct {
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	ProfilePhoto *string `json:"profile_photo,omitempty"`
+}
+
+// Search finds users by name or email (case-insensitive, prefix-or-substring),
+// excluding the caller. Used to start a direct chat.
+func (r *Repository) Search(ctx context.Context, query, excludeID string, limit int) ([]SearchResult, error) {
+	const q = `
+		SELECT id, name, profile_photo FROM users
+		WHERE deleted_at IS NULL AND id <> $2 AND (name ILIKE $1 OR email ILIKE $1)
+		ORDER BY name
+		LIMIT $3`
+	rows, err := r.db.Query(ctx, q, "%"+query+"%", excludeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]SearchResult, 0)
+	for rows.Next() {
+		var s SearchResult
+		if err := rows.Scan(&s.ID, &s.Name, &s.ProfilePhoto); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // scanOne runs a single-row profile query and maps "no rows" to ErrNotFound.
 func (r *Repository) scanOne(ctx context.Context, q string, arg any) (*User, error) {
 	var u User

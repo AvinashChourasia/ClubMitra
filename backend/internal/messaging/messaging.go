@@ -16,6 +16,25 @@ import (
 // ErrNotFound is returned when a referenced run/conversation doesn't exist.
 var ErrNotFound = errors.New("not found")
 
+// InboxItem is one row in a user's chat list: a club group or a direct chat,
+// with the last message for a preview. Sorted by recency client-side/service.
+type InboxItem struct {
+	Kind        string  `json:"kind"` // "club" | "direct"
+	ChapterID   *string `json:"chapter_id,omitempty"`
+	UserID      *string `json:"user_id,omitempty"` // the other person, for direct
+	Title       string  `json:"title"`
+	PhotoURL    *string `json:"photo_url,omitempty"`
+	LastMessage *string `json:"last_message,omitempty"`
+	LastAt      *string `json:"last_at,omitempty"`
+}
+
+// OtherUser is the counterpart in a direct chat (for the DM screen header).
+type OtherUser struct {
+	ID    string  `json:"id"`
+	Name  string  `json:"name"`
+	Photo *string `json:"profile_photo,omitempty"`
+}
+
 // Message is one chat message, joined with the sender's name for display.
 type Message struct {
 	ID             uuid.UUID `json:"id"`
@@ -145,6 +164,165 @@ func (r *Repository) postMessage(ctx context.Context, conversationID uuid.UUID, 
 		return nil, err
 	}
 	return &m, nil
+}
+
+// getUser fetches a user's display fields for a DM header. ErrNotFound if gone.
+func (r *Repository) getUser(ctx context.Context, userID string) (*OtherUser, error) {
+	var u OtherUser
+	err := r.db.QueryRow(ctx,
+		`SELECT id, name, profile_photo FROM users WHERE id = $1 AND deleted_at IS NULL`, userID,
+	).Scan(&u.ID, &u.Name, &u.Photo)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &u, err
+}
+
+// findDirect locates the direct conversation between two users without creating
+// one. found=false (id=Nil) means they've never messaged.
+func (r *Repository) findDirect(ctx context.Context, a, b string) (uuid.UUID, bool, error) {
+	var id uuid.UUID
+	const find = `
+		SELECT c.id FROM conversations c
+		WHERE c.type = 'direct'
+		  AND EXISTS (SELECT 1 FROM conversation_members WHERE conversation_id = c.id AND user_id = $1)
+		  AND EXISTS (SELECT 1 FROM conversation_members WHERE conversation_id = c.id AND user_id = $2)
+		LIMIT 1`
+	err := r.db.QueryRow(ctx, find, a, b).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	return id, true, nil
+}
+
+// findOrCreateDirect returns the direct conversation between two users, creating
+// it (with both members) on first use. Called when a message is actually sent,
+// so we never litter inboxes with empty conversations.
+func (r *Repository) findOrCreateDirect(ctx context.Context, a, b string) (uuid.UUID, error) {
+	if id, found, err := r.findDirect(ctx, a, b); err != nil {
+		return uuid.Nil, err
+	} else if found {
+		return id, nil
+	}
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer tx.Rollback(ctx)
+	var id uuid.UUID
+	if err := tx.QueryRow(ctx, `INSERT INTO conversations (type) VALUES ('direct') RETURNING id`).Scan(&id); err != nil {
+		return uuid.Nil, err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2), ($1, $3)`,
+		id, a, b); err != nil {
+		return uuid.Nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
+// isDirectMember reports whether a user is a participant of a direct conversation.
+func (r *Repository) isDirectMember(ctx context.Context, conversationID uuid.UUID, userID string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2)`,
+		conversationID, userID).Scan(&ok)
+	return ok, err
+}
+
+// clubInbox lists the user's club group chats (from their memberships), with the
+// last message for a preview. Conversations are lazily created, so last_* are
+// null until someone posts.
+func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem, error) {
+	const q = `
+		SELECT c.id::text, c.name, c.logo, lm.body, lm.media_type, lm.created_at::text
+		FROM chapters c
+		JOIN chapter_members m ON m.chapter_id = c.id AND m.user_id = $1 AND m.deleted_at IS NULL
+		LEFT JOIN conversations conv ON conv.chapter_id = c.id AND conv.type = 'chapter'
+		LEFT JOIN LATERAL (
+			SELECT body, media_type, created_at FROM messages
+			WHERE conversation_id = conv.id AND deleted_at IS NULL
+			ORDER BY created_at DESC LIMIT 1
+		) lm ON true
+		WHERE c.deleted_at IS NULL`
+	rows, err := r.db.Query(ctx, q, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]InboxItem, 0)
+	for rows.Next() {
+		var it InboxItem
+		var chapterID string
+		var mediaType *string
+		if err := rows.Scan(&chapterID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastAt); err != nil {
+			return nil, err
+		}
+		it.Kind = "club"
+		it.ChapterID = &chapterID
+		it.LastMessage = preview(it.LastMessage, mediaType)
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// directInbox lists the user's direct chats, titled by the other participant.
+func (r *Repository) directInbox(ctx context.Context, userID string) ([]InboxItem, error) {
+	const q = `
+		SELECT other.id, other.name, other.profile_photo, lm.body, lm.media_type, lm.created_at::text
+		FROM conversations conv
+		JOIN conversation_members me ON me.conversation_id = conv.id AND me.user_id = $1
+		JOIN conversation_members ot ON ot.conversation_id = conv.id AND ot.user_id <> $1
+		JOIN users other ON other.id = ot.user_id
+		LEFT JOIN LATERAL (
+			SELECT body, media_type, created_at FROM messages
+			WHERE conversation_id = conv.id AND deleted_at IS NULL
+			ORDER BY created_at DESC LIMIT 1
+		) lm ON true
+		WHERE conv.type = 'direct'`
+	rows, err := r.db.Query(ctx, q, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]InboxItem, 0)
+	for rows.Next() {
+		var it InboxItem
+		var otherID string
+		var mediaType *string
+		if err := rows.Scan(&otherID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastAt); err != nil {
+			return nil, err
+		}
+		it.Kind = "direct"
+		it.UserID = &otherID
+		it.LastMessage = preview(it.LastMessage, mediaType)
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// preview turns a stored message into a one-line inbox preview (media → a label).
+func preview(body, mediaType *string) *string {
+	if body != nil && *body != "" {
+		return body
+	}
+	if mediaType != nil && *mediaType != "" {
+		label := "📷 Photo"
+		if *mediaType == "video" {
+			label = "🎥 Video"
+		} else if *mediaType == "file" {
+			label = "📎 File"
+		}
+		return &label
+	}
+	return nil
 }
 
 // markRead upserts the caller's read marker for a conversation.

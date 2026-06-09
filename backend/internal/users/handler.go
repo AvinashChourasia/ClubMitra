@@ -37,7 +37,29 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/me", h.me)
 	r.Put("/me", h.updateMe)
 	r.Get("/me/trust-score", h.trustScore)
+	r.Get("/search", h.search)
 	return r
+}
+
+// search finds users by name/email to start a chat. Needs ?q= of 2+ chars;
+// shorter (or empty) queries return an empty list rather than the whole table.
+func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		httpx.JSON(w, http.StatusOK, []any{})
+		return
+	}
+	results, err := h.repo.Search(r.Context(), q, userID, 20)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, results)
 }
 
 // trustScore returns the caller's trust score, tier, and the component rates.

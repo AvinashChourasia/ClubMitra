@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -151,6 +152,81 @@ func (s *Service) PostRun(ctx context.Context, userID string, runID uuid.UUID, b
 		return nil, err
 	}
 	convID, err := s.repo.ensureRunConversation(ctx, chapterID, runID)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.postMessage(ctx, convID, userID, body, mediaURL, mediaType, false)
+}
+
+// DirectThread bundles the other participant + messages for the DM screen.
+type DirectThread struct {
+	Other    OtherUser `json:"other"`
+	Messages []Message `json:"messages"`
+}
+
+// Inbox returns the user's chat list — club groups + direct chats — most recent
+// first (chats with no messages yet sort to the bottom).
+func (s *Service) Inbox(ctx context.Context, userID string) ([]InboxItem, error) {
+	clubs, err := s.repo.clubInbox(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	directs, err := s.repo.directInbox(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	items := append(clubs, directs...)
+	sort.SliceStable(items, func(i, j int) bool {
+		ai, aj := items[i].LastAt, items[j].LastAt
+		if (ai == nil) != (aj == nil) {
+			return ai != nil // ones with messages come first
+		}
+		if ai == nil {
+			return false
+		}
+		return *ai > *aj // ISO timestamps compare lexically
+	})
+	return items, nil
+}
+
+// DirectThread opens (or starts) a 1:1 chat with another user and returns it.
+func (s *Service) DirectThread(ctx context.Context, userID, otherID string) (*DirectThread, error) {
+	if otherID == userID {
+		return nil, ValidationError{Msg: "you can't message yourself"}
+	}
+	other, err := s.repo.getUser(ctx, otherID)
+	if err != nil {
+		return nil, err
+	}
+	// Don't create the conversation just for viewing — it's created on first send,
+	// so we never litter inboxes with empty chats. No conversation yet = no messages.
+	convID, found, err := s.repo.findDirect(ctx, userID, otherID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return &DirectThread{Other: *other, Messages: []Message{}}, nil
+	}
+	msgs, err := s.repo.listMessages(ctx, convID)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.repo.markRead(ctx, convID, userID)
+	return &DirectThread{Other: *other, Messages: msgs}, nil
+}
+
+// PostDirect posts a message to the 1:1 chat with another user.
+func (s *Service) PostDirect(ctx context.Context, userID, otherID string, body, mediaURL, mediaType *string) (*Message, error) {
+	if otherID == userID {
+		return nil, ValidationError{Msg: "you can't message yourself"}
+	}
+	if _, err := s.repo.getUser(ctx, otherID); err != nil {
+		return nil, err
+	}
+	if err := validateContent(body, mediaURL); err != nil {
+		return nil, err
+	}
+	convID, err := s.repo.findOrCreateDirect(ctx, userID, otherID)
 	if err != nil {
 		return nil, err
 	}
