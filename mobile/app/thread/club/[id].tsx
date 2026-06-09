@@ -6,8 +6,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { useAuth } from "../../../lib/auth";
 import { getChapter, myChapters, isChapterAdmin } from "../../../lib/clubs";
-import { chapterMessages, postChapter, announce as announceApi, type OutMsg } from "../../../lib/messaging";
-import { uploadChatImage } from "../../../lib/upload";
+import { chapterMessages, postChapter, announce as announceApi, deleteMessage as deleteMessageApi, type OutMsg } from "../../../lib/messaging";
+import { uploadChatImage, uploadChatFile } from "../../../lib/upload";
 import { ChatThread } from "../../../components/ChatThread";
 
 export default function ClubGroupChat() {
@@ -54,6 +54,16 @@ export default function ClubGroupChat() {
     return uploadChatImage(token!, uri);
   }, [getAccessToken]);
 
+  const uploadFile = useCallback(async (uri: string, name: string, mime: string) => {
+    const token = await getAccessToken();
+    return uploadChatFile(token!, uri, name, mime);
+  }, [getAccessToken]);
+
+  const removeMessage = useCallback(async (mid: string) => {
+    const token = await getAccessToken();
+    if (token) await deleteMessageApi(token, mid);
+  }, [getAccessToken]);
+
   const announce = useCallback(async (body: string) => {
     const token = await getAccessToken();
     if (token) await announceApi(token, id, body);
@@ -70,6 +80,8 @@ export default function ClubGroupChat() {
       load={load}
       send={send}
       uploadImage={uploadImage}
+      uploadFile={uploadFile}
+      deleteMessage={removeMessage}
       canAnnounce={isAdmin}
       announce={announce}
       onSenderPress={(senderId) => {

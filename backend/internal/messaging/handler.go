@@ -31,7 +31,26 @@ func (h *Handler) Routes() http.Handler {
 	r.Post("/run/{runID}", h.runPost)
 	r.Get("/dm/{userID}", h.dmList)  // open/start a 1:1 chat
 	r.Post("/dm/{userID}", h.dmPost) // send to a 1:1 chat
+	r.Delete("/messages/{messageID}", h.deleteMessage)
 	return r
+}
+
+func (h *Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
+	uid, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "messageID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid message id")
+		return
+	}
+	if err := h.svc.DeleteMessage(r.Context(), uid, id); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
 }
 
 type postRequest struct {

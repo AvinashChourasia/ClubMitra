@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -162,9 +163,9 @@ func (s *Service) PostRun(ctx context.Context, userID string, runID uuid.UUID, b
 // OtherLastReadAt powers read receipts: a message you sent is "read" once its
 // created_at is at or before this timestamp.
 type DirectThread struct {
-	Other           OtherUser `json:"other"`
-	Messages        []Message `json:"messages"`
-	OtherLastReadAt *string   `json:"other_last_read_at,omitempty"`
+	Other           OtherUser  `json:"other"`
+	Messages        []Message  `json:"messages"`
+	OtherLastReadAt *time.Time `json:"other_last_read_at,omitempty"`
 }
 
 // Inbox returns the user's chat list — club groups + direct chats — most recent
@@ -187,7 +188,7 @@ func (s *Service) Inbox(ctx context.Context, userID string) ([]InboxItem, error)
 		if ai == nil {
 			return false
 		}
-		return *ai > *aj // ISO timestamps compare lexically
+		return ai.After(*aj) // most recent first
 	})
 	return items, nil
 }
@@ -238,6 +239,12 @@ func (s *Service) PostDirect(ctx context.Context, userID, otherID string, body, 
 		return nil, err
 	}
 	return s.repo.postMessage(ctx, convID, userID, body, mediaURL, mediaType, false)
+}
+
+// DeleteMessage soft-deletes a message the caller sent (WhatsApp "delete for
+// everyone"). Non-owners / missing messages get ErrNotFound.
+func (s *Service) DeleteMessage(ctx context.Context, userID string, messageID uuid.UUID) error {
+	return s.repo.softDeleteMessage(ctx, messageID, userID)
 }
 
 // validateContent requires a message to carry text or media.

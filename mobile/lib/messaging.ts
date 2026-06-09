@@ -63,3 +63,8 @@ export function postDirect(token: string, userId: string, msg: OutMsg) {
 export async function searchUsers(token: string, q: string) {
   return (await request<UserHit[] | null>(`/users/search?q=${encodeURIComponent(q)}`, { token })) ?? [];
 }
+
+// deleteMessage soft-deletes a message you sent (delete for everyone).
+export function deleteMessage(token: string, messageId: string) {
+  return request<void>(`/messaging/messages/${messageId}`, { method: "DELETE", token });
+}

@@ -44,7 +44,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "ClubMitra uses your photos so you can set a profile photo and club logo."
+          "photosPermission": "ClubMitra uses your photos so you can set a profile photo, club logo, and chat attachments.",
+          "cameraPermission": "ClubMitra uses your camera so you can take photos to send in chat."
         }
       ],
       "expo-font"

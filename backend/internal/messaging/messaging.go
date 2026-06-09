@@ -7,6 +7,7 @@ package messaging
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -19,14 +20,14 @@ var ErrNotFound = errors.New("not found")
 // InboxItem is one row in a user's chat list: a club group or a direct chat,
 // with the last message for a preview. Sorted by recency client-side/service.
 type InboxItem struct {
-	Kind        string  `json:"kind"` // "club" | "direct"
-	ChapterID   *string `json:"chapter_id,omitempty"`
-	UserID      *string `json:"user_id,omitempty"` // the other person, for direct
-	Title       string  `json:"title"`
-	PhotoURL    *string `json:"photo_url,omitempty"`
-	LastMessage *string `json:"last_message,omitempty"`
-	LastAt      *string `json:"last_at,omitempty"`
-	Unread      int     `json:"unread"`
+	Kind        string     `json:"kind"` // "club" | "direct"
+	ChapterID   *string    `json:"chapter_id,omitempty"`
+	UserID      *string    `json:"user_id,omitempty"` // the other person, for direct
+	Title       string     `json:"title"`
+	PhotoURL    *string    `json:"photo_url,omitempty"`
+	LastMessage *string    `json:"last_message,omitempty"`
+	LastAt      *time.Time `json:"last_at,omitempty"`
+	Unread      int        `json:"unread"`
 }
 
 // OtherUser is the counterpart in a direct chat (for the DM screen header).
@@ -46,7 +47,7 @@ type Message struct {
 	MediaType      *string   `json:"media_type,omitempty"`
 	IsAnnouncement bool      `json:"is_announcement"`
 	IsPinned       bool      `json:"is_pinned"`
-	CreatedAt      string    `json:"created_at"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // Repository is the messaging data-access layer.
@@ -120,7 +121,7 @@ func (r *Repository) ensureRunConversation(ctx context.Context, chapterID, runID
 func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID) ([]Message, error) {
 	const q = `
 		SELECT m.id, m.sender_id, u.name, m.body, m.media_url, m.media_type,
-		       m.is_announcement, m.is_pinned, m.created_at::text
+		       m.is_announcement, m.is_pinned, m.created_at
 		FROM messages m JOIN users u ON u.id = m.sender_id
 		WHERE m.conversation_id = $1 AND m.deleted_at IS NULL
 		ORDER BY m.created_at DESC
@@ -155,7 +156,7 @@ func (r *Repository) postMessage(ctx context.Context, conversationID uuid.UUID, 
 			RETURNING id, sender_id, body, media_url, media_type, is_announcement, is_pinned, created_at
 		)
 		SELECT ins.id, ins.sender_id, u.name, ins.body, ins.media_url, ins.media_type,
-		       ins.is_announcement, ins.is_pinned, ins.created_at::text
+		       ins.is_announcement, ins.is_pinned, ins.created_at
 		FROM ins JOIN users u ON u.id = ins.sender_id`
 	var m Message
 	err := r.db.QueryRow(ctx, q, conversationID, senderID, body, mediaURL, mediaType, isAnnouncement).Scan(
@@ -243,7 +244,7 @@ func (r *Repository) isDirectMember(ctx context.Context, conversationID uuid.UUI
 // null until someone posts.
 func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem, error) {
 	const q = `
-		SELECT c.id::text, c.name, c.logo, lm.body, lm.media_type, lm.created_at::text,
+		SELECT c.id::text, c.name, c.logo, lm.body, lm.media_type, lm.created_at,
 		       COALESCE((SELECT count(*) FROM messages msg
 		         WHERE msg.conversation_id = conv.id AND msg.deleted_at IS NULL AND msg.sender_id <> $1
 		           AND msg.created_at > COALESCE(
@@ -282,7 +283,7 @@ func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem,
 // directInbox lists the user's direct chats, titled by the other participant.
 func (r *Repository) directInbox(ctx context.Context, userID string) ([]InboxItem, error) {
 	const q = `
-		SELECT other.id, other.name, other.profile_photo, lm.body, lm.media_type, lm.created_at::text,
+		SELECT other.id, other.name, other.profile_photo, lm.body, lm.media_type, lm.created_at,
 		       COALESCE((SELECT count(*) FROM messages msg
 		         WHERE msg.conversation_id = conv.id AND msg.deleted_at IS NULL AND msg.sender_id <> $1
 		           AND msg.created_at > COALESCE(
@@ -338,15 +339,30 @@ func preview(body, mediaType *string) *string {
 
 // lastReadAt returns when a user last read a conversation (nil = never), used to
 // derive read receipts for the other party's view.
-func (r *Repository) lastReadAt(ctx context.Context, conversationID uuid.UUID, userID string) (*string, error) {
-	var ts *string
+func (r *Repository) lastReadAt(ctx context.Context, conversationID uuid.UUID, userID string) (*time.Time, error) {
+	var ts *time.Time
 	err := r.db.QueryRow(ctx,
-		`SELECT last_read_at::text FROM message_reads WHERE conversation_id = $1 AND user_id = $2`,
+		`SELECT last_read_at FROM message_reads WHERE conversation_id = $1 AND user_id = $2`,
 		conversationID, userID).Scan(&ts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return ts, err
+}
+
+// softDeleteMessage marks a message deleted, but only if the caller sent it.
+// Returns ErrNotFound if no such (own, live) message exists.
+func (r *Repository) softDeleteMessage(ctx context.Context, messageID uuid.UUID, userID string) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE messages SET deleted_at = now() WHERE id = $1 AND sender_id = $2 AND deleted_at IS NULL`,
+		messageID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // markRead upserts the caller's read marker for a conversation.
