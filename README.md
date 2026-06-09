@@ -243,9 +243,9 @@ clubmitra/
 - [ ] Analytics cache table — refreshed every 6 hours (computed live for now; cheap at this scale)
 
 #### Extended Member Lifecycle
-- [ ] On Leave status: self-declared, paused from leaderboards temporarily
-- [ ] Injured status: removed from performance comparisons
-- [ ] Alumni status: departed member, read-only history, no active participation
+- [x] On Leave status: self-declared (members/me/status), paused from leaderboards
+- [x] Injured status (admin-set): removed from the leaderboard
+- [x] Alumni status (admin-set): departed member, excluded from the leaderboard
 
 #### Inventory
 - [x] Inventory CRUD: item name, category, quantity, size breakdown (JSONB)

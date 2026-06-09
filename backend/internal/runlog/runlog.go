@@ -107,10 +107,14 @@ func (r *Repository) MyLogs(ctx context.Context, userID string, limit int) ([]Ru
 // Board aggregates the leaderboard for a chapter. from/to are inclusive
 // YYYY-MM-DD bounds; both nil means all-time.
 func (r *Repository) Board(ctx context.Context, chapterID uuid.UUID, from, to *string) ([]BoardEntry, error) {
+	// Members who are on_leave / injured / alumni are paused from the board: join
+	// their (current) membership and exclude those states.
 	const q = `
 		SELECT rl.user_id, u.name, SUM(rl.distance_km)::float8 AS km, COUNT(*)::int AS runs
 		FROM run_logs rl
 		JOIN users u ON u.id = rl.user_id
+		JOIN chapter_members cm ON cm.chapter_id = rl.chapter_id AND cm.user_id = rl.user_id
+		     AND cm.deleted_at IS NULL AND cm.status NOT IN ('on_leave', 'injured', 'alumni')
 		WHERE rl.chapter_id = $1 AND rl.deleted_at IS NULL
 		  AND ($2::date IS NULL OR rl.ran_on >= $2::date)
 		  AND ($3::date IS NULL OR rl.ran_on <= $3::date)

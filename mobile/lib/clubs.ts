@@ -127,7 +127,13 @@ export function removeMember(token: string, chapterId: string, userId: string) {
 }
 
 // MEMBER_STATUSES are the states an admin can set a member to.
-export const MEMBER_STATUSES = ["active", "lapsed", "suspended"];
+export const MEMBER_STATUSES = ["active", "lapsed", "suspended", "on_leave", "injured", "alumni"];
+
+// setOwnStatus is the member self-service: set your own membership on_leave or
+// back to active (no admin needed).
+export function setOwnStatus(token: string, chapterId: string, status: "active" | "on_leave") {
+  return request<void>(`/chapters/${chapterId}/members/me/status`, { method: "PUT", body: { status }, token });
+}
 
 // assignRole grants an admin role to a member, scoped to this chapter. Only an
 // org admin may call it (the backend enforces this).

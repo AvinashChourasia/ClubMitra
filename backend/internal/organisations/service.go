@@ -73,8 +73,16 @@ func (s *Service) GetOrg(ctx context.Context, id uuid.UUID) (*Organisation, erro
 	return s.repo.GetOrg(ctx, id)
 }
 
-// validMemberStatuses are the states a membership can be set to.
-var validMemberStatuses = map[string]bool{"active": true, "lapsed": true, "suspended": true}
+// validMemberStatuses are the states an ADMIN can set a membership to.
+var validMemberStatuses = map[string]bool{
+	"active": true, "lapsed": true, "suspended": true,
+	"on_leave": true, "injured": true, "alumni": true,
+}
+
+// selfServiceStatuses are the states a member may set on THEIR OWN membership:
+// declaring a break (on_leave) and coming back (active). Everything else
+// (injured / suspended / alumni) is admin-only.
+var selfServiceStatuses = map[string]bool{"active": true, "on_leave": true}
 
 // UpdateOrg validates and edits an organisation.
 func (s *Service) UpdateOrg(ctx context.Context, id uuid.UUID, name, description string) (*Organisation, error) {
@@ -141,10 +149,22 @@ func (s *Service) GetMemberDetail(ctx context.Context, chapterID uuid.UUID, user
 	return s.repo.GetMemberDetail(ctx, chapterID, userID)
 }
 
-// UpdateMemberStatus validates and sets a member's status.
+// UpdateMemberStatus validates and sets a member's status (admin action).
 func (s *Service) UpdateMemberStatus(ctx context.Context, chapterID uuid.UUID, userID, status string) error {
 	if !validMemberStatuses[status] {
-		return ValidationError{Msg: "status must be one of active, lapsed, suspended"}
+		return ValidationError{Msg: "status must be one of active, lapsed, suspended, on_leave, injured, alumni"}
+	}
+	return s.repo.UpdateMemberStatus(ctx, chapterID, userID, status)
+}
+
+// SetOwnStatus lets a member toggle their own membership between active and
+// on_leave (self-service break). The caller must already be a member.
+func (s *Service) SetOwnStatus(ctx context.Context, chapterID uuid.UUID, userID, status string) error {
+	if !selfServiceStatuses[status] {
+		return ValidationError{Msg: "you can only set yourself active or on_leave"}
+	}
+	if _, err := s.repo.GetMembership(ctx, chapterID, userID); err != nil {
+		return err // ErrNotFound if not a member
 	}
 	return s.repo.UpdateMemberStatus(ctx, chapterID, userID, status)
 }

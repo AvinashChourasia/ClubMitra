@@ -22,6 +22,7 @@ import {
   assignRole,
   approveMember,
   payMembership,
+  setOwnStatus,
   MEMBER_STATUSES,
   type Chapter,
   type Member,
@@ -397,7 +398,7 @@ export default function ClubDetail() {
     }
     const buttons: { text: string; style?: "destructive" | "cancel"; onPress?: () => void }[] = [
       ...MEMBER_STATUSES.filter((s) => s !== m.status).map((s) => ({
-        text: `Set ${s}`,
+        text: `Set ${s.replace("_", " ")}`,
         onPress: () => withToken((t) => setMemberStatus(t, id, m.user_id, s)),
       })),
     ];
@@ -507,6 +508,20 @@ export default function ClubDetail() {
               </Pressable>
             )}
 
+            {/* Self-service: take a break / come back (pauses you from the leaderboard) */}
+            {(myStatus === "active" || myStatus === "on_leave") && (
+              <Pressable onPress={() => withToken((t) => setOwnStatus(t, id, myStatus === "on_leave" ? "active" : "on_leave"))} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 10 }]}>
+                <Ionicons name={myStatus === "on_leave" ? "pause-circle" : "pause-circle-outline"} size={20} color={myStatus === "on_leave" ? colors.warning : colors.muted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.text, fontWeight: "700" }}>{myStatus === "on_leave" ? "You're on leave" : "Active member"}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>
+                    {myStatus === "on_leave" ? "Paused from the leaderboard" : "Tap to take a break (pause from the leaderboard)"}
+                  </Text>
+                </View>
+                <Text style={{ color: colors.accent, fontWeight: "700" }}>{myStatus === "on_leave" ? "Resume" : "On leave"}</Text>
+              </Pressable>
+            )}
+
             {/* Tabs */}
             <View style={{ flexDirection: "row", backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 3 }}>
               {(
@@ -558,7 +573,7 @@ export default function ClubDetail() {
                             <Text style={{ color: colors.muted, fontSize: 12 }}>{m.email}</Text>
                           </View>
                           <Text style={{ color: m.status === "active" ? colors.success : colors.muted, fontSize: 12, fontWeight: "700", textTransform: "capitalize" }}>
-                            {m.status}
+                            {m.status.replace("_", " ")}
                           </Text>
                         </Pressable>
                       ))}

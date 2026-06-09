@@ -55,7 +55,8 @@ func (h *Handler) Routes() http.Handler {
 		r.Get("/mine", h.myChapters)    // the caller's chapters (static before {chapterID})
 		r.Route("/{chapterID}", func(r chi.Router) {
 			r.Get("/", h.getChapter)
-			r.Post("/pay", h.payMembership) // self-service: pay/renew own membership
+			r.Post("/pay", h.payMembership)             // self-service: pay/renew own membership
+			r.Put("/members/me/status", h.setOwnStatus) // self-service: on_leave / active
 			r.With(chapterAdmin).Put("/", h.updateChapter)
 			r.With(chapterOrgAdmin).Delete("/", h.deleteChapter)
 			r.With(chapterAdmin).Post("/members", h.addMember)
@@ -327,6 +328,30 @@ func (h *Handler) updateMemberStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.UpdateMemberStatus(r.Context(), chapterID, chi.URLParam(r, "userID"), req.Status); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+// setOwnStatus is the member self-service: set your own membership to on_leave
+// or back to active. Not admin-gated — the caller can only change themselves.
+func (h *Handler) setOwnStatus(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	var req updateMemberStatusRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.SetOwnStatus(r.Context(), chapterID, userID, req.Status); err != nil {
 		h.writeError(w, err)
 		return
 	}
