@@ -159,9 +159,12 @@ func (s *Service) PostRun(ctx context.Context, userID string, runID uuid.UUID, b
 }
 
 // DirectThread bundles the other participant + messages for the DM screen.
+// OtherLastReadAt powers read receipts: a message you sent is "read" once its
+// created_at is at or before this timestamp.
 type DirectThread struct {
-	Other    OtherUser `json:"other"`
-	Messages []Message `json:"messages"`
+	Other           OtherUser `json:"other"`
+	Messages        []Message `json:"messages"`
+	OtherLastReadAt *string   `json:"other_last_read_at,omitempty"`
 }
 
 // Inbox returns the user's chat list — club groups + direct chats — most recent
@@ -211,8 +214,12 @@ func (s *Service) DirectThread(ctx context.Context, userID, otherID string) (*Di
 	if err != nil {
 		return nil, err
 	}
+	otherRead, err := s.repo.lastReadAt(ctx, convID, otherID)
+	if err != nil {
+		return nil, err
+	}
 	_ = s.repo.markRead(ctx, convID, userID)
-	return &DirectThread{Other: *other, Messages: msgs}, nil
+	return &DirectThread{Other: *other, Messages: msgs, OtherLastReadAt: otherRead}, nil
 }
 
 // PostDirect posts a message to the 1:1 chat with another user.

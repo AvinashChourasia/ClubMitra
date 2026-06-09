@@ -29,6 +29,7 @@ import (
 var folders = map[string]string{
 	"avatar": "clubmitra/avatars", // profile photos
 	"club":   "clubmitra/clubs",   // club logos + banners
+	"chat":   "clubmitra/chat",    // chat image attachments
 }
 
 const defaultKind = "avatar"

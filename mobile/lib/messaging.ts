@@ -25,11 +25,15 @@ export type InboxItem = {
   photo_url?: string | null;
   last_message?: string | null;
   last_at?: string | null;
+  unread: number;
 };
 
 export type OtherUser = { id: string; name: string; profile_photo?: string | null };
-export type DirectThread = { other: OtherUser; messages: Message[] };
+export type DirectThread = { other: OtherUser; messages: Message[]; other_last_read_at?: string | null };
 export type UserHit = { id: string; name: string; profile_photo?: string | null };
+
+// OutMsg is the payload to send: text and/or an image attachment.
+export type OutMsg = { body?: string; media_url?: string; media_type?: string };
 
 // --- inbox ---
 export async function inbox(token: string) {
@@ -40,8 +44,8 @@ export async function inbox(token: string) {
 export async function chapterMessages(token: string, chapterId: string) {
   return (await request<Message[] | null>(`/messaging/chapter/${chapterId}`, { token })) ?? [];
 }
-export function postChapter(token: string, chapterId: string, body: string) {
-  return request<Message>(`/messaging/chapter/${chapterId}`, { method: "POST", body: { body }, token });
+export function postChapter(token: string, chapterId: string, msg: OutMsg) {
+  return request<Message>(`/messaging/chapter/${chapterId}`, { method: "POST", body: msg, token });
 }
 export function announce(token: string, chapterId: string, body: string) {
   return request<Message>(`/messaging/chapter/${chapterId}/announce`, { method: "POST", body: { body }, token });
@@ -51,8 +55,8 @@ export function announce(token: string, chapterId: string, body: string) {
 export function directThread(token: string, userId: string) {
   return request<DirectThread>(`/messaging/dm/${userId}`, { token });
 }
-export function postDirect(token: string, userId: string, body: string) {
-  return request<Message>(`/messaging/dm/${userId}`, { method: "POST", body: { body }, token });
+export function postDirect(token: string, userId: string, msg: OutMsg) {
+  return request<Message>(`/messaging/dm/${userId}`, { method: "POST", body: msg, token });
 }
 
 // --- people search (to start a DM) ---

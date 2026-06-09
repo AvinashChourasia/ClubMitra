@@ -14,7 +14,7 @@ type SignatureResp = {
 };
 
 // ImageKind picks which allowlisted Cloudinary folder the server signs.
-type ImageKind = "avatar" | "club";
+type ImageKind = "avatar" | "club" | "chat";
 
 // isRemote tells an already-uploaded (http/https) URL from a freshly-picked
 // local file URI, so we never re-upload an unchanged photo.
@@ -55,4 +55,9 @@ export function uploadAvatar(token: string, localUri: string): Promise<string> {
 // uploadClubImage uploads a club logo or banner.
 export function uploadClubImage(token: string, localUri: string): Promise<string> {
   return uploadImage(token, localUri, "club");
+}
+
+// uploadChatImage uploads a chat image attachment.
+export function uploadChatImage(token: string, localUri: string): Promise<string> {
+  return uploadImage(token, localUri, "chat");
 }

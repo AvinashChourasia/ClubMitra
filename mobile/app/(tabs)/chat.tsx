@@ -112,11 +112,18 @@ export default function Chat() {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                     <Text style={{ color: colors.text, fontWeight: "700", fontSize: 16, flex: 1 }} numberOfLines={1}>{it.title}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 11, marginLeft: 8 }}>{when(it.last_at)}</Text>
+                    <Text style={{ color: it.unread > 0 ? colors.success : colors.muted, fontSize: 11, marginLeft: 8, fontWeight: it.unread > 0 ? "700" : "400" }}>{when(it.last_at)}</Text>
                   </View>
-                  <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }} numberOfLines={1}>
-                    {it.last_message ?? (it.kind === "club" ? "Club group chat" : "No messages yet")}
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", marginTop: 2 }}>
+                    <Text style={{ color: it.unread > 0 ? colors.text : colors.muted, fontSize: 13, fontWeight: it.unread > 0 ? "600" : "400", flex: 1 }} numberOfLines={1}>
+                      {it.last_message ?? (it.kind === "club" ? "Club group chat" : "No messages yet")}
+                    </Text>
+                    {it.unread > 0 && (
+                      <View style={{ backgroundColor: colors.success, borderRadius: 11, minWidth: 22, height: 22, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", marginLeft: 8 }}>
+                        <Text style={{ color: "#fff", fontSize: 11, fontWeight: "800" }}>{it.unread > 99 ? "99+" : it.unread}</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
               </Pressable>
             ))

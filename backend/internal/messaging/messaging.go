@@ -26,6 +26,7 @@ type InboxItem struct {
 	PhotoURL    *string `json:"photo_url,omitempty"`
 	LastMessage *string `json:"last_message,omitempty"`
 	LastAt      *string `json:"last_at,omitempty"`
+	Unread      int     `json:"unread"`
 }
 
 // OtherUser is the counterpart in a direct chat (for the DM screen header).
@@ -242,7 +243,12 @@ func (r *Repository) isDirectMember(ctx context.Context, conversationID uuid.UUI
 // null until someone posts.
 func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem, error) {
 	const q = `
-		SELECT c.id::text, c.name, c.logo, lm.body, lm.media_type, lm.created_at::text
+		SELECT c.id::text, c.name, c.logo, lm.body, lm.media_type, lm.created_at::text,
+		       COALESCE((SELECT count(*) FROM messages msg
+		         WHERE msg.conversation_id = conv.id AND msg.deleted_at IS NULL AND msg.sender_id <> $1
+		           AND msg.created_at > COALESCE(
+		             (SELECT last_read_at FROM message_reads WHERE conversation_id = conv.id AND user_id = $1),
+		             'epoch')), 0) AS unread
 		FROM chapters c
 		JOIN chapter_members m ON m.chapter_id = c.id AND m.user_id = $1 AND m.deleted_at IS NULL
 		LEFT JOIN conversations conv ON conv.chapter_id = c.id AND conv.type = 'chapter'
@@ -262,7 +268,7 @@ func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem,
 		var it InboxItem
 		var chapterID string
 		var mediaType *string
-		if err := rows.Scan(&chapterID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastAt); err != nil {
+		if err := rows.Scan(&chapterID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastAt, &it.Unread); err != nil {
 			return nil, err
 		}
 		it.Kind = "club"
@@ -276,7 +282,12 @@ func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem,
 // directInbox lists the user's direct chats, titled by the other participant.
 func (r *Repository) directInbox(ctx context.Context, userID string) ([]InboxItem, error) {
 	const q = `
-		SELECT other.id, other.name, other.profile_photo, lm.body, lm.media_type, lm.created_at::text
+		SELECT other.id, other.name, other.profile_photo, lm.body, lm.media_type, lm.created_at::text,
+		       COALESCE((SELECT count(*) FROM messages msg
+		         WHERE msg.conversation_id = conv.id AND msg.deleted_at IS NULL AND msg.sender_id <> $1
+		           AND msg.created_at > COALESCE(
+		             (SELECT last_read_at FROM message_reads WHERE conversation_id = conv.id AND user_id = $1),
+		             'epoch')), 0) AS unread
 		FROM conversations conv
 		JOIN conversation_members me ON me.conversation_id = conv.id AND me.user_id = $1
 		JOIN conversation_members ot ON ot.conversation_id = conv.id AND ot.user_id <> $1
@@ -297,7 +308,7 @@ func (r *Repository) directInbox(ctx context.Context, userID string) ([]InboxIte
 		var it InboxItem
 		var otherID string
 		var mediaType *string
-		if err := rows.Scan(&otherID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastAt); err != nil {
+		if err := rows.Scan(&otherID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastAt, &it.Unread); err != nil {
 			return nil, err
 		}
 		it.Kind = "direct"
@@ -323,6 +334,19 @@ func preview(body, mediaType *string) *string {
 		return &label
 	}
 	return nil
+}
+
+// lastReadAt returns when a user last read a conversation (nil = never), used to
+// derive read receipts for the other party's view.
+func (r *Repository) lastReadAt(ctx context.Context, conversationID uuid.UUID, userID string) (*string, error) {
+	var ts *string
+	err := r.db.QueryRow(ctx,
+		`SELECT last_read_at::text FROM message_reads WHERE conversation_id = $1 AND user_id = $2`,
+		conversationID, userID).Scan(&ts)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return ts, err
 }
 
 // markRead upserts the caller's read marker for a conversation.

@@ -6,7 +6,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { useAuth } from "../../../lib/auth";
 import { getChapter, myChapters, isChapterAdmin } from "../../../lib/clubs";
-import { chapterMessages, postChapter, announce as announceApi } from "../../../lib/messaging";
+import { chapterMessages, postChapter, announce as announceApi, type OutMsg } from "../../../lib/messaging";
+import { uploadChatImage } from "../../../lib/upload";
 import { ChatThread } from "../../../components/ChatThread";
 
 export default function ClubGroupChat() {
@@ -43,10 +44,15 @@ export default function ClubGroupChat() {
     return token ? chapterMessages(token, id) : [];
   }, [getAccessToken, id]);
 
-  const send = useCallback(async (body: string) => {
+  const send = useCallback(async (msg: OutMsg) => {
     const token = await getAccessToken();
-    if (token) await postChapter(token, id, body);
+    if (token) await postChapter(token, id, msg);
   }, [getAccessToken, id]);
+
+  const uploadImage = useCallback(async (uri: string) => {
+    const token = await getAccessToken();
+    return uploadChatImage(token!, uri);
+  }, [getAccessToken]);
 
   const announce = useCallback(async (body: string) => {
     const token = await getAccessToken();
@@ -60,8 +66,10 @@ export default function ClubGroupChat() {
       avatarName={title}
       avatarUri={logo}
       meId={user?.id ?? ""}
+      isGroup
       load={load}
       send={send}
+      uploadImage={uploadImage}
       canAnnounce={isAdmin}
       announce={announce}
       onSenderPress={(senderId) => {
