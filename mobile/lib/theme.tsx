@@ -30,6 +30,7 @@ export type Palette = {
   bgSecondary: string;
   fieldBg: string;
   danger: string;
+  bubbleMine: string; // own chat bubble (always pairs with white text)
 };
 
 const light: Palette = {
@@ -50,6 +51,7 @@ const light: Palette = {
   bgSecondary: "#F4F5F7",
   fieldBg: "#F1F5F9",
   danger: "#E11D2E",
+  bubbleMine: "#2563EB",
 };
 
 const dark: Palette = {
@@ -70,6 +72,7 @@ const dark: Palette = {
   bgSecondary: "#0B1018", // app background
   fieldBg: "#1B2433",
   danger: "#F43F5E",
+  bubbleMine: "#2F6FED",
 };
 
 // Theme-independent tokens.

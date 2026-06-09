@@ -36,9 +36,7 @@ import { type Message, type OutMsg } from "../lib/messaging";
 import { Avatar } from "./Avatar";
 import { colors, styles } from "../lib/theme";
 
-const READ_BLUE = "#34B7F1";
-
-type Staged = { uri: string; kind: "image" | "file"; name?: string; mime?: string };
+type Staged ={ uri: string; kind: "image" | "file"; name?: string; mime?: string };
 type Pending = { tempId: string; body?: string; localUri?: string; kind?: "image" | "file"; name?: string; failed?: boolean };
 
 function timeOf(d: string): string {
@@ -228,30 +226,64 @@ export function ChatThread({
     Alert.alert("", "", buttons, { cancelable: true });
   }
 
-  // bubble body shared by real + pending messages
-  function bubble(mine: boolean, opts: { body?: string | null; mediaUrl?: string | null; localUri?: string; mediaType?: string | null; kind?: string; name?: string }) {
+  // bubble: a WhatsApp-style message bubble shared by real + pending messages.
+  // The time + status (tick / clock) sit INSIDE the bubble, bottom-right.
+  function bubble(
+    mine: boolean,
+    opts: { body?: string | null; mediaUrl?: string | null; localUri?: string; mediaType?: string | null; kind?: string; name?: string },
+    time: string,
+    status?: "sent" | "read" | "sending" | "failed"
+  ) {
     const imgUri = opts.mediaUrl ?? opts.localUri;
-    const isImage = (opts.mediaType === "image" || opts.kind === "image") && imgUri;
+    const isImage = !!((opts.mediaType === "image" || opts.kind === "image") && imgUri);
     const isFile = opts.mediaType === "file" || opts.kind === "file";
+    const fg = mine ? "#fff" : colors.text;
+    const footFg = mine ? "rgba(255,255,255,0.72)" : colors.muted;
+    const icon: Record<string, { name: keyof typeof Ionicons.glyphMap; color: string }> = {
+      read: { name: "checkmark-done", color: "#fff" },
+      sent: { name: "checkmark", color: footFg },
+      sending: { name: "time-outline", color: footFg },
+      failed: { name: "alert-circle", color: "#FCA5A5" },
+    };
     return (
-      <View style={{ backgroundColor: mine ? colors.primary : colors.bg, borderRadius: 16, padding: isImage ? 4 : 0, paddingHorizontal: isImage ? 4 : 14, paddingVertical: isImage ? 4 : 9, borderWidth: mine ? 0 : 1, borderColor: colors.border }}>
+      <View
+        style={{
+          backgroundColor: mine ? colors.bubbleMine : colors.bg,
+          borderRadius: 18,
+          borderTopRightRadius: mine ? 5 : 18,
+          borderTopLeftRadius: mine ? 18 : 5,
+          padding: 3,
+          borderWidth: mine ? 0 : 1,
+          borderColor: colors.border,
+          shadowColor: "#0B1220",
+          shadowOpacity: mine ? 0 : 0.05,
+          shadowRadius: 3,
+          shadowOffset: { width: 0, height: 1 },
+        }}
+      >
         {isImage ? (
           <Pressable onPress={() => opts.mediaUrl && setViewer(opts.mediaUrl)}>
-            <Image source={{ uri: imgUri! }} style={{ width: 210, height: 210, borderRadius: 12 }} resizeMode="cover" />
+            <Image source={{ uri: imgUri! }} style={{ width: 216, height: 216, borderRadius: 15 }} resizeMode="cover" />
           </Pressable>
         ) : null}
         {isFile ? (
           <Pressable
             onPress={() => opts.mediaUrl && Linking.openURL(opts.mediaUrl)}
-            style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10 }}
+            style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 8 }}
           >
-            <Ionicons name="document-text" size={26} color={mine ? "#fff" : colors.primary} />
-            <Text style={{ color: mine ? "#fff" : colors.text, fontWeight: "600", maxWidth: 160 }} numberOfLines={1}>{opts.name ?? "Document"}</Text>
+            <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: mine ? "rgba(255,255,255,0.2)" : colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="document-text" size={20} color={mine ? "#fff" : colors.primary} />
+            </View>
+            <Text style={{ color: fg, fontWeight: "600", maxWidth: 150 }} numberOfLines={1}>{opts.name ?? "Document"}</Text>
           </Pressable>
         ) : null}
-        {opts.body ? (
-          <Text style={{ color: mine ? "#fff" : colors.text, fontSize: 14, paddingHorizontal: isImage ? 8 : 0, paddingTop: isImage ? 6 : 0, paddingBottom: isImage ? 2 : 0 }}>{opts.body}</Text>
-        ) : null}
+        <View style={{ flexDirection: "row", alignItems: "flex-end", flexWrap: "wrap", justifyContent: "flex-end", paddingHorizontal: 9, paddingTop: isImage || isFile ? 2 : 6, paddingBottom: 5 }}>
+          {opts.body ? <Text style={{ color: fg, fontSize: 15, flexShrink: 1, marginRight: 8 }}>{opts.body}</Text> : null}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: "auto" }}>
+            <Text style={{ color: footFg, fontSize: 10 }}>{time}</Text>
+            {status ? <Ionicons name={icon[status].name} size={13} color={icon[status].color} /> : null}
+          </View>
+        </View>
       </View>
     );
   }
@@ -309,19 +341,15 @@ export function ChatThread({
                         <Text style={{ color: colors.muted, fontSize: 10, marginTop: 4 }}>{timeOf(m.created_at)}</Text>
                       </View>
                     ) : (
-                      <View style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "82%", marginTop: showName ? 6 : 1.5 }}>
+                      <View style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "80%", marginTop: showName ? 8 : 2 }}>
                         {showName && (
                           <Pressable onPress={() => onSenderPress?.(m.sender_id, m.sender_name)} disabled={!onSenderPress}>
-                            <Text style={{ color: colors.accent, fontSize: 11, marginLeft: 10, marginBottom: 2, fontWeight: "700" }}>{m.sender_name}</Text>
+                            <Text style={{ color: colors.accent, fontSize: 12, marginLeft: 10, marginBottom: 2, fontWeight: "700" }}>{m.sender_name}</Text>
                           </Pressable>
                         )}
                         <Pressable onLongPress={() => onLongPress(m)} delayLongPress={300}>
-                          {bubble(mine, { body: m.body, mediaUrl: m.media_url, mediaType: m.media_type })}
+                          {bubble(mine, { body: m.body, mediaUrl: m.media_url, mediaType: m.media_type }, timeOf(m.created_at), mine ? (read ? "read" : "sent") : undefined)}
                         </Pressable>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 3, alignSelf: mine ? "flex-end" : "flex-start", marginTop: 2, marginHorizontal: 6 }}>
-                          <Text style={{ color: colors.muted, fontSize: 10 }}>{timeOf(m.created_at)}</Text>
-                          {mine && <Ionicons name={read ? "checkmark-done" : "checkmark"} size={14} color={read ? READ_BLUE : colors.muted} />}
-                        </View>
                       </View>
                     )}
                   </View>
@@ -331,11 +359,8 @@ export function ChatThread({
 
             {/* Optimistic (pending) messages — always mine, shown at the bottom. */}
             {pending.map((p) => (
-              <View key={p.tempId} style={{ alignSelf: "flex-end", maxWidth: "82%", marginTop: 1.5, opacity: p.failed ? 0.8 : 0.7 }}>
-                {bubble(true, { body: p.body, localUri: p.localUri, kind: p.kind, name: p.name })}
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 3, alignSelf: "flex-end", marginTop: 2, marginHorizontal: 6 }}>
-                  <Ionicons name={p.failed ? "alert-circle" : "time-outline"} size={13} color={p.failed ? colors.danger : colors.muted} />
-                </View>
+              <View key={p.tempId} style={{ alignSelf: "flex-end", maxWidth: "80%", marginTop: 2, opacity: p.failed ? 0.9 : 0.75 }}>
+                {bubble(true, { body: p.body, localUri: p.localUri, kind: p.kind, name: p.name }, "", p.failed ? "failed" : "sending")}
               </View>
             ))}
           </ScrollView>
@@ -385,10 +410,12 @@ export function ChatThread({
         </View>
       </KeyboardAvoidingView>
 
-      {/* Attachment menu */}
-      <Modal visible={attachMenu} transparent animationType="fade" onRequestClose={() => setAttachMenu(false)}>
-        <Pressable onPress={() => setAttachMenu(false)} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" }}>
-          <Pressable onPress={() => {}} style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 34, gap: 6 }}>
+      {/* Attachment menu — an inline overlay (NOT a Modal): launching the native
+          photo/document picker from inside a dismissing Modal crashes on iOS. */}
+      {attachMenu && (
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
+          <Pressable onPress={() => setAttachMenu(false)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
+          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 34, gap: 6 }}>
             <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 10 }} />
             {[
               { icon: "image" as const, label: "Photo library", onPress: pickLibrary, show: !!uploadImage },
@@ -402,9 +429,9 @@ export function ChatThread({
                 <Text style={{ color: colors.text, fontSize: 16, fontWeight: "600" }}>{o.label}</Text>
               </Pressable>
             ))}
-          </Pressable>
-        </Pressable>
-      </Modal>
+          </View>
+        </View>
+      )}
 
       {/* Fullscreen image viewer */}
       <Modal visible={viewer !== null} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
