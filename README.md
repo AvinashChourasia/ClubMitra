@@ -215,7 +215,7 @@ clubmitra/
 
 ---
 
-### Phase 2 — Trust + Leaderboards + Analytics + Inventory + Messaging `(Month 2)` 🚧 IN PROGRESS
+### Phase 2 — Trust + Leaderboards + Analytics + Inventory + Messaging `(Month 2)` ✅ COMPLETE
 
 > Self-contained work with no external setup — builds immediately. Real payments
 > moved to Phase 3 (gated by Razorpay/Stripe merchant KYC). Start the merchant
@@ -619,9 +619,9 @@ PLATFORM_CUT_PCT=10
 | Phase | Focus | Timeline |
 |---|---|---|
 | 1 | Club core — members, attendance, challenges | Month 1 ✅ |
-| 2 | Trust score, rolling leaderboards, analytics, inventory, messaging | Month 2 |
+| 2 | Trust score, rolling leaderboards, analytics, inventory, messaging | Month 2 ✅ |
 | 3 | Payments (Razorpay + Stripe), GPX, desktop admin, paid inventory | Month 3 |
-| 4 | GPS tracking, race calendar, finisher certificates, city leaderboard | Month 4 |
+| 4 | GPS tracking, race calendar, finisher certificates, city leaderboard | Month 4 🚧 |
 | 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 |
 | 6+ | Europe launch, leagues, coaches, physical events, white-label | Month 7+ |
 

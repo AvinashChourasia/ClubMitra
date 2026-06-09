@@ -102,8 +102,11 @@ export default function Home() {
           </View>
         </GradientCard>
 
-        {/* Log a run — feeds the club leaderboards */}
-        <Button label="Log a run" icon="add-circle" onPress={() => router.push("/runlog/new")} />
+        {/* Record a run with GPS (the credible source); manual log as a fallback. */}
+        <Button label="Record run" icon="play" onPress={() => router.push("/activity/record")} />
+        <Tap onPress={() => router.push("/runlog/new")} haptic={false} style={{ alignSelf: "center", paddingVertical: 2 }}>
+          <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 13 }}>or log a run manually</Text>
+        </Tap>
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />
