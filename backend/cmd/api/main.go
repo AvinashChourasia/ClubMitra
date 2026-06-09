@@ -19,6 +19,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/google/uuid"
+
 	"github.com/avinash/clubmitra/backend/internal/activities"
 	"github.com/avinash/clubmitra/backend/internal/analytics"
 	"github.com/avinash/clubmitra/backend/internal/attendance"
@@ -120,7 +122,8 @@ func main() {
 	challengesHandler := challenges.NewHandler(challengesSvc, permChecker)
 
 	// Run logging + chapter rolling leaderboards (daily/weekly/monthly/all-time).
-	runlogHandler := runlog.NewHandler(runlog.NewService(runlog.NewRepository(pool)))
+	runlogSvc := runlog.NewService(runlog.NewRepository(pool))
+	runlogHandler := runlog.NewHandler(runlogSvc)
 
 	// Chapter analytics: drop-off, engagement, volume (admin-only).
 	analyticsHandler := analytics.NewHandler(analytics.NewRepository(pool), permChecker)
@@ -131,9 +134,15 @@ func main() {
 	// Messaging: club + event chat, admin announcements (also pushed).
 	messagingHandler := messaging.NewHandler(messaging.NewService(messaging.NewRepository(pool), permChecker, notifier))
 
-	// Connect the two: when a run is recorded, credit challenge progress. This
-	// callback is how activities stays unaware of the challenges package.
-	activitiesSvc.SetRecordedHook(challengesSvc.RecordRunProgress)
+	// When a GPS run is recorded, credit both challenge progress AND the rolling
+	// club leaderboards (one run_log per active club). This callback is how
+	// activities stays unaware of the challenges/runlog packages.
+	activitiesSvc.SetRecordedHook(func(ctx context.Context, userID string, runStart time.Time, distanceM float64, activityID uuid.UUID) {
+		challengesSvc.RecordRunProgress(ctx, userID, runStart, distanceM, activityID)
+		if err := runlogSvc.CreditActivity(ctx, userID, distanceM, runStart, activityID); err != nil {
+			log.Printf("activities: credit club leaderboards failed: %v", err)
+		}
+	})
 
 	// 4. Build the HTTP server around the router.
 	srv := &http.Server{

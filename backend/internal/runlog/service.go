@@ -73,6 +73,18 @@ func (s *Service) Leaderboard(ctx context.Context, chapterID uuid.UUID, period s
 	return s.repo.Board(ctx, chapterID, from, to)
 }
 
+// CreditActivity credits a recorded GPS run to the runner's active clubs'
+// leaderboards. Distance comes in meters; the run's date is taken in IST.
+// Best-effort from the activities hook — callers log and swallow the error.
+func (s *Service) CreditActivity(ctx context.Context, userID string, distanceM float64, runStart time.Time, activityID uuid.UUID) error {
+	km := distanceM / 1000.0
+	if km <= 0 {
+		return nil
+	}
+	ranOn := startOfDay(runStart).Format("2006-01-02")
+	return s.repo.CreditActivity(ctx, userID, km, ranOn, activityID)
+}
+
 func startOfDay(t time.Time) time.Time {
 	n := t.In(ist)
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, ist)

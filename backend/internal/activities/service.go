@@ -28,7 +28,7 @@ func (e ValidationError) Error() string { return e.Msg }
 // RecordedHook is called after a run is successfully stored. We use it to credit
 // challenge progress WITHOUT this package importing the challenges package — main
 // wires the two together. The activities package stays unaware of challenges.
-type RecordedHook func(ctx context.Context, userID string, runStart time.Time, distanceM float64)
+type RecordedHook func(ctx context.Context, userID string, runStart time.Time, distanceM float64, activityID uuid.UUID)
 
 type Service struct {
 	repo     *Repository
@@ -90,7 +90,7 @@ func (s *Service) Record(ctx context.Context, userID string, points []geo.Point,
 	// Credit challenge progress (best-effort; the hook logs its own errors and
 	// must never fail the run upload). Skipped when the user opted this run out.
 	if countTowardChallenges && s.onRecord != nil {
-		s.onRecord(ctx, userID, act.StartedAt, act.DistanceM)
+		s.onRecord(ctx, userID, act.StartedAt, act.DistanceM, act.ID)
 	}
 	return act, nil
 }

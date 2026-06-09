@@ -375,7 +375,7 @@ func (s *Service) creditVerifiedProof(ctx context.Context, proof *Proof) error {
 // RecordRunProgress is the GPS hook (Phase 3): a saved run credits its distance
 // (converted to km) to the user's active DISTANCE challenges. Best-effort —
 // errors are logged so a leaderboard hiccup never fails a run upload.
-func (s *Service) RecordRunProgress(ctx context.Context, userID string, runStart time.Time, distanceM float64) {
+func (s *Service) RecordRunProgress(ctx context.Context, userID string, runStart time.Time, distanceM float64, _ uuid.UUID) {
 	if distanceM <= 0 {
 		return
 	}

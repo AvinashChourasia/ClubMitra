@@ -104,6 +104,20 @@ func (r *Repository) MyLogs(ctx context.Context, userID string, limit int) ([]Ru
 	return out, rows.Err()
 }
 
+// CreditActivity records a GPS run as a run_log for EACH of the user's active
+// clubs (so the run shows on every club's board), tagged source='gps' and linked
+// to the activity. ON CONFLICT makes it idempotent per (chapter, activity).
+func (r *Repository) CreditActivity(ctx context.Context, userID string, distanceKm float64, ranOn string, activityID uuid.UUID) error {
+	const q = `
+		INSERT INTO run_logs (user_id, chapter_id, distance_km, ran_on, source, activity_id)
+		SELECT $1, cm.chapter_id, $2, $3::date, 'gps', $4
+		FROM chapter_members cm
+		WHERE cm.user_id = $1 AND cm.deleted_at IS NULL AND cm.status = 'active'
+		ON CONFLICT (chapter_id, activity_id) WHERE activity_id IS NOT NULL DO NOTHING`
+	_, err := r.db.Exec(ctx, q, userID, distanceKm, ranOn, activityID)
+	return err
+}
+
 // Board aggregates the leaderboard for a chapter. from/to are inclusive
 // YYYY-MM-DD bounds; both nil means all-time.
 func (r *Repository) Board(ctx context.Context, chapterID uuid.UUID, from, to *string) ([]BoardEntry, error) {
