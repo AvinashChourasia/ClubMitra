@@ -367,7 +367,7 @@ export function GuestProfile() {
   const perks: { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }[] = [
     { icon: "navigate", title: "GPS run history", body: "Every run saved — route, pace, splits, elevation." },
     { icon: "podium", title: "City ranking", body: "See where you stand among your city's runners." },
-    { icon: "shield-checkmark", title: "Trust score", body: "Show up, log runs, build a verified reputation." },
+    { icon: "people", title: "Club life", body: "Group chat, run schedules, and rolling leaderboards." },
     { icon: "flame", title: "Streaks & stats", body: "Day streaks, personal records, all-time totals." },
   ];
 

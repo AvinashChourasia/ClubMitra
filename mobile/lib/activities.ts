@@ -56,9 +56,11 @@ export function getStats(token: string): Promise<Stats> {
   return request<Stats>("/activities/stats", { token });
 }
 
-// listActivities fetches the current user's runs, newest first.
-export function listActivities(token: string): Promise<Activity[]> {
-  return request<Activity[]>("/activities", { token });
+// listActivities fetches the current user's runs, newest first. limit caps the
+// page (server clamps to 100) — the profile chart asks for more than the
+// default 20 so weekly volume covers ~12 weeks.
+export function listActivities(token: string, limit = 20): Promise<Activity[]> {
+  return request<Activity[]>(`/activities?limit=${limit}`, { token });
 }
 
 // getActivity fetches a single run by id.
