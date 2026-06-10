@@ -1,7 +1,8 @@
-// Home: a club dashboard. A warm gradient greeting, your next run, the
-// challenges you're chasing, and a shortcut into your clubs.
+// Home: the daily front door. Leads with the run you can start right now (the
+// GPS track card), then your personal slice — next run, challenges in flight,
+// your clubs — and fresh clubs in your city to discover.
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -11,9 +12,10 @@ import { useAuth } from "../../lib/auth";
 import { myRuns, type MyRun } from "../../lib/attendance";
 import { listChallenges, challengeFraction, challengeProgress, challengeTarget, challengeUnit, type Challenge } from "../../lib/challenges";
 import { myChapters, type MyChapter } from "../../lib/clubs";
+import { publicClubs, type DiscoverClub } from "../../lib/discover";
+import { useJoinGate, ClubCarousel, TrackRunCard } from "../../components/discovery";
 import { ProgressBar } from "../../components/ProgressBar";
 import { Tap } from "../../components/Tap";
-import { Button } from "../../components/Button";
 import { GradientCard } from "../../components/GradientCard";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { formatRunWhen, isPast } from "../../lib/format";
@@ -39,22 +41,31 @@ export default function Home() {
   const [runs, setRuns] = useState<MyRun[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [clubs, setClubs] = useState<MyChapter[]>([]);
+  const [cityClubs, setCityClubs] = useState<DiscoverClub[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const { joinClub, joiningId } = useJoinGate();
 
   const load = useCallback(async () => {
     try {
       const token = await getAccessToken();
       if (token) {
-        const [r, c, ch] = await Promise.all([myRuns(token), listChallenges(token, true), myChapters(token)]);
+        const [r, c, ch, pc] = await Promise.all([
+          myRuns(token),
+          listChallenges(token, true),
+          myChapters(token),
+          // Discovery strip: public clubs in the member's own city.
+          user?.city ? publicClubs(user.city).catch(() => []) : Promise.resolve([]),
+        ]);
         setRuns(r);
         setChallenges(c);
         setClubs(ch);
+        setCityClubs(pc);
       }
     } catch {
       /* keep last good state */
     }
-  }, [getAccessToken]);
+  }, [getAccessToken, user?.city]);
 
   useFocusEffect(
     useCallback(() => {
@@ -74,6 +85,13 @@ export default function Home() {
     await load();
     setRefreshing(false);
   }
+
+  // Clubs in the member's city they haven't joined yet — the discovery strip.
+  // (Hook, so it must run before the guest early-return.)
+  const discoverClubs = useMemo(() => {
+    const mine = new Set(clubs.map((c) => c.id));
+    return cityClubs.filter((c) => !mine.has(c.id)).slice(0, 8);
+  }, [cityClubs, clubs]);
 
   if (!user) return <GuestHome />;
 
@@ -103,11 +121,12 @@ export default function Home() {
           </View>
         </GradientCard>
 
-        {/* Record a run with GPS (the credible source); manual log as a fallback. */}
-        <Button label="Record run" icon="play" onPress={() => router.push("/activity/record")} />
-        <Tap onPress={() => router.push("/runlog/new")} haptic={false} style={{ alignSelf: "center", paddingVertical: 2 }}>
-          <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 13 }}>or log a run manually</Text>
-        </Tap>
+        {/* Start a run — the GPS track card IS the record button. */}
+        <TrackRunCard
+          onPress={() => router.push("/activity/record")}
+          title="Record your run"
+          subtitle="GPS route, pace, splits — counts for your clubs & challenges."
+        />
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />
@@ -169,6 +188,14 @@ export default function Home() {
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
             </Tap>
+
+            {/* Popular clubs in your city you haven't joined yet */}
+            {user.city && discoverClubs.length > 0 && (
+              <View style={{ gap: 10 }}>
+                <SectionHeader title={`Popular clubs in ${user.city}`} action={{ label: "Explore", onPress: () => router.push("/explore") }} />
+                <ClubCarousel clubs={discoverClubs} joiningId={joiningId} onJoin={joinClub} />
+              </View>
+            )}
           </>
         )}
       </ScrollView>

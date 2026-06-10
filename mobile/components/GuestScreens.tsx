@@ -14,13 +14,14 @@ import { publicClubs, publicChallenges, type DiscoverClub, type PublicChallenge 
 import {
   useGuestCity,
   useJoinGate,
+  ClubCarousel,
   DiscoverClubCard,
   PublicChallengeCard,
   EmptyState,
-  challengeGoal,
+  SearchBar,
+  TrackRunCard,
 } from "./discovery";
 import { CityAutocomplete } from "./CityAutocomplete";
-import { RouteTrace } from "./RouteTrace";
 import { Avatar } from "./Avatar";
 import { Tap } from "./Tap";
 import { Button } from "./Button";
@@ -111,47 +112,7 @@ function useGuestData(city: string, search = "", type = "") {
   return { clubs, challenges, refreshing, refresh };
 }
 
-function SearchBar({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.bg, borderRadius: 12, paddingHorizontal: 12 }}>
-      <Ionicons name="search" size={18} color={colors.muted} />
-      <TextInput
-        style={{ flex: 1, paddingVertical: 12, color: colors.text, fontSize: 15 }}
-        placeholder={placeholder}
-        placeholderTextColor={colors.muted}
-        value={value}
-        onChangeText={onChange}
-      />
-      {value !== "" && (
-        <Tap haptic={false} onPress={() => onChange("")} hitSlop={8}>
-          <Ionicons name="close-circle" size={18} color={colors.muted} />
-        </Tap>
-      )}
-    </View>
-  );
-}
-
 // --- Home ---
-
-// A synthetic ~2.5km loop so the GPS teaser shows the real RouteTrace (pace
-// gradient, km markers) without needing a real run. Built once.
-function demoRoute() {
-  const coords = [] as { latitude: number; longitude: number }[];
-  const times = [] as number[];
-  let t = 0;
-  const n = 48;
-  for (let i = 0; i <= n; i++) {
-    const a = (i / n) * Math.PI * 2;
-    coords.push({
-      latitude: 18.52 + 0.0035 * Math.sin(a) + 0.0008 * Math.sin(3 * a),
-      longitude: 73.85 + 0.0045 * Math.cos(a) + 0.0006 * Math.sin(2 * a),
-    });
-    t += 24000 + 9000 * Math.sin(a * 2); // varying pace → visible gradient
-    times.push(t);
-  }
-  return { coords, times };
-}
-const DEMO = demoRoute();
 
 export function GuestHome() {
   useThemeMode();
@@ -188,19 +149,7 @@ export function GuestHome() {
         </GradientCard>
 
         {/* GPS tracking teaser — show the actual product, not a screenshot */}
-        <Tap onPress={() => router.push("/register")} style={[styles.card, { gap: 12, padding: 16 }]}>
-          <RouteTrace coords={DEMO.coords} times={DEMO.times} height={150} live />
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name="navigate" size={22} color={colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16 }}>Track every run</Text>
-              <Text style={{ color: colors.muted, fontSize: 13 }}>GPS route, pace, splits — and it counts for your club.</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
-          </View>
-        </Tap>
+        <TrackRunCard onPress={() => router.push("/register")} />
 
         {/* Popular clubs (horizontal) */}
         {clubs === null ? (
@@ -208,28 +157,7 @@ export function GuestHome() {
         ) : clubs.length > 0 ? (
           <View style={{ gap: 10 }}>
             <Text style={styles.sectionTitle}>Popular clubs in {cityLabel}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 4 }}>
-              {clubs.slice(0, 8).map((c) => (
-                <View key={c.id} style={[styles.card, { width: 200, gap: 10, alignItems: "center", paddingVertical: 18 }]}>
-                  <Avatar name={c.name} uri={c.logo} size={56} bg={colors.accent} />
-                  <View style={{ alignItems: "center" }}>
-                    <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15, textAlign: "center" }} numberOfLines={1}>{c.name}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>{c.member_count} {c.member_count === 1 ? "member" : "members"}</Text>
-                  </View>
-                  {c.join_policy === "open" ? (
-                    <Tap
-                      onPress={() => joinClub(c)}
-                      disabled={joiningId === c.id}
-                      style={{ backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 22, paddingVertical: 8, opacity: joiningId === c.id ? 0.6 : 1 }}
-                    >
-                      <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>{joiningId === c.id ? "Joining…" : "Join"}</Text>
-                    </Tap>
-                  ) : (
-                    <Text style={{ color: colors.muted, fontWeight: "700", fontSize: 12 }}>Invite only</Text>
-                  )}
-                </View>
-              ))}
-            </ScrollView>
+            <ClubCarousel clubs={clubs.slice(0, 8)} joiningId={joiningId} onJoin={joinClub} />
           </View>
         ) : (
           <EmptyState icon="people" title={`No clubs in ${cityLabel} yet`} body="Be the first — create your city's running club." />

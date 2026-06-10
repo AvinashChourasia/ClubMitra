@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, type Href } from "expo-router";
 
 import { useAuth } from "../../lib/auth";
@@ -108,67 +109,78 @@ export default function Register() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.bg }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Create your account</Text>
-        <Text style={styles.subtitle}>Join your running club on ClubMitra.</Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top", "bottom"]}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 10, paddingBottom: 24, gap: 10 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Compact header: photo beside the title so the form starts higher. */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 2 }}>
+            <PhotoPicker uri={photo} onChange={setPhoto} label="Photo" size={64} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 23, fontWeight: "800", color: colors.text, letterSpacing: -0.4 }}>Create your account</Text>
+              <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>Free — and everything starts counting.</Text>
+            </View>
+          </View>
 
-        <PhotoPicker uri={photo} onChange={setPhoto} label="Add profile photo" />
+          <TextInput style={styles.input} placeholder="Full name" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            autoComplete="email"
+            keyboardType="email-address"
+            value={email}
+            onChangeText={setEmail}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Password (min 8 characters)"
+            placeholderTextColor={colors.muted}
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+          />
 
-        <TextInput style={styles.input} placeholder="Full name" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          placeholderTextColor={colors.muted}
-          autoCapitalize="none"
-          autoComplete="email"
-          keyboardType="email-address"
-          value={email}
-          onChangeText={setEmail}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Phone"
-          placeholderTextColor={colors.muted}
-          keyboardType="phone-pad"
-          value={phone}
-          onChangeText={setPhone}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Password (min 8 characters)"
-          placeholderTextColor={colors.muted}
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-        <CityPicker value={city || null} onChange={setCity} placeholder="City" />
-        <TextInput
-          style={styles.input}
-          placeholder="Age"
-          placeholderTextColor={colors.muted}
-          keyboardType="number-pad"
-          value={age}
-          onChangeText={setAge}
-        />
+          {/* Two-up: phone + age share a row to keep the form in one frame. */}
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <TextInput
+              style={[styles.input, { flex: 1.4 }]}
+              placeholder="Phone"
+              placeholderTextColor={colors.muted}
+              keyboardType="phone-pad"
+              value={phone}
+              onChangeText={setPhone}
+            />
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="Age"
+              placeholderTextColor={colors.muted}
+              keyboardType="number-pad"
+              value={age}
+              onChangeText={setAge}
+            />
+          </View>
 
-        <Text style={styles.fieldLabel}>Running level</Text>
-        <ChipSelect options={RUNNING_LEVELS} value={level} onChange={setLevel} />
+          <CityPicker value={city || null} onChange={setCity} placeholder="City" />
 
-        <Text style={styles.fieldLabel}>T-shirt size (optional)</Text>
-        <ChipSelect options={TSHIRT_SIZES} value={tshirt} onChange={setTshirt} allowDeselect />
+          <Text style={[styles.fieldLabel, { marginTop: 2 }]}>Running level</Text>
+          <ChipSelect options={RUNNING_LEVELS} value={level} onChange={setLevel} />
 
-        {error && <Text style={styles.error}>{error}</Text>}
+          <Text style={[styles.fieldLabel, { marginTop: 2 }]}>T-shirt size (optional)</Text>
+          <ChipSelect options={TSHIRT_SIZES} value={tshirt} onChange={setTshirt} allowDeselect />
 
-        <Button label="Create account" onPress={onSubmit} loading={submitting} />
+          {error && <Text style={styles.error}>{error}</Text>}
 
-        <Tap onPress={() => router.back()} haptic={false}>
-          <Text style={styles.link}>Already have an account? Log in</Text>
-        </Tap>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          <Button label="Create account" onPress={onSubmit} loading={submitting} />
+
+          <Tap onPress={() => router.back()} haptic={false}>
+            <Text style={styles.link}>Already have an account? Log in</Text>
+          </Tap>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }

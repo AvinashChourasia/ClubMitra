@@ -20,6 +20,7 @@ import {
   type Challenge,
 } from "../../lib/challenges";
 import { ProgressBar } from "../../components/ProgressBar";
+import { SearchBar } from "../../components/discovery";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 import { GuestChallenges } from "../../components/GuestScreens";
 
@@ -32,6 +33,8 @@ export default function Challenges() {
   useThemeMode(); // subscribe for instant theme updates
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [joinedOnly, setJoinedOnly] = useState(false);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState(""); // "" = all types
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -66,6 +69,12 @@ export default function Challenges() {
 
   if (!user) return <GuestChallenges />;
 
+  // Search + type narrow the fetched list client-side (it's already visible-to-you).
+  const q = search.trim().toLowerCase();
+  const visible = challenges.filter(
+    (c) => (!q || c.title.toLowerCase().includes(q)) && (!typeFilter || c.type === typeFilter)
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>
       <ScrollView
@@ -83,27 +92,33 @@ export default function Challenges() {
           </Tap>
         </View>
 
-        <View style={{ flexDirection: "row", gap: 8 }}>
+        <SearchBar value={search} onChange={setSearch} placeholder="Search challenges" />
+
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
           <FilterChip label="All" active={!joinedOnly} onPress={() => setJoinedOnly(false)} />
           <FilterChip label="Joined" active={joinedOnly} onPress={() => setJoinedOnly(true)} />
+          <View style={{ width: 1, backgroundColor: colors.border, marginVertical: 4 }} />
+          <FilterChip label="Distance" active={typeFilter === "distance"} onPress={() => setTypeFilter(typeFilter === "distance" ? "" : "distance")} />
+          <FilterChip label="Days" active={typeFilter === "days"} onPress={() => setTypeFilter(typeFilter === "days" ? "" : "days")} />
+          <FilterChip label="Streak" active={typeFilter === "streak"} onPress={() => setTypeFilter(typeFilter === "streak" ? "" : "streak")} />
         </View>
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
-        ) : challenges.length === 0 ? (
+        ) : visible.length === 0 ? (
           <View style={[styles.card, { alignItems: "center", paddingVertical: 32, marginTop: 8 }]}>
             <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
               <Ionicons name="trophy" size={30} color={colors.primary} />
             </View>
             <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, marginTop: 12 }}>
-              {joinedOnly ? "No joined challenges" : "No challenges yet"}
+              {q || typeFilter ? "No matches" : joinedOnly ? "No joined challenges" : "No challenges yet"}
             </Text>
             <Text style={{ color: colors.muted, marginTop: 4, textAlign: "center" }}>
-              {joinedOnly ? "Join one from the All tab." : "Create one with New."}
+              {q || typeFilter ? "Try a different search or filter." : joinedOnly ? "Join one from the All tab." : "Create one with New."}
             </Text>
           </View>
         ) : (
-          challenges.map((c) => <ChallengeCard key={c.id} item={c} onPress={() => router.push(`/challenge/${c.id}`)} />)
+          visible.map((c) => <ChallengeCard key={c.id} item={c} onPress={() => router.push(`/challenge/${c.id}`)} />)
         )}
       </ScrollView>
     </SafeAreaView>
