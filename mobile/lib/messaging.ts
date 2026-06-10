@@ -4,6 +4,9 @@
 
 import { request } from "./api";
 
+export type Reaction = { emoji: string; count: number; mine: boolean };
+export type ReplyRef = { id: string; sender_name: string; preview: string };
+
 export type Message = {
   id: string;
   sender_id: string;
@@ -13,6 +16,8 @@ export type Message = {
   media_type?: string | null;
   is_announcement: boolean;
   is_pinned: boolean;
+  reply_to?: ReplyRef | null;
+  reactions?: Reaction[] | null;
   created_at: string;
 };
 
@@ -27,14 +32,17 @@ export type InboxItem = {
   last_sender_id?: string | null; // who sent it — "You: " prefix when it's me
   last_at?: string | null;
   unread: number;
+  muted: boolean;
+  archived: boolean;
 };
 
 export type OtherUser = { id: string; name: string; profile_photo?: string | null };
 export type DirectThread = { other: OtherUser; messages: Message[]; other_last_read_at?: string | null };
 export type UserHit = { id: string; name: string; profile_photo?: string | null };
 
-// OutMsg is the payload to send: text and/or an image attachment.
-export type OutMsg = { body?: string; media_url?: string; media_type?: string };
+// OutMsg is the payload to send: text and/or an attachment, optionally quoting
+// an earlier message (reply_to_id).
+export type OutMsg = { body?: string; media_url?: string; media_type?: string; reply_to_id?: string };
 
 // --- inbox ---
 export async function inbox(token: string) {
@@ -68,4 +76,19 @@ export async function searchUsers(token: string, q: string) {
 // deleteMessage soft-deletes a message you sent (delete for everyone).
 export function deleteMessage(token: string, messageId: string) {
   return request<void>(`/messaging/messages/${messageId}`, { method: "DELETE", token });
+}
+
+// setReaction sets your one reaction on a message; "" clears it.
+export function setReaction(token: string, messageId: string, emoji: string) {
+  return request<void>(`/messaging/messages/${messageId}/reaction`, { method: "PUT", body: { emoji }, token });
+}
+
+// setChatPrefs mutes/archives a conversation for you only.
+export function setChatPrefs(
+  token: string,
+  kind: "club" | "direct",
+  id: string,
+  prefs: { muted?: boolean; archived?: boolean }
+) {
+  return request<void>("/messaging/prefs", { method: "PUT", body: { kind, id, ...prefs }, token });
 }

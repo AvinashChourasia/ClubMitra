@@ -32,7 +32,61 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/dm/{userID}", h.dmList)  // open/start a 1:1 chat
 	r.Post("/dm/{userID}", h.dmPost) // send to a 1:1 chat
 	r.Delete("/messages/{messageID}", h.deleteMessage)
+	r.Put("/messages/{messageID}/reaction", h.setReaction) // {"emoji":"❤️"} ("" clears)
+	r.Put("/prefs", h.setPrefs)                            // mute / archive a conversation
 	return r
+}
+
+type reactionRequest struct {
+	Emoji string `json:"emoji"`
+}
+
+func (h *Handler) setReaction(w http.ResponseWriter, r *http.Request) {
+	uid, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "messageID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid message id")
+		return
+	}
+	var req reactionRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.SetReaction(r.Context(), uid, id, req.Emoji); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+type prefsRequest struct {
+	Kind     string `json:"kind"` // "club" | "direct"
+	ID       string `json:"id"`   // chapter id or other user's id
+	Muted    *bool  `json:"muted"`
+	Archived *bool  `json:"archived"`
+}
+
+func (h *Handler) setPrefs(w http.ResponseWriter, r *http.Request) {
+	uid, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var req prefsRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.SetPrefs(r.Context(), uid, req.Kind, req.ID, req.Muted, req.Archived); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
 }
 
 func (h *Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +111,19 @@ type postRequest struct {
 	Body      *string `json:"body"`
 	MediaURL  *string `json:"media_url"`
 	MediaType *string `json:"media_type"`
+	ReplyToID *string `json:"reply_to_id"`
+}
+
+// replyID parses the optional reply target (nil when absent/invalid).
+func (p postRequest) replyID() *uuid.UUID {
+	if p.ReplyToID == nil {
+		return nil
+	}
+	id, err := uuid.Parse(*p.ReplyToID)
+	if err != nil {
+		return nil
+	}
+	return &id
 }
 
 type announceRequest struct {
@@ -82,7 +149,7 @@ func (h *Handler) chapterPost(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	msg, err := h.svc.PostChapter(r.Context(), uid, cid, req.Body, req.MediaURL, req.MediaType)
+	msg, err := h.svc.PostChapter(r.Context(), uid, cid, req.Body, req.MediaURL, req.MediaType, req.replyID())
 	h.respondCreated(w, msg, err)
 }
 
@@ -154,7 +221,7 @@ func (h *Handler) dmPost(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	msg, err := h.svc.PostDirect(r.Context(), uid, chi.URLParam(r, "userID"), req.Body, req.MediaURL, req.MediaType)
+	msg, err := h.svc.PostDirect(r.Context(), uid, chi.URLParam(r, "userID"), req.Body, req.MediaURL, req.MediaType, req.replyID())
 	h.respondCreated(w, msg, err)
 }
 

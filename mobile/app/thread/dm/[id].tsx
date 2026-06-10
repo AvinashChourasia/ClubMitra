@@ -6,7 +6,7 @@ import { useCallback, useState } from "react";
 import { useLocalSearchParams } from "expo-router";
 
 import { useAuth } from "../../../lib/auth";
-import { directThread, postDirect, deleteMessage as deleteMessageApi, type OtherUser, type OutMsg } from "../../../lib/messaging";
+import { directThread, postDirect, deleteMessage as deleteMessageApi, setReaction, type OtherUser, type OutMsg } from "../../../lib/messaging";
 import { uploadChatImage, uploadChatFile } from "../../../lib/upload";
 import { ChatThread } from "../../../components/ChatThread";
 
@@ -46,6 +46,11 @@ export default function DirectChat() {
     if (token) await deleteMessageApi(token, mid);
   }, [getAccessToken]);
 
+  const react = useCallback(async (mid: string, emoji: string) => {
+    const token = await getAccessToken();
+    if (token) await setReaction(token, mid, emoji);
+  }, [getAccessToken]);
+
   return (
     <ChatThread
       title={other?.name ?? "Chat"}
@@ -59,6 +64,9 @@ export default function DirectChat() {
       uploadImage={uploadImage}
       uploadFile={uploadFile}
       deleteMessage={removeMessage}
+      react={react}
+      realtime={{ scope: "dm", id }}
+      getToken={getAccessToken}
     />
   );
 }

@@ -1,11 +1,15 @@
 // ChatThread: the reusable conversation UI (header + messages + composer),
-// shared by the club group chat and 1:1 direct chats. WhatsApp-style:
+// shared by the club group chat and 1:1 direct chats. WhatsApp-grade:
+// - realtime: new messages arrive instantly over the websocket (poll = fallback),
+//   and a typing indicator shows in the header while the other side types
+// - long-press a message → action sheet: react (one emoji per person), reply,
+//   copy, delete-for-everyone (own messages)
+// - reply-quoting with a composer bar + in-bubble quote block
 // - attachments: photo library, camera, or document (pdf/doc), with a caption
 // - optimistic send: your message shows instantly with a clock, then a tick
-// - read receipts: single grey (sent) → blue double (read) for DMs
+// - read receipts: single (sent) → green double (read) for DMs
 // - date separators, consecutive-sender grouping, fullscreen image viewer
-// - long-press a message to copy text or delete your own
-// Delivery is pull-on-open: it loads on focus and polls every 4s while focused.
+// - scroll-aware: polling never yanks you off history; a jump FAB counts new
 
 import { useCallback, useRef, useState } from "react";
 import {
@@ -33,11 +37,14 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { ApiError } from "../lib/api";
 import { type Message, type OutMsg } from "../lib/messaging";
+import { ensureConnected, subscribe, sendTyping, isLive, type RTEvent } from "../lib/realtime";
 import { Avatar } from "./Avatar";
 import { colors, styles } from "../lib/theme";
 
-type Staged ={ uri: string; kind: "image" | "file"; name?: string; mime?: string };
+type Staged = { uri: string; kind: "image" | "file"; name?: string; mime?: string };
 type Pending = { tempId: string; body?: string; localUri?: string; kind?: "image" | "file"; name?: string; failed?: boolean };
+
+const REACTIONS = ["👍", "❤️", "😂", "🔥", "👏", "🎉"];
 
 function timeOf(d: string): string {
   const t = new Date(d);
@@ -70,36 +77,44 @@ type Props = {
   uploadImage?: (localUri: string) => Promise<string>;
   uploadFile?: (localUri: string, name: string, mime: string) => Promise<string>;
   deleteMessage?: (id: string) => Promise<void>;
+  react?: (id: string, emoji: string) => Promise<void>;
   canAnnounce?: boolean;
   announce?: (body: string) => Promise<void>;
   onSenderPress?: (senderId: string, senderName: string) => void;
+  /** Realtime scope for this conversation (instant delivery + typing). */
+  realtime?: { scope: "chapter" | "dm"; id: string };
+  getToken?: () => Promise<string | null>;
 };
 
 export function ChatThread({
   title, subtitle, avatarName, avatarUri, meId, isGroup, isDirect, otherLastReadAt,
-  load, send, uploadImage, uploadFile, deleteMessage, canAnnounce, announce, onSenderPress,
+  load, send, uploadImage, uploadFile, deleteMessage, react, canAnnounce, announce, onSenderPress,
+  realtime, getToken,
 }: Props) {
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
   const countRef = useRef(0);
   const seq = useRef(0);
-  const nearBottom = useRef(true); // is the user at (or near) the latest message?
+  const nearBottom = useRef(true);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [pending, setPending] = useState<Pending[]>([]);
   const [text, setText] = useState("");
   const [staged, setStaged] = useState<Staged | null>(null);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [actionFor, setActionFor] = useState<Message | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
   const [announceMode, setAnnounceMode] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [viewer, setViewer] = useState<string | null>(null);
-  const [showJump, setShowJump] = useState(false); // scroll-to-bottom FAB
-  const [newBelow, setNewBelow] = useState(0); // messages arrived while scrolled up
+  const [showJump, setShowJump] = useState(false);
+  const [newBelow, setNewBelow] = useState(0);
+  const [typingName, setTypingName] = useState<string | null>(null);
 
   const scrollEnd = (animated: boolean) => setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 50);
 
-  // Reading history shouldn't be yanked to the bottom by the 4s poll: new
-  // messages only autoscroll when the user is already near the bottom —
-  // otherwise the jump FAB shows how many are waiting (WhatsApp behaviour).
+  // Reading history is never yanked to the bottom: new messages autoscroll only
+  // when already near it — otherwise the jump FAB counts what's waiting.
   const reload = useCallback(
     async (forceScroll: boolean) => {
       const msgs = await load();
@@ -126,12 +141,37 @@ export function ChatThread({
           if (active) setMessages([]);
         }
       })();
-      const timer = setInterval(() => active && reload(false).catch(() => {}), 4000);
+
+      // Realtime: instant delivery + typing for THIS conversation.
+      let unsub: (() => void) | undefined;
+      if (realtime && getToken) {
+        ensureConnected(getToken);
+        unsub = subscribe((e: RTEvent) => {
+          if (!active || e.scope !== realtime.scope || e.id !== realtime.id) return;
+          if (e.type === "message" || e.type === "update") {
+            if (e.user_id !== meId) setTypingName(null);
+            reload(false).catch(() => {});
+          } else if (e.type === "typing" && e.user_id !== meId) {
+            setTypingName(e.name ?? "Someone");
+            if (typingTimer.current) clearTimeout(typingTimer.current);
+            typingTimer.current = setTimeout(() => setTypingName(null), 3500);
+          }
+        });
+      }
+
+      // Poll fallback: slow when the socket is live, snappy when it isn't.
+      const timer = setInterval(() => {
+        if (!active) return;
+        reload(false).catch(() => {});
+      }, realtime && isLive() ? 20000 : 4000);
+
       return () => {
         active = false;
         clearInterval(timer);
+        unsub?.();
+        if (typingTimer.current) clearTimeout(typingTimer.current);
       };
-    }, [reload])
+    }, [reload, realtime, getToken, meId])
   );
 
   async function onRefresh() {
@@ -179,14 +219,15 @@ export function ChatThread({
   async function onSend() {
     const body = text.trim();
     if (!body && !staged) return;
-    const cap = staged; // capture
+    const cap = staged;
+    const quote = replyTo;
     const isAnnounce = announceMode && !!announce && !cap;
     const tempId = `tmp-${seq.current++}`;
 
-    // Optimistic: show immediately, clear the composer.
     setPending((p) => [...p, { tempId, body: body || undefined, localUri: cap?.uri, kind: cap?.kind, name: cap?.name }]);
     setText("");
     setStaged(null);
+    setReplyTo(null);
     setAnnounceMode(false);
     scrollEnd(true);
 
@@ -203,9 +244,8 @@ export function ChatThread({
           mediaUrl = await uploadFile(cap.uri, cap.name ?? "document", cap.mime ?? "application/octet-stream");
           mediaType = "file";
         }
-        await send({ body: body || undefined, media_url: mediaUrl, media_type: mediaType });
+        await send({ body: body || undefined, media_url: mediaUrl, media_type: mediaType, reply_to_id: quote?.id });
       }
-      // Reconcile: pull server truth and drop the temp in one render (no flicker).
       const msgs = await load();
       countRef.current = msgs.length;
       setMessages(msgs);
@@ -217,43 +257,61 @@ export function ChatThread({
     }
   }
 
-  function onLongPress(m: Message) {
-    const mine = m.sender_id === meId;
-    const buttons: { text: string; style?: "destructive" | "cancel"; onPress?: () => void }[] = [];
-    if (m.body) buttons.push({ text: "Copy", onPress: () => Clipboard.setStringAsync(m.body!) });
-    if (mine && deleteMessage) {
-      buttons.push({
-        text: "Delete",
-        style: "destructive",
-        onPress: () =>
-          deleteMessage(m.id)
-            .then(() => reload(false))
-            .catch((e) => Alert.alert("Couldn't delete", e instanceof ApiError ? e.message : "Something went wrong")),
-      });
+  function onTextChange(v: string) {
+    setText(v);
+    if (realtime && v.length > 0) sendTyping(realtime.scope, realtime.id);
+  }
+
+  // --- message actions ---
+  async function toggleReaction(m: Message, emoji: string) {
+    setActionFor(null);
+    if (!react) return;
+    const mine = m.reactions?.find((r) => r.mine);
+    try {
+      await react(m.id, mine?.emoji === emoji ? "" : emoji);
+      await reload(false);
+    } catch (e) {
+      Alert.alert("Couldn't react", e instanceof ApiError ? e.message : "Something went wrong");
     }
-    if (!buttons.length) return;
-    buttons.push({ text: "Cancel", style: "cancel" });
-    Alert.alert("", "", buttons, { cancelable: true });
+  }
+
+  function doCopy(m: Message) {
+    setActionFor(null);
+    if (m.body) void Clipboard.setStringAsync(m.body);
+  }
+
+  function doDelete(m: Message) {
+    setActionFor(null);
+    deleteMessage?.(m.id)
+      .then(() => reload(false))
+      .catch((e) => Alert.alert("Couldn't delete", e instanceof ApiError ? e.message : "Something went wrong"));
   }
 
   // bubble: a WhatsApp-style message bubble shared by real + pending messages.
-  // The time + status (tick / clock) sit INSIDE the bubble, bottom-right.
   function bubble(
     mine: boolean,
-    opts: { body?: string | null; mediaUrl?: string | null; localUri?: string; mediaType?: string | null; kind?: string; name?: string },
+    opts: {
+      body?: string | null;
+      mediaUrl?: string | null;
+      localUri?: string;
+      mediaType?: string | null;
+      kind?: string;
+      name?: string;
+      replyTo?: { sender_name: string; preview: string } | null;
+    },
     time: string,
     status?: "sent" | "read" | "sending" | "failed"
   ) {
     const imgUri = opts.mediaUrl ?? opts.localUri;
     const isImage = !!((opts.mediaType === "image" || opts.kind === "image") && imgUri);
     const isFile = opts.mediaType === "file" || opts.kind === "file";
-    const fg = mine ? "#fff" : colors.text;
-    const footFg = mine ? "rgba(255,255,255,0.72)" : colors.muted;
+    const fg = mine ? colors.bubbleMineText : colors.text;
+    const footFg = mine ? colors.bubbleMineText + "B3" : colors.muted; // ~70% alpha
     const icon: Record<string, { name: keyof typeof Ionicons.glyphMap; color: string }> = {
-      read: { name: "checkmark-done", color: "#fff" },
+      read: { name: "checkmark-done", color: colors.success },
       sent: { name: "checkmark", color: footFg },
       sending: { name: "time-outline", color: footFg },
-      failed: { name: "alert-circle", color: "#FCA5A5" },
+      failed: { name: "alert-circle", color: colors.danger },
     };
     return (
       <View
@@ -266,11 +324,31 @@ export function ChatThread({
           borderWidth: mine ? 0 : 1,
           borderColor: colors.border,
           shadowColor: "#0B1220",
-          shadowOpacity: mine ? 0 : 0.05,
+          shadowOpacity: 0.05,
           shadowRadius: 3,
           shadowOffset: { width: 0, height: 1 },
         }}
       >
+        {/* Quoted message (reply) */}
+        {opts.replyTo && (
+          <View
+            style={{
+              borderLeftWidth: 3,
+              borderLeftColor: mine ? colors.bubbleMineText + "99" : colors.primary,
+              backgroundColor: mine ? colors.bubbleMineText + "1A" : colors.bgSecondary,
+              borderRadius: 10,
+              paddingHorizontal: 9,
+              paddingVertical: 6,
+              margin: 4,
+              marginBottom: 2,
+            }}
+          >
+            <Text style={{ color: mine ? colors.bubbleMineText : colors.primary, fontWeight: "800", fontSize: 11 }} numberOfLines={1}>
+              {opts.replyTo.sender_name}
+            </Text>
+            <Text style={{ color: footFg, fontSize: 12 }} numberOfLines={1}>{opts.replyTo.preview}</Text>
+          </View>
+        )}
         {isImage ? (
           <Pressable onPress={() => opts.mediaUrl && setViewer(opts.mediaUrl)}>
             <Image source={{ uri: imgUri! }} style={{ width: 216, height: 216, borderRadius: 15 }} resizeMode="cover" />
@@ -281,8 +359,8 @@ export function ChatThread({
             onPress={() => opts.mediaUrl && Linking.openURL(opts.mediaUrl)}
             style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 8 }}
           >
-            <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: mine ? "rgba(255,255,255,0.2)" : colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name="document-text" size={20} color={mine ? "#fff" : colors.primary} />
+            <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: mine ? colors.bubbleMineText + "26" : colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="document-text" size={20} color={mine ? colors.bubbleMineText : colors.primary} />
             </View>
             <Text style={{ color: fg, fontWeight: "600", maxWidth: 150 }} numberOfLines={1}>{opts.name ?? "Document"}</Text>
           </Pressable>
@@ -301,7 +379,7 @@ export function ChatThread({
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={8}>
-        {/* Header */}
+        {/* Header — subtitle becomes the live typing line when someone types */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
           <Pressable onPress={() => router.back()} hitSlop={8}>
             <Ionicons name="chevron-back" size={26} color={colors.accent} />
@@ -309,7 +387,13 @@ export function ChatThread({
           <Avatar name={avatarName} uri={avatarUri} size={38} bg={colors.accent} />
           <View style={{ flex: 1 }}>
             <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16 }} numberOfLines={1}>{title}</Text>
-            {subtitle ? <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={1}>{subtitle}</Text> : null}
+            {typingName ? (
+              <Text style={{ color: colors.success, fontSize: 12, fontWeight: "700" }} numberOfLines={1}>
+                {isGroup ? `${typingName} is typing…` : "typing…"}
+              </Text>
+            ) : subtitle ? (
+              <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={1}>{subtitle}</Text>
+            ) : null}
           </View>
         </View>
 
@@ -343,6 +427,7 @@ export function ChatThread({
                 const mine = m.sender_id === meId;
                 const showName = !!isGroup && !mine && (showDate || !prev || prev.sender_id !== m.sender_id);
                 const read = isDirect && mine && !!otherLastReadAt && new Date(m.created_at).getTime() <= new Date(otherLastReadAt).getTime();
+                const hasReactions = !!m.reactions?.length;
                 return (
                   <View key={m.id}>
                     {showDate && (
@@ -360,15 +445,45 @@ export function ChatThread({
                         <Text style={{ color: colors.muted, fontSize: 10, marginTop: 4 }}>{timeOf(m.created_at)}</Text>
                       </View>
                     ) : (
-                      <View style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "80%", marginTop: showName ? 8 : 2 }}>
+                      <View style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "80%", marginTop: showName ? 8 : 2, marginBottom: hasReactions ? 12 : 0 }}>
                         {showName && (
                           <Pressable onPress={() => onSenderPress?.(m.sender_id, m.sender_name)} disabled={!onSenderPress}>
                             <Text style={{ color: colors.accent, fontSize: 12, marginLeft: 10, marginBottom: 2, fontWeight: "700" }}>{m.sender_name}</Text>
                           </Pressable>
                         )}
-                        <Pressable onLongPress={() => onLongPress(m)} delayLongPress={300}>
-                          {bubble(mine, { body: m.body, mediaUrl: m.media_url, mediaType: m.media_type }, timeOf(m.created_at), mine ? (read ? "read" : "sent") : undefined)}
+                        <Pressable onLongPress={() => setActionFor(m)} delayLongPress={250}>
+                          {bubble(
+                            mine,
+                            { body: m.body, mediaUrl: m.media_url, mediaType: m.media_type, replyTo: m.reply_to },
+                            timeOf(m.created_at),
+                            mine ? (read ? "read" : "sent") : undefined
+                          )}
                         </Pressable>
+                        {/* Reaction chips — overlap the bubble's bottom edge */}
+                        {hasReactions && (
+                          <View style={{ flexDirection: "row", gap: 4, position: "absolute", bottom: -11, [mine ? "right" : "left"]: 8 }}>
+                            {m.reactions!.map((r) => (
+                              <Pressable
+                                key={r.emoji}
+                                onPress={() => toggleReaction(m, r.emoji)}
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  gap: 3,
+                                  backgroundColor: colors.bg,
+                                  borderWidth: 1,
+                                  borderColor: r.mine ? colors.primary : colors.border,
+                                  borderRadius: 11,
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                }}
+                              >
+                                <Text style={{ fontSize: 11 }}>{r.emoji}</Text>
+                                {r.count > 1 && <Text style={{ fontSize: 10, fontWeight: "800", color: colors.muted }}>{r.count}</Text>}
+                              </Pressable>
+                            ))}
+                          </View>
+                        )}
                       </View>
                     )}
                   </View>
@@ -379,14 +494,13 @@ export function ChatThread({
             {/* Optimistic (pending) messages — always mine, shown at the bottom. */}
             {pending.map((p) => (
               <View key={p.tempId} style={{ alignSelf: "flex-end", maxWidth: "80%", marginTop: 2, opacity: p.failed ? 0.9 : 0.75 }}>
-                {bubble(true, { body: p.body, localUri: p.localUri, kind: p.kind, name: p.name }, "", p.failed ? "failed" : "sending")}
+                {bubble(true, { body: p.body, localUri: p.localUri, kind: p.kind, name: p.name, replyTo: replyTo ? { sender_name: replyTo.sender_name, preview: replyTo.body ?? "…" } : null }, "", p.failed ? "failed" : "sending")}
               </View>
             ))}
           </ScrollView>
         )}
 
-        {/* Jump to latest — appears when scrolled up; badges messages that
-            arrived in the meantime. */}
+        {/* Jump to latest — appears when scrolled up; counts what arrived. */}
         {showJump && messages !== null && (
           <Pressable
             onPress={() => {
@@ -396,7 +510,7 @@ export function ChatThread({
             style={{
               position: "absolute",
               right: 14,
-              bottom: 86,
+              bottom: 92,
               width: 40,
               height: 40,
               borderRadius: 20,
@@ -422,6 +536,24 @@ export function ChatThread({
           </Pressable>
         )}
 
+        {/* Reply bar — what you're quoting, with a clear X */}
+        {replyTo && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.bg }}>
+            <View style={{ width: 3, alignSelf: "stretch", borderRadius: 2, backgroundColor: colors.primary }} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 12 }}>
+                Replying to {replyTo.sender_id === meId ? "yourself" : replyTo.sender_name}
+              </Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={1}>
+                {replyTo.body ?? (replyTo.media_type === "image" ? "📷 Photo" : "📎 File")}
+              </Text>
+            </View>
+            <Pressable onPress={() => setReplyTo(null)} hitSlop={8}>
+              <Ionicons name="close-circle" size={20} color={colors.muted} />
+            </Pressable>
+          </View>
+        )}
+
         {/* Staged attachment preview */}
         {staged && (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
@@ -437,8 +569,8 @@ export function ChatThread({
           </View>
         )}
 
-        {/* Composer */}
-        <View style={{ padding: 10, borderTopWidth: staged ? 0 : 1, borderTopColor: colors.border, gap: 8 }}>
+        {/* Composer — pill input, circular attach + send */}
+        <View style={{ padding: 10, borderTopWidth: staged || replyTo ? 0 : 1, borderTopColor: colors.border, gap: 8 }}>
           {canAnnounce && announce && !staged && (
             <Pressable onPress={() => setAnnounceMode((v) => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 4 }}>
               <Ionicons name={announceMode ? "megaphone" : "megaphone-outline"} size={16} color={announceMode ? colors.primary : colors.muted} />
@@ -447,16 +579,16 @@ export function ChatThread({
           )}
           <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
             {(uploadImage || uploadFile) && !announceMode && !staged && (
-              <Pressable onPress={() => setAttachMenu(true)} hitSlop={6} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name="add-circle-outline" size={26} color={colors.muted} />
+              <Pressable onPress={() => setAttachMenu(true)} hitSlop={6} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="add" size={24} color={colors.text} />
               </Pressable>
             )}
             <TextInput
-              style={[styles.input, { flex: 1, maxHeight: 110 }]}
+              style={[styles.input, { flex: 1, maxHeight: 110, borderRadius: 22 }]}
               placeholder={announceMode ? "Announcement…" : staged ? "Add a caption…" : "Message"}
               placeholderTextColor={colors.muted}
               value={text}
-              onChangeText={setText}
+              onChangeText={onTextChange}
               multiline
             />
             <Pressable onPress={onSend} disabled={!text.trim() && !staged} style={{ backgroundColor: text.trim() || staged ? colors.primary : colors.bgSecondary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
@@ -466,25 +598,68 @@ export function ChatThread({
         </View>
       </KeyboardAvoidingView>
 
-      {/* Attachment menu — an inline overlay (NOT a Modal): launching the native
-          photo/document picker from inside a dismissing Modal crashes on iOS. */}
+      {/* Message action sheet — react / reply / copy / delete */}
+      {actionFor && (
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
+          <Pressable onPress={() => setActionFor(null)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
+          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 34, gap: 4 }}>
+            <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 10 }} />
+            {/* Quick reactions */}
+            {react && (
+              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 6, paddingBottom: 12 }}>
+                {REACTIONS.map((e) => {
+                  const minePicked = actionFor.reactions?.some((r) => r.mine && r.emoji === e);
+                  return (
+                    <Pressable
+                      key={e}
+                      onPress={() => toggleReaction(actionFor, e)}
+                      style={{
+                        width: 46,
+                        height: 46,
+                        borderRadius: 23,
+                        backgroundColor: minePicked ? colors.primarySoft : colors.bgSecondary,
+                        borderWidth: minePicked ? 1.5 : 0,
+                        borderColor: colors.primary,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text style={{ fontSize: 22 }}>{e}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+            <SheetRow icon="arrow-undo" label="Reply" onPress={() => { setReplyTo(actionFor); setActionFor(null); }} />
+            {actionFor.body ? <SheetRow icon="copy" label="Copy" onPress={() => doCopy(actionFor)} /> : null}
+            {actionFor.sender_id === meId && deleteMessage ? (
+              <SheetRow icon="trash" label="Delete for everyone" danger onPress={() => doDelete(actionFor)} />
+            ) : null}
+          </View>
+        </View>
+      )}
+
+      {/* Attachment menu — inline overlay (NOT a Modal): launching the native
+          picker from inside a dismissing Modal crashes on iOS. */}
       {attachMenu && (
         <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
           <Pressable onPress={() => setAttachMenu(false)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
-          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 34, gap: 6 }}>
-            <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 10 }} />
-            {[
-              { icon: "image" as const, label: "Photo library", onPress: pickLibrary, show: !!uploadImage },
-              { icon: "camera" as const, label: "Camera", onPress: pickCamera, show: !!uploadImage },
-              { icon: "document" as const, label: "Document", onPress: pickDocument, show: !!uploadFile },
-            ].filter((o) => o.show).map((o) => (
-              <Pressable key={o.label} onPress={o.onPress} style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 14 }}>
-                <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
-                  <Ionicons name={o.icon} size={20} color={colors.primary} />
-                </View>
-                <Text style={{ color: colors.text, fontSize: 16, fontWeight: "600" }}>{o.label}</Text>
-              </Pressable>
-            ))}
+          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 34 }}>
+            <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 14 }} />
+            <View style={{ flexDirection: "row", justifyContent: "space-evenly" }}>
+              {[
+                { icon: "image" as const, label: "Photos", tint: "#22C55E", onPress: pickLibrary, show: !!uploadImage },
+                { icon: "camera" as const, label: "Camera", tint: "#3B82F6", onPress: pickCamera, show: !!uploadImage },
+                { icon: "document" as const, label: "Document", tint: "#F59E0B", onPress: pickDocument, show: !!uploadFile },
+              ].filter((o) => o.show).map((o) => (
+                <Pressable key={o.label} onPress={o.onPress} style={{ alignItems: "center", gap: 8 }}>
+                  <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: o.tint + "22", alignItems: "center", justifyContent: "center" }}>
+                    <Ionicons name={o.icon} size={24} color={o.tint} />
+                  </View>
+                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: "600" }}>{o.label}</Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
         </View>
       )}
@@ -499,5 +674,17 @@ export function ChatThread({
         </Pressable>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+// SheetRow: one action in the long-press sheet.
+function SheetRow({ icon, label, onPress, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {
+  return (
+    <Pressable onPress={onPress} style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 13 }}>
+      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: danger ? "#FEE2E2" : colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name={icon} size={19} color={danger ? colors.danger : colors.text} />
+      </View>
+      <Text style={{ color: danger ? colors.danger : colors.text, fontSize: 16, fontWeight: "600" }}>{label}</Text>
+    </Pressable>
   );
 }

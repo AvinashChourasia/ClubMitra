@@ -15,9 +15,10 @@ export function setUnreadTotal(n: number): void {
   subs.forEach((f) => f(n));
 }
 
-// sumUnread folds an inbox response into the badge number.
-export function sumUnread(items: { unread: number }[]): number {
-  return items.reduce((s, it) => s + it.unread, 0);
+// sumUnread folds an inbox response into the badge number. Muted conversations
+// don't count — that's the whole point of muting.
+export function sumUnread(items: { unread: number; muted?: boolean }[]): number {
+  return items.reduce((s, it) => s + (it.muted ? 0 : it.unread), 0);
 }
 
 // refreshUnread fetches the inbox just to update the badge (cheap, best-effort).

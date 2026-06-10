@@ -1,11 +1,12 @@
 // Package messaging is the club's in-app chat: a group conversation per chapter
 // and an event conversation per run. Members read + post; admins can broadcast
-// announcements (also pushed). Delivery is pull-on-open — clients fetch on entry
-// and on refresh; there are no websockets yet.
+// announcements (also pushed). Delivery is realtime-first (the websocket hub
+// pushes new messages/typing) with pull-on-open as the fallback.
 package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -29,6 +30,8 @@ type InboxItem struct {
 	LastSenderID *string    `json:"last_sender_id,omitempty"` // who sent it ("You: " prefix client-side)
 	LastAt       *time.Time `json:"last_at,omitempty"`
 	Unread       int        `json:"unread"`
+	Muted        bool       `json:"muted"`
+	Archived     bool       `json:"archived"`
 }
 
 // OtherUser is the counterpart in a direct chat (for the DM screen header).
@@ -38,17 +41,34 @@ type OtherUser struct {
 	Photo *string `json:"profile_photo,omitempty"`
 }
 
+// ReplyRef is the quoted message shown above a reply (a compact preview, not
+// the full message — enough to render the WhatsApp-style quote block).
+type ReplyRef struct {
+	ID         uuid.UUID `json:"id"`
+	SenderName string    `json:"sender_name"`
+	Preview    string    `json:"preview"`
+}
+
+// Reaction is one emoji's aggregate on a message (count + whether it's mine).
+type Reaction struct {
+	Emoji string `json:"emoji"`
+	Count int    `json:"count"`
+	Mine  bool   `json:"mine"`
+}
+
 // Message is one chat message, joined with the sender's name for display.
 type Message struct {
-	ID             uuid.UUID `json:"id"`
-	SenderID       string    `json:"sender_id"`
-	SenderName     string    `json:"sender_name"`
-	Body           *string   `json:"body,omitempty"`
-	MediaURL       *string   `json:"media_url,omitempty"`
-	MediaType      *string   `json:"media_type,omitempty"`
-	IsAnnouncement bool      `json:"is_announcement"`
-	IsPinned       bool      `json:"is_pinned"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             uuid.UUID  `json:"id"`
+	SenderID       string     `json:"sender_id"`
+	SenderName     string     `json:"sender_name"`
+	Body           *string    `json:"body,omitempty"`
+	MediaURL       *string    `json:"media_url,omitempty"`
+	MediaType      *string    `json:"media_type,omitempty"`
+	IsAnnouncement bool       `json:"is_announcement"`
+	IsPinned       bool       `json:"is_pinned"`
+	ReplyTo        *ReplyRef  `json:"reply_to,omitempty"`
+	Reactions      []Reaction `json:"reactions,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // Repository is the messaging data-access layer.
@@ -118,16 +138,29 @@ func (r *Repository) ensureRunConversation(ctx context.Context, chapterID, runID
 }
 
 // listMessages returns a conversation's recent messages, oldest-last (the client
-// renders bottom-up). Capped at 100 — pagination can come later.
-func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID) ([]Message, error) {
+// renders bottom-up), each carrying its reply preview and aggregated reactions
+// (with the viewer's own reaction flagged). Capped at 100 — pagination later.
+func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID, viewerID string) ([]Message, error) {
 	const q = `
 		SELECT m.id, m.sender_id, u.name, m.body, m.media_url, m.media_type,
-		       m.is_announcement, m.is_pinned, m.created_at
-		FROM messages m JOIN users u ON u.id = m.sender_id
+		       m.is_announcement, m.is_pinned, m.created_at,
+		       rm.id, ru.name, rm.body, rm.media_type,
+		       COALESCE(rx.agg, '[]'::json)::text
+		FROM messages m
+		JOIN users u ON u.id = m.sender_id
+		LEFT JOIN messages rm ON rm.id = m.reply_to_id
+		LEFT JOIN users ru ON ru.id = rm.sender_id
+		LEFT JOIN LATERAL (
+			SELECT json_agg(json_build_object('emoji', t.emoji, 'count', t.cnt, 'mine', t.mine) ORDER BY t.cnt DESC) AS agg
+			FROM (
+				SELECT emoji, count(*)::int AS cnt, bool_or(user_id = $2) AS mine
+				FROM message_reactions WHERE message_id = m.id GROUP BY emoji
+			) t
+		) rx ON true
 		WHERE m.conversation_id = $1 AND m.deleted_at IS NULL
 		ORDER BY m.created_at DESC
 		LIMIT 100`
-	rows, err := r.db.Query(ctx, q, conversationID)
+	rows, err := r.db.Query(ctx, q, conversationID, viewerID)
 	if err != nil {
 		return nil, err
 	}
@@ -135,9 +168,19 @@ func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID)
 	out := make([]Message, 0)
 	for rows.Next() {
 		var m Message
+		var rID *uuid.UUID
+		var rName, rBody, rMedia *string
+		var reactionsJSON string
 		if err := rows.Scan(&m.ID, &m.SenderID, &m.SenderName, &m.Body, &m.MediaURL, &m.MediaType,
-			&m.IsAnnouncement, &m.IsPinned, &m.CreatedAt); err != nil {
+			&m.IsAnnouncement, &m.IsPinned, &m.CreatedAt,
+			&rID, &rName, &rBody, &rMedia, &reactionsJSON); err != nil {
 			return nil, err
+		}
+		if rID != nil {
+			m.ReplyTo = &ReplyRef{ID: *rID, SenderName: deref(rName), Preview: deref(preview(rBody, rMedia))}
+		}
+		if reactionsJSON != "" && reactionsJSON != "[]" {
+			_ = json.Unmarshal([]byte(reactionsJSON), &m.Reactions)
 		}
 		out = append(out, m)
 	}
@@ -148,25 +191,125 @@ func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID)
 	return out, rows.Err()
 }
 
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // postMessage inserts a message and returns it (joined with the sender name).
-func (r *Repository) postMessage(ctx context.Context, conversationID uuid.UUID, senderID string, body, mediaURL, mediaType *string, isAnnouncement bool) (*Message, error) {
+// replyToID is kept only when it points at a message in the SAME conversation —
+// anything else is silently dropped rather than trusted.
+func (r *Repository) postMessage(ctx context.Context, conversationID uuid.UUID, senderID string, body, mediaURL, mediaType *string, isAnnouncement bool, replyToID *uuid.UUID) (*Message, error) {
 	const q = `
 		WITH ins AS (
-			INSERT INTO messages (conversation_id, sender_id, body, media_url, media_type, is_announcement)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			RETURNING id, sender_id, body, media_url, media_type, is_announcement, is_pinned, created_at
+			INSERT INTO messages (conversation_id, sender_id, body, media_url, media_type, is_announcement, reply_to_id)
+			VALUES ($1, $2, $3, $4, $5, $6,
+			        (SELECT id FROM messages WHERE id = $7 AND conversation_id = $1 AND deleted_at IS NULL))
+			RETURNING id, sender_id, body, media_url, media_type, is_announcement, is_pinned, reply_to_id, created_at
 		)
 		SELECT ins.id, ins.sender_id, u.name, ins.body, ins.media_url, ins.media_type,
-		       ins.is_announcement, ins.is_pinned, ins.created_at
-		FROM ins JOIN users u ON u.id = ins.sender_id`
+		       ins.is_announcement, ins.is_pinned, ins.created_at,
+		       rm.id, ru.name, rm.body, rm.media_type
+		FROM ins
+		JOIN users u ON u.id = ins.sender_id
+		LEFT JOIN messages rm ON rm.id = ins.reply_to_id
+		LEFT JOIN users ru ON ru.id = rm.sender_id`
 	var m Message
-	err := r.db.QueryRow(ctx, q, conversationID, senderID, body, mediaURL, mediaType, isAnnouncement).Scan(
+	var rID *uuid.UUID
+	var rName, rBody, rMedia *string
+	err := r.db.QueryRow(ctx, q, conversationID, senderID, body, mediaURL, mediaType, isAnnouncement, replyToID).Scan(
 		&m.ID, &m.SenderID, &m.SenderName, &m.Body, &m.MediaURL, &m.MediaType,
-		&m.IsAnnouncement, &m.IsPinned, &m.CreatedAt)
+		&m.IsAnnouncement, &m.IsPinned, &m.CreatedAt,
+		&rID, &rName, &rBody, &rMedia)
 	if err != nil {
 		return nil, err
 	}
+	if rID != nil {
+		m.ReplyTo = &ReplyRef{ID: *rID, SenderName: deref(rName), Preview: deref(preview(rBody, rMedia))}
+	}
 	return &m, nil
+}
+
+// setReaction upserts the viewer's single reaction on a message (one per user,
+// re-reacting replaces it); an empty emoji removes it.
+func (r *Repository) setReaction(ctx context.Context, messageID uuid.UUID, userID, emoji string) error {
+	if emoji == "" {
+		_, err := r.db.Exec(ctx, `DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2`, messageID, userID)
+		return err
+	}
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3)
+		ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji, created_at = now()`,
+		messageID, userID, emoji)
+	return err
+}
+
+// messageConversation resolves a message to its conversation (for access checks
+// and realtime fan-out). Returns the conversation id, type, and scope ids.
+func (r *Repository) messageConversation(ctx context.Context, messageID uuid.UUID) (convID uuid.UUID, convType string, chapterID *uuid.UUID, err error) {
+	err = r.db.QueryRow(ctx, `
+		SELECT c.id, c.type, c.chapter_id
+		FROM messages m JOIN conversations c ON c.id = m.conversation_id
+		WHERE m.id = $1 AND m.deleted_at IS NULL`, messageID).Scan(&convID, &convType, &chapterID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = ErrNotFound
+	}
+	return
+}
+
+// setPrefs upserts the viewer's mute/archive flags for a conversation. Nil
+// fields are left unchanged.
+func (r *Repository) setPrefs(ctx context.Context, conversationID uuid.UUID, userID string, muted, archived *bool) error {
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO conversation_prefs (conversation_id, user_id, muted, archived)
+		VALUES ($1, $2, COALESCE($3, FALSE), COALESCE($4, FALSE))
+		ON CONFLICT (conversation_id, user_id) DO UPDATE SET
+			muted    = COALESCE($3, conversation_prefs.muted),
+			archived = COALESCE($4, conversation_prefs.archived),
+			updated_at = now()`,
+		conversationID, userID, muted, archived)
+	return err
+}
+
+// directMemberIDs returns both participants of a direct conversation.
+func (r *Repository) directMemberIDs(ctx context.Context, conversationID uuid.UUID) ([]string, error) {
+	rows, err := r.db.Query(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id = $1`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0, 2)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// ListChapterMemberIDs returns the user ids in a chapter's chat (active
+// membership), for realtime fan-out.
+func (r *Repository) ListChapterMemberIDs(ctx context.Context, chapterID uuid.UUID) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT user_id FROM chapter_members
+		WHERE chapter_id = $1 AND deleted_at IS NULL`, chapterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // getUser fetches a user's display fields for a DM header. ErrNotFound if gone.
@@ -250,10 +393,12 @@ func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem,
 		         WHERE msg.conversation_id = conv.id AND msg.deleted_at IS NULL AND msg.sender_id <> $1
 		           AND msg.created_at > COALESCE(
 		             (SELECT last_read_at FROM message_reads WHERE conversation_id = conv.id AND user_id = $1),
-		             'epoch')), 0) AS unread
+		             'epoch')), 0) AS unread,
+		       COALESCE(p.muted, FALSE), COALESCE(p.archived, FALSE)
 		FROM chapters c
 		JOIN chapter_members m ON m.chapter_id = c.id AND m.user_id = $1 AND m.deleted_at IS NULL
 		LEFT JOIN conversations conv ON conv.chapter_id = c.id AND conv.type = 'chapter'
+		LEFT JOIN conversation_prefs p ON p.conversation_id = conv.id AND p.user_id = $1
 		LEFT JOIN LATERAL (
 			SELECT body, media_type, sender_id, created_at FROM messages
 			WHERE conversation_id = conv.id AND deleted_at IS NULL
@@ -270,7 +415,7 @@ func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem,
 		var it InboxItem
 		var chapterID string
 		var mediaType *string
-		if err := rows.Scan(&chapterID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastSenderID, &it.LastAt, &it.Unread); err != nil {
+		if err := rows.Scan(&chapterID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastSenderID, &it.LastAt, &it.Unread, &it.Muted, &it.Archived); err != nil {
 			return nil, err
 		}
 		it.Kind = "club"
@@ -289,11 +434,13 @@ func (r *Repository) directInbox(ctx context.Context, userID string) ([]InboxIte
 		         WHERE msg.conversation_id = conv.id AND msg.deleted_at IS NULL AND msg.sender_id <> $1
 		           AND msg.created_at > COALESCE(
 		             (SELECT last_read_at FROM message_reads WHERE conversation_id = conv.id AND user_id = $1),
-		             'epoch')), 0) AS unread
+		             'epoch')), 0) AS unread,
+		       COALESCE(p.muted, FALSE), COALESCE(p.archived, FALSE)
 		FROM conversations conv
 		JOIN conversation_members me ON me.conversation_id = conv.id AND me.user_id = $1
 		JOIN conversation_members ot ON ot.conversation_id = conv.id AND ot.user_id <> $1
 		JOIN users other ON other.id = ot.user_id
+		LEFT JOIN conversation_prefs p ON p.conversation_id = conv.id AND p.user_id = $1
 		LEFT JOIN LATERAL (
 			SELECT body, media_type, sender_id, created_at FROM messages
 			WHERE conversation_id = conv.id AND deleted_at IS NULL
@@ -310,7 +457,7 @@ func (r *Repository) directInbox(ctx context.Context, userID string) ([]InboxIte
 		var it InboxItem
 		var otherID string
 		var mediaType *string
-		if err := rows.Scan(&otherID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastSenderID, &it.LastAt, &it.Unread); err != nil {
+		if err := rows.Scan(&otherID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastSenderID, &it.LastAt, &it.Unread, &it.Muted, &it.Archived); err != nil {
 			return nil, err
 		}
 		it.Kind = "direct"

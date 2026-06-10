@@ -34,6 +34,7 @@ import (
 	"github.com/avinash/clubmitra/backend/internal/notifications"
 	"github.com/avinash/clubmitra/backend/internal/organisations"
 	"github.com/avinash/clubmitra/backend/internal/permissions"
+	"github.com/avinash/clubmitra/backend/internal/realtime"
 	"github.com/avinash/clubmitra/backend/internal/runlog"
 	"github.com/avinash/clubmitra/backend/internal/trust"
 	"github.com/avinash/clubmitra/backend/internal/uploads"
@@ -132,7 +133,14 @@ func main() {
 	inventoryHandler := inventory.NewHandler(inventory.NewService(inventory.NewRepository(pool)), permChecker)
 
 	// Messaging: club + event chat, admin announcements (also pushed).
-	messagingHandler := messaging.NewHandler(messaging.NewService(messaging.NewRepository(pool), permChecker, notifier))
+	messagingSvc := messaging.NewService(messaging.NewRepository(pool), permChecker, notifier)
+	messagingHandler := messaging.NewHandler(messagingSvc)
+
+	// Realtime: the websocket hub delivers new messages + typing instantly;
+	// clients keep a slow poll as fallback. Auth = the same access token, passed
+	// as ?token= (websockets can't carry our Authorization header reliably).
+	hub := realtime.NewHub(tokenMgr.ParseAccessToken, messagingSvc.RelayTyping)
+	messagingSvc.SetRealtime(hub)
 
 	// When a GPS run is recorded, credit both challenge progress AND the rolling
 	// club leaderboards (one run_log per active club). This callback is how
@@ -147,7 +155,7 @@ func main() {
 	// 4. Build the HTTP server around the router.
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, runlogHandler, analyticsHandler, inventoryHandler, messagingHandler, tokenMgr),
+		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, runlogHandler, analyticsHandler, inventoryHandler, messagingHandler, hub, tokenMgr),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -177,7 +185,7 @@ func main() {
 }
 
 // newRouter builds the middleware stack and mounts all routes.
-func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, runlogHandler *runlog.Handler, analyticsHandler *analytics.Handler, inventoryHandler *inventory.Handler, messagingHandler *messaging.Handler, tokenMgr *auth.TokenManager) http.Handler {
+func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, runlogHandler *runlog.Handler, analyticsHandler *analytics.Handler, inventoryHandler *inventory.Handler, messagingHandler *messaging.Handler, hub *realtime.Hub, tokenMgr *auth.TokenManager) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID) // tag each request with a unique id
@@ -190,6 +198,8 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 		r.Get("/health", handleHealth)
 		r.Get("/version", handleVersion)
 		r.Mount("/auth", authHandler.Routes())
+		// Realtime chat socket — authenticates via ?token= inside the handler.
+		r.Get("/ws", hub.ServeHTTP)
 		// Guest discovery: read-only teasers (clubs by city, the city picker,
 		// public challenges) so a new user sees value before creating a profile.
 		r.Route("/public", func(r chi.Router) {
