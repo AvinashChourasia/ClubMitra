@@ -16,9 +16,10 @@ import { Tap } from "../../components/Tap";
 import { colors, styles } from "../../lib/theme";
 
 const PERIODS: { key: CityPeriod; label: string }[] = [
-  { key: "week", label: "This week" },
-  { key: "month", label: "This month" },
-  { key: "all", label: "All time" },
+  { key: "today", label: "Today" },
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+  { key: "all", label: "All" },
 ];
 
 // Medal accents for the podium; everyone else gets a muted rank number.
@@ -86,7 +87,12 @@ export default function CityLeaderboard() {
       >
         {/* Header */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Tap onPress={() => router.back()} hitSlop={10} haptic={false} style={{ marginLeft: -4 }}>
+          <Tap
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/home"))}
+            hitSlop={12}
+            haptic={false}
+            style={{ marginLeft: -8, padding: 6 }}
+          >
             <Ionicons name="chevron-back" size={28} color={colors.text} />
           </Tap>
           <View style={{ flex: 1 }}>

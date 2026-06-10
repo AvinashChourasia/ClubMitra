@@ -17,6 +17,12 @@ type Props = {
   style?: StyleProp<ViewStyle>;
 };
 
+// The Pressable IS the animated, styled element — so layout style (flex, width,
+// padding) reaches the touchable itself. Wrapping the styled box in an inner
+// view instead would drop flex onto a non-laid-out child (tabs collapse) and
+// shrink the tap target.
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 export function Tap({ children, onPress, onLongPress, disabled, haptic = true, scaleTo = 0.96, hitSlop, style }: Props) {
   const scale = useRef(new Animated.Value(1)).current;
 
@@ -24,7 +30,7 @@ export function Tap({ children, onPress, onLongPress, disabled, haptic = true, s
     Animated.spring(scale, { toValue: v, useNativeDriver: true, speed: 50, bounciness }).start();
 
   return (
-    <Pressable
+    <AnimatedPressable
       disabled={disabled}
       hitSlop={hitSlop}
       onPressIn={() => to(scaleTo, 0)}
@@ -34,8 +40,9 @@ export function Tap({ children, onPress, onLongPress, disabled, haptic = true, s
         onPress?.(e);
       }}
       onLongPress={onLongPress}
+      style={[{ transform: [{ scale }] }, style]}
     >
-      <Animated.View style={[{ transform: [{ scale }] }, style]}>{children}</Animated.View>
-    </Pressable>
+      {children}
+    </AnimatedPressable>
   );
 }

@@ -149,7 +149,7 @@ func (s *Service) CityLeaderboard(ctx context.Context, userID, city, period stri
 		}
 		city = c
 	}
-	if period != "week" && period != "month" && period != "all" {
+	if period != "today" && period != "week" && period != "month" && period != "all" {
 		period = "week"
 	}
 	view := &CityBoardView{City: city, Period: period, Entries: []CityBoardEntry{}}
@@ -164,10 +164,24 @@ func (s *Service) CityLeaderboard(ctx context.Context, userID, city, period stri
 	return view, nil
 }
 
-// cityPeriodFrom maps a period to the rolling-window start. "all" returns the
-// zero time so every activity qualifies.
+// ist is the reference timezone for "today" (the audience is in India), so the
+// day boundary matches what users expect rather than UTC midnight.
+var ist = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		return time.FixedZone("IST", 5*3600+30*60)
+	}
+	return loc
+}()
+
+// cityPeriodFrom maps a period to the rolling-window start. "today" is midnight
+// IST; week/month are rolling windows; "all" returns the zero time so every
+// activity qualifies.
 func cityPeriodFrom(period string, now time.Time) time.Time {
 	switch period {
+	case "today":
+		n := now.In(ist)
+		return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, ist)
 	case "week":
 		return now.AddDate(0, 0, -7)
 	case "month":

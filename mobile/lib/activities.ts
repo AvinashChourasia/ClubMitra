@@ -76,7 +76,7 @@ export type CityBoardEntry = {
   runs: number;
 };
 
-export type CityPeriod = "week" | "month" | "all";
+export type CityPeriod = "today" | "week" | "month" | "all";
 
 // The city leaderboard response: the ranked rows plus the city/period they're for.
 export type CityBoardView = {

@@ -69,7 +69,12 @@ export default function RunHistory() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Tap onPress={() => router.back()} hitSlop={10} haptic={false} style={{ marginLeft: -4 }}>
+          <Tap
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/home"))}
+            hitSlop={12}
+            haptic={false}
+            style={{ marginLeft: -8, padding: 6 }}
+          >
             <Ionicons name="chevron-back" size={28} color={colors.text} />
           </Tap>
           <Text style={{ fontSize: 24, fontWeight: "800", color: colors.text }}>Your runs</Text>
