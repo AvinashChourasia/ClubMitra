@@ -131,6 +131,16 @@ func (s *Service) List(ctx context.Context, userID string, joinedOnly bool) ([]C
 	return s.repo.List(ctx, userID, joinedOnly)
 }
 
+// PublicList lists live/upcoming challenges for guests (no auth): public ones,
+// plus city-visibility ones for the guest's chosen city. An unknown type filter
+// is ignored rather than erroring — it's a browse, not a write.
+func (s *Service) PublicList(ctx context.Context, city, search, ctype string) ([]PublicEntry, error) {
+	if ctype != TypeDistance && ctype != TypeDays && ctype != TypeStreak {
+		ctype = ""
+	}
+	return s.repo.PublicList(ctx, strings.TrimSpace(city), strings.TrimSpace(search), ctype)
+}
+
 // ErrPaymentRequired means the challenge has a join fee that hasn't been paid.
 var ErrPaymentRequired = errors.New("payment required to join this challenge")
 

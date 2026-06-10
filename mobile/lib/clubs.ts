@@ -14,6 +14,7 @@ export type Chapter = {
   banner?: string | null;
   is_public: boolean;
   invite_code: string;
+  join_policy: "open" | "invite";
   requires_approval: boolean;
   membership_fee_enabled: boolean;
   membership_fee_amount?: number | null;
@@ -27,6 +28,7 @@ export type Chapter = {
 export type ClubSettings = {
   logo?: string | null;
   banner?: string | null;
+  join_policy?: "open" | "invite";
   requires_approval?: boolean;
   membership_fee_enabled?: boolean;
   membership_fee_amount?: number;

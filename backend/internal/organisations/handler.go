@@ -55,6 +55,7 @@ func (h *Handler) Routes() http.Handler {
 		r.Get("/mine", h.myChapters)    // the caller's chapters (static before {chapterID})
 		r.Route("/{chapterID}", func(r chi.Router) {
 			r.Get("/", h.getChapter)
+			r.Post("/join", h.joinOpen) // join a discovered open club (no invite code)
 			r.Post("/pay", h.payMembership)             // self-service: pay/renew own membership
 			r.Put("/members/me/status", h.setOwnStatus) // self-service: on_leave / active
 			r.With(chapterAdmin).Put("/", h.updateChapter)
@@ -81,8 +82,9 @@ type createOrgRequest struct {
 // chapterSettingsFields are the editable club config (media + fee/approval),
 // embedded in create+update.
 type chapterSettingsFields struct {
-	Logo              *string  `json:"logo"`   // Cloudinary URL or null to clear
-	Banner            *string  `json:"banner"` // Cloudinary URL or null to clear
+	Logo              *string  `json:"logo"`        // Cloudinary URL or null to clear
+	Banner            *string  `json:"banner"`      // Cloudinary URL or null to clear
+	JoinPolicy        *string  `json:"join_policy"` // open | invite (omitted = open)
 	RequiresApproval  *bool    `json:"requires_approval"`
 	FeeEnabled        *bool    `json:"membership_fee_enabled"`
 	FeeAmount         *float64 `json:"membership_fee_amount"`
@@ -90,17 +92,21 @@ type chapterSettingsFields struct {
 	RenewalWindowDays *int     `json:"renewal_window_days"`
 }
 
-// toSettings builds ChapterSettings with sensible defaults (approval on,
-// fee off, 5-day renewal window) when fields are omitted.
+// toSettings builds ChapterSettings with sensible defaults (open join, approval
+// on, fee off, 5-day renewal window) when fields are omitted.
 func (f chapterSettingsFields) toSettings() ChapterSettings {
 	s := ChapterSettings{
 		Logo:              f.Logo,
 		Banner:            f.Banner,
+		JoinPolicy:        "open",
 		RequiresApproval:  f.RequiresApproval == nil || *f.RequiresApproval,
 		FeeEnabled:        f.FeeEnabled != nil && *f.FeeEnabled,
 		FeeAmount:         f.FeeAmount,
 		MembershipPeriod:  f.MembershipPeriod,
 		RenewalWindowDays: 5,
+	}
+	if f.JoinPolicy != nil && *f.JoinPolicy == "invite" {
+		s.JoinPolicy = "invite"
 	}
 	if f.RenewalWindowDays != nil {
 		s.RenewalWindowDays = *f.RenewalWindowDays
@@ -422,6 +428,55 @@ func (h *Handler) myChapters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, chapters)
+}
+
+// PublicRoutes returns the unauthenticated discovery endpoints, mounted in main
+// OUTSIDE the auth group. Read-only teasers — no invite codes, no member
+// identities — so guests can browse clubs before creating a profile.
+func (h *Handler) PublicRoutes() http.Handler {
+	r := chi.NewRouter()
+	r.Get("/chapters", h.discover) // ?city=&q=
+	r.Get("/cities", h.cities)
+	return r
+}
+
+// discover lists public clubs for guests, filtered by ?city= and/or ?q= (name).
+func (h *Handler) discover(w http.ResponseWriter, r *http.Request) {
+	entries, err := h.svc.Discover(r.Context(), r.URL.Query().Get("city"), r.URL.Query().Get("q"))
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, entries)
+}
+
+// cities lists cities with public clubs, for the guest city picker.
+func (h *Handler) cities(w http.ResponseWriter, r *http.Request) {
+	cities, err := h.svc.Cities(r.Context())
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, cities)
+}
+
+// joinOpen joins a discovered open club directly (auth required; no invite code).
+func (h *Handler) joinOpen(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	chapterID, ok := h.chapterID(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.svc.JoinOpen(r.Context(), chapterID, userID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) joinByInvite(w http.ResponseWriter, r *http.Request) {

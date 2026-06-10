@@ -3,7 +3,7 @@
 
 import { useCallback, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -86,6 +86,18 @@ export default function Clubs() {
           <Button label="Join" icon="enter-outline" variant="secondary" onPress={() => router.push("/club/join")} style={{ flex: 1 }} />
           <Button label="Create club" icon="add" onPress={() => router.push("/club/new")} style={{ flex: 1 }} />
         </View>
+
+        {/* Discover: browse public clubs by city (the same explore guests see) */}
+        <Tap onPress={() => router.push("/explore" as Href)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
+          <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="compass" size={22} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Discover clubs</Text>
+            <Text style={{ color: colors.muted, fontSize: 13 }}>Find clubs running in your city</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
+        </Tap>
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />

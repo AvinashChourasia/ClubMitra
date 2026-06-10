@@ -3,12 +3,13 @@
 // the new, already-logged-in user home. Everything except t-shirt size is
 // required — the backend enforces the same.
 
-import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useEffect, useState } from "react";
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from "react-native";
+import { useRouter, type Href } from "expo-router";
 
 import { useAuth } from "../../lib/auth";
 import { uploadAvatar, isRemote } from "../../lib/upload";
+import { resumePendingIntent, getGuestCity } from "../../lib/discover";
 import { ApiError } from "../../lib/api";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 import { ChipSelect } from "../../components/ChipSelect";
@@ -35,6 +36,13 @@ export default function Register() {
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // A guest arriving from Welcome/Explore already told us their city — prefill.
+  useEffect(() => {
+    getGuestCity().then((c) => {
+      if (c) setCity((prev) => prev || c);
+    });
+  }, []);
 
   async function onSubmit() {
     setError(null);
@@ -82,7 +90,16 @@ export default function Register() {
           /* non-fatal */
         }
       }
-      router.replace("/home");
+      // If an auth gate stopped them mid-action (joining a club/challenge),
+      // finish it now and land them where they were headed.
+      const token = await getAccessToken();
+      const resumed = token ? await resumePendingIntent(token) : null;
+      if (resumed) {
+        router.replace(resumed.route as Href);
+        Alert.alert(resumed.title, resumed.message);
+      } else {
+        router.replace("/home");
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong");
     } finally {

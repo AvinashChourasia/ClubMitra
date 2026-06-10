@@ -39,6 +39,7 @@ export default function EditClub() {
   const [logo, setLogo] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(true);
+  const [openJoin, setOpenJoin] = useState(true); // join_policy: open vs invite
   const [fee, setFee] = useState<FeeState>(defaultFeeState);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +59,7 @@ export default function EditClub() {
             setLogo(ch.logo ?? null);
             setBanner(ch.banner ?? null);
             setIsPublic(ch.is_public);
+            setOpenJoin(ch.join_policy !== "invite");
             setFee({
               requiresApproval: ch.requires_approval,
               feeEnabled: ch.membership_fee_enabled,
@@ -93,6 +95,7 @@ export default function EditClub() {
         city: city.trim(),
         description: description.trim(),
         is_public: isPublic,
+        join_policy: openJoin ? "open" : "invite",
         logo: logoUrl,
         banner: bannerUrl,
         ...feeSettings(fee),
@@ -146,6 +149,16 @@ export default function EditClub() {
               <Text style={{ color: colors.muted, fontSize: 12 }}>Allow others to discover this club.</Text>
             </View>
             <Switch value={isPublic} onValueChange={setIsPublic} trackColor={{ true: colors.primary }} />
+          </View>
+
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>Open joining</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>
+                Anyone who discovers the club can join. Off = invite code only.
+              </Text>
+            </View>
+            <Switch value={openJoin} onValueChange={setOpenJoin} trackColor={{ true: colors.primary }} />
           </View>
 
           <ClubFeeFields value={fee} onChange={setFee} />

@@ -252,7 +252,27 @@ func (s *Service) JoinByInvite(ctx context.Context, code, userID string) (*JoinR
 	if err != nil {
 		return nil, err
 	}
+	return s.enrol(ctx, chapter, userID)
+}
 
+// JoinOpen joins a discovered club directly (no invite code). Only public clubs
+// with the open join policy allow this; the club's approval/fee rules still
+// decide the resulting membership status.
+func (s *Service) JoinOpen(ctx context.Context, chapterID uuid.UUID, userID string) (*JoinResult, error) {
+	chapter, err := s.repo.GetChapter(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+	if !chapter.IsPublic || chapter.JoinPolicy != "open" {
+		return nil, ValidationError{Msg: "this club is invite-only — ask a club admin for an invite code"}
+	}
+	return s.enrol(ctx, chapter, userID)
+}
+
+// enrol is the shared join path (invite or open): keep an existing membership
+// as-is, otherwise add one with the status the club's approval/fee rules imply,
+// pinging the admins when approval is needed.
+func (s *Service) enrol(ctx context.Context, chapter *Chapter, userID string) (*JoinResult, error) {
 	// If they already have a membership, leave it as-is (don't reset a pending
 	// or active member back a step by re-joining).
 	if existing, err := s.repo.GetMembership(ctx, chapter.ID, userID); err == nil {
@@ -274,6 +294,16 @@ func (s *Service) JoinByInvite(ctx context.Context, code, userID string) (*JoinR
 			"A runner asked to join "+chapter.Name, map[string]string{"type": "join_request", "chapter_id": chapter.ID.String()})
 	}
 	return &JoinResult{Chapter: chapter, Status: status}, nil
+}
+
+// Discover lists public clubs for guests, filtered by city and/or name search.
+func (s *Service) Discover(ctx context.Context, city, search string) ([]DiscoverEntry, error) {
+	return s.repo.DiscoverChapters(ctx, strings.TrimSpace(city), strings.TrimSpace(search))
+}
+
+// Cities lists the cities with public clubs, for the guest city picker.
+func (s *Service) Cities(ctx context.Context) ([]CityCount, error) {
+	return s.repo.Cities(ctx)
 }
 
 // AddMember adds a runner to a chapter on an admin's behalf (active immediately —

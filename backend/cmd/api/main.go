@@ -190,6 +190,12 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 		r.Get("/health", handleHealth)
 		r.Get("/version", handleVersion)
 		r.Mount("/auth", authHandler.Routes())
+		// Guest discovery: read-only teasers (clubs by city, the city picker,
+		// public challenges) so a new user sees value before creating a profile.
+		r.Route("/public", func(r chi.Router) {
+			r.Mount("/challenges", challengesHandler.PublicRoutes())
+			r.Mount("/", orgHandler.PublicRoutes()) // /chapters, /cities
+		})
 
 		// Protected routes: this Group applies RequireAuth to everything mounted
 		// inside it, so each handler can assume a verified user in the context.

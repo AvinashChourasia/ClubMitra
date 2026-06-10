@@ -38,6 +38,7 @@ type Chapter struct {
 	Banner      *string   `json:"banner,omitempty"` // Cloudinary URL (wide hero)
 	IsPublic    bool      `json:"is_public"`
 	InviteCode  string    `json:"invite_code"`
+	JoinPolicy  string    `json:"join_policy"` // open | invite
 
 	// Membership fee + subscription config. When FeeEnabled, joining requires
 	// paying FeeAmount, and membership lasts one Period (monthly/annual).
@@ -56,6 +57,7 @@ type Chapter struct {
 type ChapterSettings struct {
 	Logo              *string
 	Banner            *string
+	JoinPolicy        string // open | invite
 	RequiresApproval  bool
 	FeeEnabled        bool
 	FeeAmount         *float64
@@ -65,7 +67,7 @@ type ChapterSettings struct {
 
 // chapterColumns is the shared SELECT/RETURNING list, kept in sync with
 // scanChapter. (membership_fee_amount is NUMERIC; pgx scans it into *float64.)
-const chapterColumns = `id, org_id, name, city, description, logo, banner, is_public, invite_code,
+const chapterColumns = `id, org_id, name, city, description, logo, banner, is_public, invite_code, join_policy,
 	requires_approval, membership_fee_enabled, membership_fee_amount,
 	membership_period, renewal_window_days, created_at, updated_at`
 
@@ -73,7 +75,7 @@ const chapterColumns = `id, org_id, name, city, description, logo, banner, is_pu
 func scanChapterRow(s interface{ Scan(...any) error }) (*Chapter, error) {
 	var c Chapter
 	err := s.Scan(
-		&c.ID, &c.OrgID, &c.Name, &c.City, &c.Description, &c.Logo, &c.Banner, &c.IsPublic, &c.InviteCode,
+		&c.ID, &c.OrgID, &c.Name, &c.City, &c.Description, &c.Logo, &c.Banner, &c.IsPublic, &c.InviteCode, &c.JoinPolicy,
 		&c.RequiresApproval, &c.FeeEnabled, &c.FeeAmount, &c.MembershipPeriod, &c.RenewalWindowDays,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
@@ -221,13 +223,13 @@ func (r *Repository) CreateChapter(ctx context.Context, orgID uuid.UUID, name, c
 	defer tx.Rollback(ctx) // no-op once Commit succeeds
 
 	const insertChapter = `
-		INSERT INTO chapters (org_id, name, city, description, logo, banner, invite_code,
+		INSERT INTO chapters (org_id, name, city, description, logo, banner, invite_code, join_policy,
 		                      requires_approval, membership_fee_enabled, membership_fee_amount,
 		                      membership_period, renewal_window_days)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING ` + chapterColumns
 	chapter, err := scanChapterRow(tx.QueryRow(ctx, insertChapter,
-		orgID, name, city, description, s.Logo, s.Banner, inviteCode,
+		orgID, name, city, description, s.Logo, s.Banner, inviteCode, s.JoinPolicy,
 		s.RequiresApproval, s.FeeEnabled, s.FeeAmount, s.MembershipPeriod, s.RenewalWindowDays))
 	if err != nil {
 		return nil, err
@@ -297,16 +299,96 @@ func (r *Repository) GetChapter(ctx context.Context, id uuid.UUID) (*Chapter, er
 func (r *Repository) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, description string, isPublic bool, s ChapterSettings) (*Chapter, error) {
 	const q = `
 		UPDATE chapters SET name = $2, city = $3, description = $4, logo = $5, banner = $6, is_public = $7,
-		       requires_approval = $8, membership_fee_enabled = $9, membership_fee_amount = $10,
-		       membership_period = $11, renewal_window_days = $12
+		       join_policy = $8,
+		       requires_approval = $9, membership_fee_enabled = $10, membership_fee_amount = $11,
+		       membership_period = $12, renewal_window_days = $13
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING ` + chapterColumns
 	c, err := scanChapterRow(r.db.QueryRow(ctx, q, id, name, city, description, s.Logo, s.Banner, isPublic,
-		s.RequiresApproval, s.FeeEnabled, s.FeeAmount, s.MembershipPeriod, s.RenewalWindowDays))
+		s.JoinPolicy, s.RequiresApproval, s.FeeEnabled, s.FeeAmount, s.MembershipPeriod, s.RenewalWindowDays))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return c, err
+}
+
+// DiscoverEntry is the guest-facing teaser of a club: enough to want in (name,
+// city, size, how to join) and nothing private (no invite code, no fee config,
+// no member identities).
+type DiscoverEntry struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	City        string    `json:"city"`
+	Description string    `json:"description"`
+	Logo        *string   `json:"logo,omitempty"`
+	Banner      *string   `json:"banner,omitempty"`
+	JoinPolicy  string    `json:"join_policy"`
+	MemberCount int       `json:"member_count"`
+}
+
+// DiscoverChapters lists public clubs for guests, optionally narrowed to a city
+// (exact, case-insensitive) and a name search. Most members first, so the most
+// alive clubs lead the list.
+func (r *Repository) DiscoverChapters(ctx context.Context, city, search string) ([]DiscoverEntry, error) {
+	const q = `
+		SELECT c.id, c.name, c.city, c.description, c.logo, c.banner, c.join_policy,
+		       COUNT(cm.user_id) FILTER (WHERE cm.deleted_at IS NULL AND cm.status = 'active')::int AS member_count
+		FROM chapters c
+		LEFT JOIN chapter_members cm ON cm.chapter_id = c.id
+		WHERE c.deleted_at IS NULL AND c.is_public
+		  AND ($1 = '' OR lower(c.city) = lower($1))
+		  AND ($2 = '' OR c.name ILIKE '%' || $2 || '%')
+		GROUP BY c.id
+		ORDER BY member_count DESC, c.created_at DESC
+		LIMIT 100`
+	rows, err := r.db.Query(ctx, q, city, search)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]DiscoverEntry, 0)
+	for rows.Next() {
+		var e DiscoverEntry
+		if err := rows.Scan(&e.ID, &e.Name, &e.City, &e.Description, &e.Logo, &e.Banner, &e.JoinPolicy, &e.MemberCount); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// CityCount is one row of the city picker: a city and how many public clubs run
+// there. Grouped case-insensitively so "Pune" and "pune" don't split.
+type CityCount struct {
+	City  string `json:"city"`
+	Clubs int    `json:"clubs"`
+}
+
+// Cities lists the cities that have public clubs, busiest first.
+func (r *Repository) Cities(ctx context.Context) ([]CityCount, error) {
+	const q = `
+		SELECT min(city) AS city, COUNT(*)::int AS clubs
+		FROM chapters
+		WHERE deleted_at IS NULL AND is_public
+		GROUP BY lower(city)
+		ORDER BY clubs DESC, city ASC
+		LIMIT 100`
+	rows, err := r.db.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]CityCount, 0)
+	for rows.Next() {
+		var c CityCount
+		if err := rows.Scan(&c.City, &c.Clubs); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // SoftDeleteChapter stamps deleted_at on a chapter.

@@ -142,6 +142,25 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, list)
 }
 
+// PublicRoutes returns the unauthenticated challenge browse, mounted in main
+// OUTSIDE the auth group. Guest teasers only — no leaderboards, no creators.
+func (h *Handler) PublicRoutes() http.Handler {
+	r := chi.NewRouter()
+	r.Get("/", h.publicList) // ?city=&q=&type=
+	return r
+}
+
+// publicList lists live public (and city-scoped) challenges for guests.
+func (h *Handler) publicList(w http.ResponseWriter, r *http.Request) {
+	qs := r.URL.Query()
+	list, err := h.svc.PublicList(r.Context(), qs.Get("city"), qs.Get("q"), qs.Get("type"))
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, list)
+}
+
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	userID, ok := httpx.UserIDFromContext(r.Context())
 	if !ok {

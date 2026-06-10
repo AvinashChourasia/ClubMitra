@@ -223,6 +223,57 @@ func (r *Repository) List(ctx context.Context, userID string, joinedOnly bool) (
 	return out, rows.Err()
 }
 
+// PublicEntry is the guest-facing teaser of a challenge: the goal and its
+// window, but no creator identity, fees, or leaderboard.
+type PublicEntry struct {
+	ID               uuid.UUID `json:"id"`
+	Title            string    `json:"title"`
+	Description      string    `json:"description"`
+	Type             string    `json:"type"`
+	City             *string   `json:"city,omitempty"`
+	TargetKM         *float64  `json:"target_km,omitempty"`
+	TargetDays       *int      `json:"target_days,omitempty"`
+	StartDate        time.Time `json:"start_date"`
+	EndDate          time.Time `json:"end_date"`
+	ParticipantCount int       `json:"participant_count"`
+}
+
+// PublicList lists live/upcoming challenges for guests: public ones everywhere,
+// plus city-visibility ones for the guest's chosen city. Optional title search
+// and type filter. Soonest-ending first, same as the member list.
+func (r *Repository) PublicList(ctx context.Context, city, search, ctype string) ([]PublicEntry, error) {
+	const q = `
+		SELECT c.id, c.title, c.description, c.type, c.city, c.target_km, c.target_days,
+		       c.start_date, c.end_date,
+		       (SELECT COUNT(*) FROM challenge_participants pc
+		          WHERE pc.challenge_id = c.id AND pc.deleted_at IS NULL)::int AS participant_count
+		FROM challenges c
+		WHERE c.deleted_at IS NULL
+		  AND c.end_date >= CURRENT_DATE
+		  AND (c.visibility = 'public'
+		       OR (c.visibility = 'city' AND $1 <> '' AND lower(c.city) = lower($1)))
+		  AND ($2 = '' OR c.title ILIKE '%' || $2 || '%')
+		  AND ($3 = '' OR c.type = $3)
+		ORDER BY c.end_date ASC
+		LIMIT 100`
+	rows, err := r.db.Query(ctx, q, city, search, ctype)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]PublicEntry, 0)
+	for rows.Next() {
+		var e PublicEntry
+		if err := rows.Scan(&e.ID, &e.Title, &e.Description, &e.Type, &e.City, &e.TargetKM, &e.TargetDays,
+			&e.StartDate, &e.EndDate, &e.ParticipantCount); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // JoinAsUser adds an individual participation (idempotent). Returns whether a
 // new row was created.
 func (r *Repository) JoinAsUser(ctx context.Context, challengeID uuid.UUID, userID string, feePaid bool) (bool, error) {

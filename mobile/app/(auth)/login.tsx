@@ -3,19 +3,20 @@
 // user home. New runners create an account on the register screen.
 
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, Text, TextInput, View } from "react-native";
-import { useRouter } from "expo-router";
+import { Alert, KeyboardAvoidingView, Platform, Text, TextInput, View } from "react-native";
+import { useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
 import { ApiError } from "../../lib/api";
+import { resumePendingIntent } from "../../lib/discover";
 import { Tap } from "../../components/Tap";
 import { Button } from "../../components/Button";
 import { GradientCard } from "../../components/GradientCard";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, getAccessToken } = useAuth();
   const router = useRouter();
   useThemeMode();
 
@@ -29,7 +30,16 @@ export default function Login() {
     setSubmitting(true);
     try {
       await login(email.trim(), password);
-      router.replace("/home");
+      // If an auth gate stopped a guest mid-action (joining a club/challenge),
+      // finish it now and land them where they were headed.
+      const token = await getAccessToken();
+      const resumed = token ? await resumePendingIntent(token) : null;
+      if (resumed) {
+        router.replace(resumed.route as Href);
+        Alert.alert(resumed.title, resumed.message);
+      } else {
+        router.replace("/home");
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong");
     } finally {
