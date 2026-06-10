@@ -4,7 +4,7 @@
 
 import { useCallback, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Redirect, useFocusEffect, useRouter, type Href } from "expo-router";
+import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -89,18 +89,6 @@ export default function RunHistory() {
             <Stat label="Streak" value={`${stats.current_streak_days}d`} />
           </View>
         )}
-
-        {/* City leaderboard entry */}
-        <Tap onPress={() => router.push("/leaderboard/city" as Href)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
-          <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: "#FEF3C7", alignItems: "center", justifyContent: "center" }}>
-            <Ionicons name="trophy" size={22} color="#F59E0B" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16 }}>City ranking</Text>
-            <Text style={{ color: colors.muted, fontSize: 13 }}>See how you rank against your city</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
-        </Tap>
 
         {runs === null ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />

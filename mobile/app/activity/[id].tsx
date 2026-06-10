@@ -5,8 +5,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 
 import { useAuth } from "../../lib/auth";
@@ -21,6 +22,7 @@ import {
 } from "../../lib/activities";
 import { RouteTrace } from "../../components/RouteTrace";
 import { ElevationChart } from "../../components/ElevationChart";
+import { Tap } from "../../components/Tap";
 
 // react-native-maps is a native module absent from Expo Go, so we only pull it
 // in (and render the interactive map) in a dev/standalone build. Expo Go gets
@@ -50,6 +52,7 @@ import { colors } from "../../lib/theme";
 export default function ActivityDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getAccessToken } = useAuth();
+  const router = useRouter();
 
   const [activity, setActivity] = useState<Activity | null>(null);
   const [route, setRoute] = useState<LatLng[]>([]);
@@ -94,9 +97,27 @@ export default function ActivityDetail() {
   }, [id, getAccessToken]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["bottom"]}>
-      {/* A native header with a back button, titled "Run". */}
-      <Stack.Screen options={{ headerShown: true, title: "Run", headerBackTitle: "Back" }} />
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top", "bottom"]}>
+      {/* Floating back button — no native header bar, it floats over the map. */}
+      <Tap
+        onPress={() => (router.canGoBack() ? router.back() : router.replace("/activity"))}
+        hitSlop={10}
+        haptic={false}
+        style={{
+          position: "absolute",
+          top: 58,
+          left: 24,
+          zIndex: 10,
+          width: 38,
+          height: 38,
+          borderRadius: 19,
+          backgroundColor: "rgba(15,23,42,0.55)",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons name="chevron-back" size={22} color="#fff" />
+      </Tap>
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>

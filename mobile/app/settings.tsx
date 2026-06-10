@@ -14,6 +14,7 @@ import * as Updates from "expo-updates";
 import { useAuth } from "../lib/auth";
 import { request } from "../lib/api";
 import { colors, styles, useThemeMode, type ThemeMode } from "../lib/theme";
+import { runningLevelLabel } from "../lib/profile";
 import { Avatar } from "../components/Avatar";
 
 // Where tester feedback is sent. Change to a support address when you have one.
@@ -53,6 +54,26 @@ const APPEARANCE: { key: ThemeMode; label: string; icon: keyof typeof Ionicons.g
   { key: "dark", label: "Dark", icon: "moon-outline" },
 ];
 
+// DetailRow: one read-only profile fact (label left, value right).
+function DetailRow({ label, value, last }: { label: string; value?: string | number | null; last?: boolean }) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        justifyContent: "space-between",
+        paddingVertical: 11,
+        borderBottomWidth: last ? 0 : 1,
+        borderBottomColor: colors.border,
+      }}
+    >
+      <Text style={{ color: colors.muted, fontSize: 14 }}>{label}</Text>
+      <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }}>
+        {value === null || value === undefined || value === "" ? "—" : String(value)}
+      </Text>
+    </View>
+  );
+}
+
 function AppearanceToggle() {
   const { mode, setMode } = useThemeMode();
   return (
@@ -78,6 +99,7 @@ export default function Settings() {
   const { user, logout } = useAuth();
   const router = useRouter();
   useThemeMode(); // subscribe so this screen re-themes instantly on toggle
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   // Version info — helps testers report which app + backend they're on.
   const appVersion = Constants.expoConfig?.version ?? "1.0.0";
@@ -107,19 +129,27 @@ export default function Settings() {
           <Text style={{ fontSize: 26, fontWeight: "800", color: colors.text }}>Settings</Text>
         </View>
 
-        {/* Account */}
+        {/* Account — tap to reveal read-only profile details (editing lives on
+            the Profile tab's pencil icon, so settings stays one-purpose). */}
         <View style={styles.card}>
           <Text style={[styles.sectionTitle, { marginBottom: 10 }]}>Account</Text>
-          <Pressable onPress={() => router.push("/profile/edit")} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <Pressable onPress={() => setDetailsOpen((v) => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <Avatar name={user.name} uri={user.profile_photo} size={48} />
             <View style={{ flex: 1 }}>
               <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16 }}>{user.name}</Text>
               <Text style={{ color: colors.muted, fontSize: 13 }}>{user.email}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.subtle} />
+            <Ionicons name={detailsOpen ? "chevron-up" : "chevron-down"} size={18} color={colors.subtle} />
           </Pressable>
-          <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 6 }} />
-          <Row icon="person-outline" label="Edit profile" onPress={() => router.push("/profile/edit")} />
+          {detailsOpen && (
+            <View style={{ marginTop: 8 }}>
+              <DetailRow label="Phone" value={user.phone} />
+              <DetailRow label="Age" value={user.age} />
+              <DetailRow label="City" value={user.city} />
+              <DetailRow label="Running level" value={runningLevelLabel(user.running_level)} />
+              <DetailRow label="T-shirt size" value={user.tshirt_size} last />
+            </View>
+          )}
         </View>
 
         {/* Appearance */}

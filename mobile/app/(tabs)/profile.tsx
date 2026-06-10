@@ -210,6 +210,7 @@ export default function Profile() {
           <View style={{ flexDirection: "row", gap: 8, marginTop: 2, flexWrap: "wrap", justifyContent: "center" }}>
             <Pill icon="flash" text={runningLevelLabel(user.running_level)} />
             {user.city ? <Pill icon="location" text={user.city} /> : null}
+            {user.age ? <Pill icon="hourglass" text={`${user.age} yrs`} /> : null}
           </View>
         </GradientCard>
 
