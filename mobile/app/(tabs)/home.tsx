@@ -13,12 +13,14 @@ import { myRuns, type MyRun } from "../../lib/attendance";
 import { listChallenges, challengeFraction, challengeProgress, challengeTarget, challengeUnit, type Challenge } from "../../lib/challenges";
 import { myChapters, type MyChapter } from "../../lib/clubs";
 import { publicClubs, type DiscoverClub } from "../../lib/discover";
+import { listActivities, getRoute, geoJSONToLatLng, offsetsToTimes, type Activity, type LatLng } from "../../lib/activities";
 import { useJoinGate, ClubCarousel, TrackRunCard } from "../../components/discovery";
 import { ProgressBar } from "../../components/ProgressBar";
+import { RouteTrace } from "../../components/RouteTrace";
 import { Tap } from "../../components/Tap";
 import { GradientCard } from "../../components/GradientCard";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
-import { formatRunWhen, isPast } from "../../lib/format";
+import { formatDistance, formatDuration, formatPace, formatRunWhen, isPast } from "../../lib/format";
 import { GuestHome } from "../../components/GuestScreens";
 
 function SectionHeader({ title, action }: { title: string; action?: { label: string; onPress: () => void } }) {
@@ -42,6 +44,9 @@ export default function Home() {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [clubs, setClubs] = useState<MyChapter[]>([]);
   const [cityClubs, setCityClubs] = useState<DiscoverClub[]>([]);
+  const [lastRun, setLastRun] = useState<Activity | null>(null);
+  const [lastRoute, setLastRoute] = useState<LatLng[]>([]);
+  const [lastTimes, setLastTimes] = useState<number[] | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { joinClub, joiningId } = useJoinGate();
@@ -50,17 +55,30 @@ export default function Home() {
     try {
       const token = await getAccessToken();
       if (token) {
-        const [r, c, ch, pc] = await Promise.all([
+        const [r, c, ch, pc, acts] = await Promise.all([
           myRuns(token),
           listChallenges(token, true),
           myChapters(token),
           // Discovery strip: public clubs in the member's own city.
           user?.city ? publicClubs(user.city).catch(() => []) : Promise.resolve([]),
+          listActivities(token).catch(() => [] as Activity[]),
         ]);
         setRuns(r);
         setChallenges(c);
         setClubs(ch);
         setCityClubs(pc);
+        // Latest GPS run + its route for the thumbnail (best-effort).
+        const latest = acts[0] ?? null;
+        setLastRun(latest);
+        if (latest) {
+          try {
+            const route = await getRoute(token, latest.id);
+            setLastRoute(geoJSONToLatLng(route.geometry));
+            setLastTimes(offsetsToTimes(route.offsets_s));
+          } catch {
+            setLastRoute([]);
+          }
+        }
       }
     } catch {
       /* keep last good state */
@@ -127,6 +145,30 @@ export default function Home() {
           title="Record your run"
           subtitle="GPS route, pace, splits — counts for your clubs & challenges."
         />
+
+        {/* Your last run — real route thumbnail + the headline numbers. */}
+        {lastRun && (
+          <View style={{ gap: 10 }}>
+            <SectionHeader title="Your last run" action={{ label: "All runs", onPress: () => router.push("/activity") }} />
+            <Tap onPress={() => router.push(`/activity/${lastRun.id}`)} style={[styles.card, { gap: 12, padding: 16 }]}>
+              {lastRoute.length >= 2 && <RouteTrace coords={lastRoute} times={lastTimes} height={130} />}
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.text, fontWeight: "800", fontSize: 20, letterSpacing: -0.3 }}>
+                    {formatDistance(lastRun.distance_m)}
+                  </Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>
+                    {new Date(lastRun.started_at).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", gap: 18 }}>
+                  <MiniStat label="Time" value={formatDuration(lastRun.duration_s)} />
+                  <MiniStat label="Pace" value={formatPace(lastRun.avg_pace_s_per_km)} />
+                </View>
+              </View>
+            </Tap>
+          </View>
+        )}
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />
@@ -208,6 +250,15 @@ function HeroStat({ value, label }: { value: number; label: string }) {
     <View>
       <Text style={{ color: "#fff", fontSize: 22, fontWeight: "800" }}>{value}</Text>
       <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 12, fontWeight: "600" }}>{label}</Text>
+    </View>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={{ alignItems: "flex-end" }}>
+      <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>{value}</Text>
+      <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "700" }}>{label}</Text>
     </View>
   );
 }

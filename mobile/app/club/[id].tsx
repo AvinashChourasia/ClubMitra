@@ -214,8 +214,14 @@ export default function ClubDetail() {
           <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 13, fontWeight: "600" }}>
             {chapter.city}
             {members ? ` · ${members.length} member${members.length === 1 ? "" : "s"}` : ""}
+            {chapter.join_policy === "open" ? " · open to join" : " · invite only"}
           </Text>
         </View>
+        {chapter.description ? (
+          <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, marginTop: 4 }} numberOfLines={2}>
+            {chapter.description}
+          </Text>
+        ) : null}
       </View>
       {isAdmin && (
         <Pressable onPress={() => router.push(`/club/manage/${id}`)} hitSlop={10}>
@@ -307,8 +313,12 @@ export default function ClubDetail() {
         contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 48 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={{ color: colors.accent, fontWeight: "600" }}>‹ Back</Text>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={{ marginLeft: -8, padding: 6, alignSelf: "flex-start" }}
+        >
+          <Ionicons name="chevron-back" size={28} color={colors.text} />
         </Pressable>
 
         {loading ? (
@@ -322,9 +332,29 @@ export default function ClubDetail() {
               <ImageBackground
                 source={{ uri: chapter.banner }}
                 imageStyle={{ borderRadius: 22 }}
-                style={{ borderRadius: 22, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 5 }}
+                style={{
+                  borderRadius: 22,
+                  minHeight: 180,
+                  justifyContent: "flex-end",
+                  shadowColor: colors.primary,
+                  shadowOpacity: 0.3,
+                  shadowRadius: 18,
+                  shadowOffset: { width: 0, height: 10 },
+                  elevation: 5,
+                }}
               >
-                <View style={{ borderRadius: 22, padding: 20, flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: "rgba(11,18,32,0.45)" }}>
+                {/* Content sits at the bottom over a scrim, banner art breathes above. */}
+                <View
+                  style={{
+                    borderBottomLeftRadius: 22,
+                    borderBottomRightRadius: 22,
+                    padding: 16,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 14,
+                    backgroundColor: "rgba(11,18,32,0.55)",
+                  }}
+                >
                   {headerInner}
                 </View>
               </ImageBackground>
