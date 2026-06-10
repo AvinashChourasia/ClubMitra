@@ -3,7 +3,7 @@
 
 import { useCallback, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -18,6 +18,7 @@ import { formatRunWhen, isPast } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
 import { GradientCard } from "../../components/GradientCard";
 import { Tap } from "../../components/Tap";
+import { GuestProfile } from "../../components/GuestScreens";
 
 // tierColor maps a trust tier to its accent colour (basic → muted, trusted →
 // brand accent, verified → success green).
@@ -98,7 +99,7 @@ export default function Profile() {
     setRefreshing(false);
   }
 
-  if (!user) return <Redirect href="/login" />;
+  if (!user) return <GuestProfile />;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>

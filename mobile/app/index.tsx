@@ -1,10 +1,10 @@
 // The entry route ("/"). Routing by who's opening the app:
 //
 //   still checking storage  -> spinner
-//   logged in               -> /home
+//   logged in               -> /home (member tabs)
 //   brand new (no welcome)  -> /welcome  (pick a city, see the value)
-//   returning guest         -> /explore  (browse clubs/challenges; auth gates
-//                                         fire only when they try to act)
+//   returning guest         -> /home (the SAME tabs render guest variants —
+//                              public content everywhere, auth gates on action)
 //
 // The old behaviour (logged out -> /login) put a login wall in front of any
 // value; guests now browse first and identity is asked at commitment moments.
@@ -33,5 +33,5 @@ export default function Index() {
   }
 
   if (user) return <Redirect href="/home" />;
-  return <Redirect href={(seen ? "/explore" : "/welcome") as Href} />;
+  return <Redirect href={(seen ? "/home" : "/welcome") as Href} />;
 }

@@ -4,7 +4,7 @@
 
 import { useCallback, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -21,6 +21,7 @@ import {
 } from "../../lib/challenges";
 import { ProgressBar } from "../../components/ProgressBar";
 import { colors, styles, useThemeMode } from "../../lib/theme";
+import { GuestChallenges } from "../../components/GuestScreens";
 
 const TYPE_LABEL: Record<string, string> = { distance: "Distance", days: "Days", streak: "Streak" };
 const TYPE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = { distance: "speedometer", days: "calendar", streak: "flame" };
@@ -63,7 +64,7 @@ export default function Challenges() {
     setRefreshing(false);
   }
 
-  if (!user) return <Redirect href="/login" />;
+  if (!user) return <GuestChallenges />;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>

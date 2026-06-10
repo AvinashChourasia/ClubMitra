@@ -23,6 +23,7 @@ import {
 } from "../lib/discover";
 import { joinChallenge } from "../lib/challenges";
 import { Avatar } from "../components/Avatar";
+import { CityAutocomplete } from "../components/CityAutocomplete";
 import { Tap } from "../components/Tap";
 import { colors, styles, useThemeMode } from "../lib/theme";
 
@@ -164,36 +165,18 @@ export default function Explore() {
           )}
         </View>
 
-        {/* City editor (toggled from the chip) */}
+        {/* City editor (toggled from the chip) — type-ahead suggestions */}
         {editingCity && (
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <View style={{ flex: 1 }}>
-              <TextInput
-                style={styles.input}
-                placeholder="City (blank = all cities)"
-                placeholderTextColor={colors.muted}
-                autoCapitalize="words"
-                value={city}
-                onChangeText={setCity}
-                onSubmitEditing={() => {
-                  setEditingCity(false);
-                  if (!user) void setGuestCity(city);
-                }}
-                returnKeyType="done"
-                autoFocus
-              />
-            </View>
-            <Tap
-              haptic={false}
-              onPress={() => {
-                setEditingCity(false);
-                if (!user) void setGuestCity(city);
-              }}
-              style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}
-            >
-              <Ionicons name="checkmark" size={22} color="#fff" />
-            </Tap>
-          </View>
+          <CityAutocomplete
+            value={city}
+            onChange={setCity}
+            onPick={(c) => {
+              setEditingCity(false);
+              if (!user) void setGuestCity(c);
+            }}
+            placeholder="City (blank = all cities)"
+            autoFocus
+          />
         )}
 
         {/* Search */}

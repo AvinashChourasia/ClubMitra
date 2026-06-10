@@ -3,12 +3,13 @@
 // wall — identity is asked for later, at the moment they try to act.
 
 import { useEffect, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 
 import { publicCities, setGuestCity, markWelcomeSeen, type CityCount } from "../lib/discover";
+import { CityAutocomplete } from "../components/CityAutocomplete";
 import { Tap } from "../components/Tap";
 import { Button } from "../components/Button";
 import { GradientCard } from "../components/GradientCard";
@@ -45,11 +46,12 @@ export default function Welcome() {
     }
   }
 
+  // Into the real app shell (all five tabs render guest variants).
   async function explore() {
     const chosen = city.trim();
     if (chosen) await setGuestCity(chosen);
     await markWelcomeSeen();
-    router.replace("/explore");
+    router.replace("/home");
   }
 
   async function toLogin() {
@@ -73,17 +75,8 @@ export default function Welcome() {
 
         {/* City */}
         <View style={{ gap: 10 }}>
-          <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-            <View style={{ flex: 1 }}>
-              <TextInput
-                style={styles.input}
-                placeholder="Your city (e.g. Pune)"
-                placeholderTextColor={colors.muted}
-                autoCapitalize="words"
-                value={city}
-                onChangeText={setCity}
-              />
-            </View>
+          <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+            <CityAutocomplete value={city} onChange={setCity} style={{ flex: 1 }} />
             <Tap onPress={detect} haptic={false} style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
               {detecting ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="locate" size={20} color={colors.primary} />}
             </Tap>

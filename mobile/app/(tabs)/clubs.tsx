@@ -3,7 +3,7 @@
 
 import { useCallback, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Redirect, useFocusEffect, useRouter, type Href } from "expo-router";
+import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +14,7 @@ import { colors, styles, useThemeMode } from "../../lib/theme";
 import { Avatar } from "../../components/Avatar";
 import { Tap } from "../../components/Tap";
 import { Button } from "../../components/Button";
+import { GuestClubs } from "../../components/GuestScreens";
 
 function CountPill({ icon, value, label }: { icon: keyof typeof Ionicons.glyphMap; value: number; label: string }) {
   return (
@@ -72,7 +73,7 @@ export default function Clubs() {
     setRefreshing(false);
   }
 
-  if (!user) return <Redirect href="/login" />;
+  if (!user) return <GuestClubs />;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>

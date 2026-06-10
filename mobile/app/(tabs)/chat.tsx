@@ -4,7 +4,7 @@
 
 import { useCallback, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -13,6 +13,7 @@ import { inbox, type InboxItem } from "../../lib/messaging";
 import { Avatar } from "../../components/Avatar";
 import { Tap } from "../../components/Tap";
 import { colors, useThemeMode } from "../../lib/theme";
+import { GuestChat } from "../../components/GuestScreens";
 
 // Short, WhatsApp-ish timestamp: time if today, else a day/month.
 function when(iso?: string | null): string {
@@ -69,7 +70,7 @@ export default function Chat() {
     else if (it.kind === "direct" && it.user_id) router.push(`/thread/dm/${it.user_id}`);
   }
 
-  if (!user) return <Redirect href="/login" />;
+  if (!user) return <GuestChat />;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>

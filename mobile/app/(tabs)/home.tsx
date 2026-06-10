@@ -3,7 +3,7 @@
 
 import { useCallback, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -17,6 +17,7 @@ import { Button } from "../../components/Button";
 import { GradientCard } from "../../components/GradientCard";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { formatRunWhen, isPast } from "../../lib/format";
+import { GuestHome } from "../../components/GuestScreens";
 
 function SectionHeader({ title, action }: { title: string; action?: { label: string; onPress: () => void } }) {
   return (
@@ -74,7 +75,7 @@ export default function Home() {
     setRefreshing(false);
   }
 
-  if (!user) return <Redirect href="/login" />;
+  if (!user) return <GuestHome />;
 
   const firstName = user.name.split(" ")[0];
   const nextRun = runs.filter((r) => !isPast(r.scheduled_at)).sort((a, b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at))[0];
