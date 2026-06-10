@@ -20,14 +20,15 @@ var ErrNotFound = errors.New("not found")
 // InboxItem is one row in a user's chat list: a club group or a direct chat,
 // with the last message for a preview. Sorted by recency client-side/service.
 type InboxItem struct {
-	Kind        string     `json:"kind"` // "club" | "direct"
-	ChapterID   *string    `json:"chapter_id,omitempty"`
-	UserID      *string    `json:"user_id,omitempty"` // the other person, for direct
-	Title       string     `json:"title"`
-	PhotoURL    *string    `json:"photo_url,omitempty"`
-	LastMessage *string    `json:"last_message,omitempty"`
-	LastAt      *time.Time `json:"last_at,omitempty"`
-	Unread      int        `json:"unread"`
+	Kind         string     `json:"kind"` // "club" | "direct"
+	ChapterID    *string    `json:"chapter_id,omitempty"`
+	UserID       *string    `json:"user_id,omitempty"` // the other person, for direct
+	Title        string     `json:"title"`
+	PhotoURL     *string    `json:"photo_url,omitempty"`
+	LastMessage  *string    `json:"last_message,omitempty"`
+	LastSenderID *string    `json:"last_sender_id,omitempty"` // who sent it ("You: " prefix client-side)
+	LastAt       *time.Time `json:"last_at,omitempty"`
+	Unread       int        `json:"unread"`
 }
 
 // OtherUser is the counterpart in a direct chat (for the DM screen header).
@@ -244,7 +245,7 @@ func (r *Repository) isDirectMember(ctx context.Context, conversationID uuid.UUI
 // null until someone posts.
 func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem, error) {
 	const q = `
-		SELECT c.id::text, c.name, c.logo, lm.body, lm.media_type, lm.created_at,
+		SELECT c.id::text, c.name, c.logo, lm.body, lm.media_type, lm.sender_id, lm.created_at,
 		       COALESCE((SELECT count(*) FROM messages msg
 		         WHERE msg.conversation_id = conv.id AND msg.deleted_at IS NULL AND msg.sender_id <> $1
 		           AND msg.created_at > COALESCE(
@@ -254,7 +255,7 @@ func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem,
 		JOIN chapter_members m ON m.chapter_id = c.id AND m.user_id = $1 AND m.deleted_at IS NULL
 		LEFT JOIN conversations conv ON conv.chapter_id = c.id AND conv.type = 'chapter'
 		LEFT JOIN LATERAL (
-			SELECT body, media_type, created_at FROM messages
+			SELECT body, media_type, sender_id, created_at FROM messages
 			WHERE conversation_id = conv.id AND deleted_at IS NULL
 			ORDER BY created_at DESC LIMIT 1
 		) lm ON true
@@ -269,7 +270,7 @@ func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem,
 		var it InboxItem
 		var chapterID string
 		var mediaType *string
-		if err := rows.Scan(&chapterID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastAt, &it.Unread); err != nil {
+		if err := rows.Scan(&chapterID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastSenderID, &it.LastAt, &it.Unread); err != nil {
 			return nil, err
 		}
 		it.Kind = "club"
@@ -283,7 +284,7 @@ func (r *Repository) clubInbox(ctx context.Context, userID string) ([]InboxItem,
 // directInbox lists the user's direct chats, titled by the other participant.
 func (r *Repository) directInbox(ctx context.Context, userID string) ([]InboxItem, error) {
 	const q = `
-		SELECT other.id, other.name, other.profile_photo, lm.body, lm.media_type, lm.created_at,
+		SELECT other.id, other.name, other.profile_photo, lm.body, lm.media_type, lm.sender_id, lm.created_at,
 		       COALESCE((SELECT count(*) FROM messages msg
 		         WHERE msg.conversation_id = conv.id AND msg.deleted_at IS NULL AND msg.sender_id <> $1
 		           AND msg.created_at > COALESCE(
@@ -294,7 +295,7 @@ func (r *Repository) directInbox(ctx context.Context, userID string) ([]InboxIte
 		JOIN conversation_members ot ON ot.conversation_id = conv.id AND ot.user_id <> $1
 		JOIN users other ON other.id = ot.user_id
 		LEFT JOIN LATERAL (
-			SELECT body, media_type, created_at FROM messages
+			SELECT body, media_type, sender_id, created_at FROM messages
 			WHERE conversation_id = conv.id AND deleted_at IS NULL
 			ORDER BY created_at DESC LIMIT 1
 		) lm ON true
@@ -309,7 +310,7 @@ func (r *Repository) directInbox(ctx context.Context, userID string) ([]InboxIte
 		var it InboxItem
 		var otherID string
 		var mediaType *string
-		if err := rows.Scan(&otherID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastAt, &it.Unread); err != nil {
+		if err := rows.Scan(&otherID, &it.Title, &it.PhotoURL, &it.LastMessage, &mediaType, &it.LastSenderID, &it.LastAt, &it.Unread); err != nil {
 			return nil, err
 		}
 		it.Kind = "direct"

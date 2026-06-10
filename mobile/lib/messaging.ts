@@ -24,6 +24,7 @@ export type InboxItem = {
   title: string;
   photo_url?: string | null;
   last_message?: string | null;
+  last_sender_id?: string | null; // who sent it — "You: " prefix when it's me
   last_at?: string | null;
   unread: number;
 };

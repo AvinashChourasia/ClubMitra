@@ -83,6 +83,7 @@ export function ChatThread({
   const scrollRef = useRef<ScrollView>(null);
   const countRef = useRef(0);
   const seq = useRef(0);
+  const nearBottom = useRef(true); // is the user at (or near) the latest message?
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [pending, setPending] = useState<Pending[]>([]);
   const [text, setText] = useState("");
@@ -91,16 +92,25 @@ export function ChatThread({
   const [announceMode, setAnnounceMode] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [viewer, setViewer] = useState<string | null>(null);
+  const [showJump, setShowJump] = useState(false); // scroll-to-bottom FAB
+  const [newBelow, setNewBelow] = useState(0); // messages arrived while scrolled up
 
   const scrollEnd = (animated: boolean) => setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 50);
 
+  // Reading history shouldn't be yanked to the bottom by the 4s poll: new
+  // messages only autoscroll when the user is already near the bottom —
+  // otherwise the jump FAB shows how many are waiting (WhatsApp behaviour).
   const reload = useCallback(
     async (forceScroll: boolean) => {
       const msgs = await load();
-      const grew = msgs.length > countRef.current;
+      const grewBy = Math.max(0, msgs.length - countRef.current);
       countRef.current = msgs.length;
       setMessages(msgs);
-      if (forceScroll || grew) scrollEnd(forceScroll);
+      if (forceScroll || (grewBy > 0 && nearBottom.current)) {
+        scrollEnd(forceScroll);
+      } else if (grewBy > 0) {
+        setNewBelow((n) => n + grewBy);
+      }
     },
     [load]
   );
@@ -311,6 +321,15 @@ export function ChatThread({
             contentContainerStyle={{ padding: 12, gap: 2 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             keyboardShouldPersistTaps="handled"
+            onScroll={(e) => {
+              const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+              const fromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+              const near = fromBottom < 140;
+              nearBottom.current = near;
+              setShowJump(!near);
+              if (near) setNewBelow(0);
+            }}
+            scrollEventThrottle={100}
           >
             {messages.length === 0 && pending.length === 0 ? (
               <View style={{ alignItems: "center", paddingVertical: 44 }}>
@@ -364,6 +383,43 @@ export function ChatThread({
               </View>
             ))}
           </ScrollView>
+        )}
+
+        {/* Jump to latest — appears when scrolled up; badges messages that
+            arrived in the meantime. */}
+        {showJump && messages !== null && (
+          <Pressable
+            onPress={() => {
+              setNewBelow(0);
+              scrollEnd(true);
+            }}
+            style={{
+              position: "absolute",
+              right: 14,
+              bottom: 86,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: colors.bg,
+              borderWidth: 1,
+              borderColor: colors.border,
+              alignItems: "center",
+              justifyContent: "center",
+              shadowColor: "#0B1220",
+              shadowOpacity: 0.15,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 3 },
+              elevation: 4,
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name="chevron-down" size={22} color={colors.text} />
+            {newBelow > 0 && (
+              <View style={{ position: "absolute", top: -6, right: -6, backgroundColor: colors.success, borderRadius: 10, minWidth: 20, height: 20, paddingHorizontal: 5, alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>{newBelow > 99 ? "99+" : newBelow}</Text>
+              </View>
+            )}
+          </Pressable>
         )}
 
         {/* Staged attachment preview */}
