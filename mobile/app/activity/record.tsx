@@ -10,6 +10,7 @@ import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Switch, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Constants from "expo-constants";
 
 import { useAuth } from "../../lib/auth";
 import { useRunRecorder } from "../../lib/useRunRecorder";
@@ -17,7 +18,13 @@ import { enqueue, flush } from "../../lib/runQueue";
 import { formatDistance, formatDuration, formatPace, formatSpeed } from "../../lib/format";
 import { StatCard, StatRow } from "../../components/StatCard";
 import { RouteTrace } from "../../components/RouteTrace";
+import type { LatLng } from "../../lib/activities";
 import { colors } from "../../lib/theme";
+
+// Native map only in a dev/standalone build; Expo Go uses the SVG trace.
+const isExpoGo = Constants.appOwnership === "expo";
+const RunMap: React.ComponentType<{ coords: LatLng[]; times?: number[]; height?: number; live?: boolean }> | null =
+  isExpoGo ? null : require("../../components/RunMap").RunMap;
 
 export default function RecordRun() {
   const { getAccessToken } = useAuth();
@@ -114,8 +121,13 @@ export default function RecordRun() {
           <StatCard label="Speed" value={formatSpeed(distanceM, elapsedS)} />
         </StatRow>
 
-        {/* Live route trace (grows as you run), coloured by pace */}
-        {recording && <RouteTrace coords={route} times={times} height={180} live />}
+        {/* Live route — follow-me map in a dev build, SVG trace in Expo Go */}
+        {recording &&
+          (RunMap ? (
+            <RunMap coords={route} times={times} height={200} live />
+          ) : (
+            <RouteTrace coords={route} times={times} height={180} live />
+          ))}
 
         {/* Controls */}
         <View style={{ gap: 12 }}>

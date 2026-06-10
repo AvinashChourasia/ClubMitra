@@ -3,7 +3,7 @@
 // the id. We fetch the run + its route GeoJSON, draw the route as an SVG trace
 // (no map tiles / API key), and show the full stat breakdown.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,8 +26,15 @@ import { ElevationChart } from "../../components/ElevationChart";
 // in (and render the interactive map) in a dev/standalone build. Expo Go gets
 // the SVG RouteTrace fallback — which still draws the pace-coloured route.
 const isExpoGo = Constants.appOwnership === "expo";
-const RunMap: React.ComponentType<{ coords: LatLng[]; times?: number[]; height?: number }> | null =
-  isExpoGo ? null : require("../../components/RunMap").RunMap;
+const RunMap:
+  | React.ComponentType<{
+      coords: LatLng[];
+      times?: number[];
+      height?: number;
+      selectedKm?: number | null;
+      onSelectKm?: (km: number | null) => void;
+    }>
+  | null = isExpoGo ? null : require("../../components/RunMap").RunMap;
 import {
   formatDistance,
   formatDuration,
@@ -36,6 +43,8 @@ import {
   formatElevation,
 } from "../../lib/format";
 import { StatCard, StatRow } from "../../components/StatCard";
+import { Splits } from "../../components/Splits";
+import { computeSplits } from "../../lib/pace";
 import { colors } from "../../lib/theme";
 
 export default function ActivityDetail() {
@@ -48,6 +57,9 @@ export default function ActivityDetail() {
   const [elevation, setElevation] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedKm, setSelectedKm] = useState<number | null>(null);
+
+  const splits = useMemo(() => computeSplits(route, times), [route, times]);
 
   useEffect(() => {
     let active = true;
@@ -93,7 +105,7 @@ export default function ActivityDetail() {
         <ScrollView contentContainerStyle={{ gap: 16, padding: 16 }}>
           {/* Interactive native map in a dev build; SVG trace fallback in Expo Go */}
           {RunMap ? (
-            <RunMap coords={route} times={times} height={260} />
+            <RunMap coords={route} times={times} height={260} selectedKm={selectedKm} onSelectKm={setSelectedKm} />
           ) : (
             <RouteTrace coords={route} times={times} height={260} />
           )}
@@ -127,6 +139,9 @@ export default function ActivityDetail() {
               valueColor={colors.success}
             />
           </StatRow>
+
+          {/* Per-km splits — tapping a row flies the map to that kilometre */}
+          <Splits splits={splits} selectedKm={selectedKm} onSelect={setSelectedKm} />
 
           {/* Elevation profile */}
           <View style={{ gap: 8 }}>

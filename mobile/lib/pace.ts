@@ -81,3 +81,41 @@ function mix(a: number[], b: number[], t: number): number[] {
 function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n;
 }
+
+// A per-kilometre split: its index, the time it took, the pace, and the map
+// position where the kilometre completed (for a split marker).
+export type Split = {
+  km: number;          // 1, 2, 3, …
+  durationS: number;   // seconds for this kilometre
+  paceSPerKm: number;  // = durationS (a split is exactly 1 km)
+  coord: LatLng;       // where the km boundary fell
+};
+
+// computeSplits walks the route accumulating geodesic distance and, at every
+// whole-kilometre boundary, interpolates the boundary's time + position to
+// produce a clean per-km split. Needs per-vertex times (ms); returns [] without
+// them. The trailing partial kilometre is intentionally omitted.
+export function computeSplits(coords: LatLng[], times?: number[]): Split[] {
+  if (!times || times.length !== coords.length || coords.length < 2) return [];
+  const out: Split[] = [];
+  let acc = 0;
+  let nextKm = 1;
+  let prevBoundaryMs = times[0];
+  for (let i = 1; i < coords.length; i++) {
+    const seg = haversine(coords[i - 1], coords[i]);
+    while (seg > 0 && acc + seg >= nextKm * 1000) {
+      const frac = (nextKm * 1000 - acc) / seg; // fraction along this segment
+      const boundaryMs = times[i - 1] + (times[i] - times[i - 1]) * frac;
+      const coord: LatLng = {
+        latitude: coords[i - 1].latitude + (coords[i].latitude - coords[i - 1].latitude) * frac,
+        longitude: coords[i - 1].longitude + (coords[i].longitude - coords[i - 1].longitude) * frac,
+      };
+      const durationS = (boundaryMs - prevBoundaryMs) / 1000;
+      out.push({ km: nextKm, durationS, paceSPerKm: durationS, coord });
+      prevBoundaryMs = boundaryMs;
+      nextKm++;
+    }
+    acc += seg;
+  }
+  return out;
+}
