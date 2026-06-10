@@ -32,6 +32,7 @@ export type Palette = {
   danger: string;
   bubbleMine: string;     // own chat bubble background
   bubbleMineText: string; // text/foreground on your own bubble
+  chatBg: string;         // the conversation "wallpaper" behind bubbles
 };
 
 const light: Palette = {
@@ -52,8 +53,9 @@ const light: Palette = {
   bgSecondary: "#F4F5F7",
   fieldBg: "#F1F5F9",
   danger: "#E11D2E",
-  bubbleMine: "#1F2937",
-  bubbleMineText: "#FFFFFF",
+  bubbleMine: "#D9FDD3",
+  bubbleMineText: "#0B1220",
+  chatBg: "#EFEAE2",
 };
 
 const dark: Palette = {
@@ -74,8 +76,9 @@ const dark: Palette = {
   bgSecondary: "#0B1018", // app background
   fieldBg: "#1B2433",
   danger: "#F43F5E",
-  bubbleMine: "#E2E8F0",
-  bubbleMineText: "#0F172A",
+  bubbleMine: "#005C4B",
+  bubbleMineText: "#FFFFFF",
+  chatBg: "#0B141A",
 };
 
 // Theme-independent tokens.

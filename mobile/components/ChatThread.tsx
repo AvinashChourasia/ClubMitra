@@ -15,6 +15,7 @@ import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   Image,
   KeyboardAvoidingView,
@@ -38,7 +39,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { ApiError } from "../lib/api";
-import { type Message, type OutMsg } from "../lib/messaging";
+import { inbox, postChapter, postDirect, type InboxItem, type Message, type OutMsg } from "../lib/messaging";
 import { ensureConnected, subscribe, sendTyping, isLive, type RTEvent } from "../lib/realtime";
 import { Avatar } from "./Avatar";
 import { colors, styles } from "../lib/theme";
@@ -108,6 +109,12 @@ export function ChatThread({
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [actionFor, setActionFor] = useState<Message | null>(null);
+  const [forwardFor, setForwardFor] = useState<Message | null>(null);
+  const [forwardTargets, setForwardTargets] = useState<InboxItem[] | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const overlayAnim = useRef(new Animated.Value(0)).current;
+  const rowYs = useRef<Record<string, number>>({});
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
   const [announceMode, setAnnounceMode] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -308,8 +315,54 @@ export function ChatThread({
   }
 
   function openActions(m: Message) {
-    Haptics.selectionAsync().catch(() => {});
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setActionFor(m);
+    overlayAnim.setValue(0);
+    Animated.spring(overlayAnim, { toValue: 1, useNativeDriver: true, speed: 24, bounciness: 7 }).start();
+  }
+
+  // jumpToMessage scrolls to a quoted original and flashes it (tap the quote).
+  function jumpToMessage(id: string) {
+    const y = rowYs.current[id];
+    if (y === undefined) return;
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - 90), animated: true });
+    setHighlightId(id);
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlightId(null), 1300);
+  }
+
+  // openForward: pick a conversation to forward this message to.
+  async function openForward(m: Message) {
+    setActionFor(null);
+    setForwardFor(m);
+    setForwardTargets(null);
+    try {
+      const token = getToken ? await getToken() : null;
+      if (!token) return;
+      setForwardTargets((await inbox(token)).filter((c) => !c.archived));
+    } catch {
+      setForwardTargets([]);
+    }
+  }
+
+  async function doForward(target: InboxItem) {
+    const m = forwardFor;
+    setForwardFor(null);
+    if (!m || !getToken) return;
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const out: OutMsg = {
+        body: m.body ?? undefined,
+        media_url: m.media_url ?? undefined,
+        media_type: m.media_type ?? undefined,
+      };
+      if (target.kind === "club" && target.chapter_id) await postChapter(token, target.chapter_id, out);
+      else if (target.kind === "direct" && target.user_id) await postDirect(token, target.user_id, out);
+      Alert.alert("Forwarded ✓", `Sent to ${target.title}.`);
+    } catch (e) {
+      Alert.alert("Couldn't forward", e instanceof ApiError ? e.message : "Something went wrong");
+    }
   }
 
   function doDelete(m: Message) {
@@ -329,8 +382,9 @@ export function ChatThread({
       mediaType?: string | null;
       kind?: string;
       name?: string;
-      replyTo?: { sender_name: string; preview: string } | null;
+      replyTo?: { id?: string; sender_name: string; preview: string } | null;
       edited?: boolean;
+      onQuotePress?: () => void;
     },
     time: string,
     status?: "sent" | "read" | "sending" | "failed"
@@ -341,7 +395,7 @@ export function ChatThread({
     const fg = mine ? colors.bubbleMineText : colors.text;
     const footFg = mine ? colors.bubbleMineText + "B3" : colors.muted; // ~70% alpha
     const icon: Record<string, { name: keyof typeof Ionicons.glyphMap; color: string }> = {
-      read: { name: "checkmark-done", color: colors.success },
+      read: { name: "checkmark-done", color: "#38BDF8" },
       sent: { name: "checkmark", color: footFg },
       sending: { name: "time-outline", color: footFg },
       failed: { name: "alert-circle", color: colors.danger },
@@ -362,9 +416,11 @@ export function ChatThread({
           shadowOffset: { width: 0, height: 1 },
         }}
       >
-        {/* Quoted message (reply) */}
+        {/* Quoted message (reply) — tap to jump to the original */}
         {opts.replyTo && (
-          <View
+          <Pressable
+            onPress={opts.onQuotePress}
+            disabled={!opts.onQuotePress}
             style={{
               borderLeftWidth: 3,
               borderLeftColor: mine ? colors.bubbleMineText + "99" : colors.primary,
@@ -380,7 +436,7 @@ export function ChatThread({
               {opts.replyTo.sender_name}
             </Text>
             <Text style={{ color: footFg, fontSize: 12 }} numberOfLines={1}>{opts.replyTo.preview}</Text>
-          </View>
+          </Pressable>
         )}
         {isImage ? (
           <Pressable onPress={() => opts.mediaUrl && setViewer(opts.mediaUrl)}>
@@ -432,10 +488,13 @@ export function ChatThread({
         </View>
 
         {messages === null ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+          <View style={{ flex: 1, backgroundColor: colors.chatBg }}>
+            <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+          </View>
         ) : (
           <ScrollView
             ref={scrollRef}
+            style={{ backgroundColor: colors.chatBg }}
             contentContainerStyle={{ padding: 12, gap: 2 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             keyboardShouldPersistTaps="handled"
@@ -463,7 +522,13 @@ export function ChatThread({
                 const read = isDirect && mine && !!otherLastReadAt && new Date(m.created_at).getTime() <= new Date(otherLastReadAt).getTime();
                 const hasReactions = !!m.reactions?.length;
                 return (
-                  <View key={m.id}>
+                  <View
+                    key={m.id}
+                    onLayout={(e) => {
+                      rowYs.current[m.id] = e.nativeEvent.layout.y;
+                    }}
+                    style={highlightId === m.id ? { backgroundColor: colors.accent + "26", borderRadius: 14 } : undefined}
+                  >
                     {showDate && (
                       <View style={{ alignItems: "center", marginVertical: 10 }}>
                         <Text style={{ backgroundColor: colors.bg, color: colors.muted, fontSize: 11, fontWeight: "700", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: colors.border }}>{dayLabel(m.created_at)}</Text>
@@ -508,7 +573,14 @@ export function ChatThread({
                         <Pressable onLongPress={() => openActions(m)} delayLongPress={250}>
                           {bubble(
                             mine,
-                            { body: m.body, mediaUrl: m.media_url, mediaType: m.media_type, replyTo: m.reply_to, edited: !!m.edited_at },
+                            {
+                              body: m.body,
+                              mediaUrl: m.media_url,
+                              mediaType: m.media_type,
+                              replyTo: m.reply_to,
+                              edited: !!m.edited_at,
+                              onQuotePress: m.reply_to ? () => jumpToMessage(m.reply_to!.id) : undefined,
+                            },
                             timeOf(m.created_at),
                             mine ? (read ? "read" : "sent") : undefined
                           )}
@@ -667,53 +739,133 @@ export function ChatThread({
         </View>
       </KeyboardAvoidingView>
 
-      {/* Message action sheet — react / reply / copy / delete */}
+      {/* Long-press overlay — WhatsApp style: dim the room, float the emoji bar
+          above the focused message, and hang the action menu below it. */}
       {actionFor && (
-        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
-          <Pressable onPress={() => setActionFor(null)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
-          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 34, gap: 4 }}>
-            <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 10 }} />
-            {/* What you're acting on */}
-            <View style={{ backgroundColor: colors.bgSecondary, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 }}>
-              <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800" }}>{actionFor.sender_id === meId ? "You" : actionFor.sender_name}</Text>
-              <Text style={{ color: colors.text, fontSize: 13 }} numberOfLines={2}>
-                {actionFor.body ?? (actionFor.media_type === "image" ? "📷 Photo" : "📎 File")}
-              </Text>
-            </View>
-            {/* Quick reactions */}
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "center", paddingHorizontal: 20 }}>
+          <Pressable onPress={() => setActionFor(null)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(8,12,20,0.6)" }} />
+          <Animated.View
+            style={{
+              alignItems: actionFor.sender_id === meId ? "flex-end" : "flex-start",
+              gap: 10,
+              opacity: overlayAnim,
+              transform: [{ scale: overlayAnim.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] }) }],
+            }}
+          >
+            {/* Emoji pill */}
             {react && (
-              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 6, paddingBottom: 12 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  gap: 4,
+                  backgroundColor: colors.bg,
+                  borderRadius: 999,
+                  paddingHorizontal: 8,
+                  paddingVertical: 6,
+                  shadowColor: "#000",
+                  shadowOpacity: 0.25,
+                  shadowRadius: 12,
+                  shadowOffset: { width: 0, height: 4 },
+                  elevation: 8,
+                }}
+              >
                 {REACTIONS.map((e) => {
                   const minePicked = actionFor.reactions?.some((r) => r.mine && r.emoji === e);
                   return (
                     <Pressable
                       key={e}
-                      onPress={() => toggleReaction(actionFor, e)}
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        void toggleReaction(actionFor, e);
+                      }}
                       style={{
-                        width: 46,
-                        height: 46,
-                        borderRadius: 23,
-                        backgroundColor: colors.bgSecondary,
-                        borderWidth: minePicked ? 1.5 : 0,
-                        borderColor: colors.accent,
+                        width: 40,
+                        height: 40,
+                        borderRadius: 20,
+                        backgroundColor: minePicked ? colors.bgSecondary : "transparent",
                         alignItems: "center",
                         justifyContent: "center",
                       }}
                     >
-                      <Text style={{ fontSize: 22 }}>{e}</Text>
+                      <Text style={{ fontSize: 24 }}>{e}</Text>
                     </Pressable>
                   );
                 })}
               </View>
             )}
-            <SheetRow icon="arrow-undo" label="Reply" onPress={() => { setReplyTo(actionFor); setActionFor(null); }} />
-            {actionFor.sender_id === meId && actionFor.body && edit ? (
-              <SheetRow icon="pencil" label="Edit" onPress={() => startEdit(actionFor)} />
-            ) : null}
-            {actionFor.body ? <SheetRow icon="copy" label="Copy" onPress={() => doCopy(actionFor)} /> : null}
-            {actionFor.sender_id === meId && deleteMessage ? (
-              <SheetRow icon="trash" label="Delete for everyone" danger onPress={() => doDelete(actionFor)} />
-            ) : null}
+
+            {/* The focused message */}
+            <View pointerEvents="none" style={{ maxWidth: "82%" }}>
+              {bubble(
+                actionFor.sender_id === meId,
+                {
+                  body: actionFor.body,
+                  mediaUrl: actionFor.media_url,
+                  mediaType: actionFor.media_type,
+                  replyTo: actionFor.reply_to,
+                  edited: !!actionFor.edited_at,
+                },
+                timeOf(actionFor.created_at)
+              )}
+            </View>
+
+            {/* Action menu — labels left, icons right (the WhatsApp menu) */}
+            <View
+              style={{
+                backgroundColor: colors.bg,
+                borderRadius: 16,
+                width: 232,
+                paddingVertical: 4,
+                shadowColor: "#000",
+                shadowOpacity: 0.25,
+                shadowRadius: 14,
+                shadowOffset: { width: 0, height: 6 },
+                elevation: 8,
+              }}
+            >
+              <MenuRow label="Reply" icon="arrow-undo" onPress={() => { setReplyTo(actionFor); setActionFor(null); }} />
+              {getToken ? <MenuRow label="Forward" icon="arrow-redo" onPress={() => void openForward(actionFor)} /> : null}
+              {actionFor.body ? <MenuRow label="Copy" icon="copy-outline" onPress={() => doCopy(actionFor)} /> : null}
+              {actionFor.sender_id === meId && actionFor.body && edit ? (
+                <MenuRow label="Edit" icon="pencil" onPress={() => startEdit(actionFor)} />
+              ) : null}
+              {actionFor.sender_id === meId && deleteMessage ? (
+                <MenuRow label="Delete" icon="trash-outline" danger last onPress={() => doDelete(actionFor)} />
+              ) : null}
+            </View>
+          </Animated.View>
+        </View>
+      )}
+
+      {/* Forward picker — choose a conversation */}
+      {forwardFor && (
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
+          <Pressable onPress={() => setForwardFor(null)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
+          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 30, maxHeight: 420 }}>
+            <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 10 }} />
+            <Text style={{ color: colors.text, fontWeight: "800", fontSize: 17, marginBottom: 10 }}>Forward to…</Text>
+            {forwardTargets === null ? (
+              <ActivityIndicator color={colors.primary} style={{ marginVertical: 20 }} />
+            ) : forwardTargets.length === 0 ? (
+              <Text style={{ color: colors.muted, paddingVertical: 16 }}>No conversations yet.</Text>
+            ) : (
+              <ScrollView style={{ maxHeight: 320 }}>
+                {forwardTargets.map((t) => (
+                  <Pressable
+                    key={`${t.kind}-${t.chapter_id ?? t.user_id}`}
+                    onPress={() => void doForward(t)}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11 }}
+                  >
+                    <Avatar name={t.title} uri={t.photo_url} size={42} bg={t.kind === "club" ? colors.primary : colors.accent} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.text, fontWeight: "700", fontSize: 15 }} numberOfLines={1}>{t.title}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>{t.kind === "club" ? "Club group" : "Direct message"}</Text>
+                    </View>
+                    <Ionicons name="send" size={17} color={colors.primary} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
           </View>
         </View>
       )}
@@ -756,14 +908,23 @@ export function ChatThread({
   );
 }
 
-// SheetRow: one action in the long-press sheet.
-function SheetRow({ icon, label, onPress, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {
+// MenuRow: one row of the WhatsApp-style action menu — label left, icon right.
+function MenuRow({ icon, label, onPress, danger, last }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean; last?: boolean }) {
   return (
-    <Pressable onPress={onPress} style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 13 }}>
-      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: danger ? "#FEE2E2" : colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
-        <Ionicons name={icon} size={19} color={danger ? colors.danger : colors.text} />
-      </View>
-      <Text style={{ color: danger ? colors.danger : colors.text, fontSize: 16, fontWeight: "600" }}>{label}</Text>
+    <Pressable
+      onPress={onPress}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: last ? 0 : 1,
+        borderBottomColor: colors.border,
+      }}
+    >
+      <Text style={{ color: danger ? colors.danger : colors.text, fontSize: 15, fontWeight: "600" }}>{label}</Text>
+      <Ionicons name={icon} size={18} color={danger ? colors.danger : colors.muted} />
     </Pressable>
   );
 }
