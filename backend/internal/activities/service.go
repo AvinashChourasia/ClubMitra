@@ -137,3 +137,42 @@ func (s *Service) Stats(ctx context.Context, userID string) (*Stats, error) {
 func (s *Service) RouteWithMeta(ctx context.Context, userID string, id uuid.UUID) (string, []float64, error) {
 	return s.repo.RouteWithMeta(ctx, userID, id)
 }
+
+// CityLeaderboard ranks GPS-verified runners in a city over a rolling window
+// (week | month | all). An empty city defaults to the requester's own city; a
+// runner with no city set gets an empty board rather than an error.
+func (s *Service) CityLeaderboard(ctx context.Context, userID, city, period string) (*CityBoardView, error) {
+	if city == "" {
+		c, err := s.repo.UserCity(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		city = c
+	}
+	if period != "week" && period != "month" && period != "all" {
+		period = "week"
+	}
+	view := &CityBoardView{City: city, Period: period, Entries: []CityBoardEntry{}}
+	if city == "" {
+		return view, nil // no city → nothing to rank
+	}
+	entries, err := s.repo.CityBoardEntries(ctx, city, cityPeriodFrom(period, time.Now()))
+	if err != nil {
+		return nil, err
+	}
+	view.Entries = entries
+	return view, nil
+}
+
+// cityPeriodFrom maps a period to the rolling-window start. "all" returns the
+// zero time so every activity qualifies.
+func cityPeriodFrom(period string, now time.Time) time.Time {
+	switch period {
+	case "week":
+		return now.AddDate(0, 0, -7)
+	case "month":
+		return now.AddDate(0, 0, -30)
+	default:
+		return time.Time{}
+	}
+}

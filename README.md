@@ -35,7 +35,7 @@ replaces that stack with:
 | Cache / Leaderboard | Redis (Upstash) | Real-time challenge + rolling leaderboards |
 | Payments (India) | Razorpay + Razorpay Route | INR collections + automatic platform split (Phase 3) |
 | Payments (Global) | Stripe + Stripe Connect | EUR/USD collections + automatic platform split (Phase 3) |
-| File Storage | Cloudinary | Profile photos, club logos, finisher certs, GPX previews |
+| File Storage | Cloudinary | Profile photos, club logos, GPX previews |
 | Push Notifications | Expo Notifications | Run reminders, challenge updates, fee alerts, rank changes |
 | Deployment | Render (API) + Neon (DB) + Upstash (Redis) | Low cost, scalable |
 
@@ -315,21 +315,24 @@ clubmitra/
 
 ### Phase 4 — GPS Tracking + Race Calendar `(Month 4)`
 
-- [ ] GPS run recording: live route, distance, pace, elevation
-- [ ] Offline run recording with auto-sync
-- [ ] Server-side stats via PostGIS (geodesic distance, elevation gain)
-- [ ] Route map + elevation chart per activity
-- [ ] Run history with weekly summary
+- [x] GPS run recording: live route, distance, pace, elevation
+- [x] Offline run recording with auto-sync
+- [x] Server-side stats via PostGIS (geodesic distance, elevation gain)
+- [x] Interactive map (Apple Maps) — dark style, satellite toggle, recenter
+- [x] Pace-coloured route + per-km split markers + tappable splits
+- [x] Route map + elevation chart per activity
+- [x] Animated route replay (retrace the run)
+- [x] Auto-pause detection (moving vs elapsed time)
+- [x] Run history + all-time stats (runs, distance, time, streak)
 - [ ] GPX file import from any GPS device (Garmin, Polar, Suunto)
-- [ ] Runs auto-credit to active challenges (replaces manual Strava proof)
-- [ ] Runs auto-credit to rolling leaderboards
+- [x] Runs auto-credit to active challenges (replaces manual Strava proof)
+- [x] Runs auto-credit to rolling leaderboards
 - [ ] Trust score update on GPS-verified activity (highest trust tier)
-- [ ] Personal stats: total km, streak, personal records
+- [x] Personal stats: total km, streak, personal records
 - [ ] Activity feed per chapter
 - [ ] Streak freeze: 2 per month to protect streaks during planned rest
-- [ ] Background GPS (requires EAS dev build)
-- [ ] Finisher certificate generation (Cloudinary PDF)
-- [ ] City leaderboard: all verified runners in a city ranked collectively
+- [x] Background GPS (requires EAS dev build)
+- [x] City leaderboard: all verified runners in a city ranked collectively
 - [ ] Race calendar: discover races by type, city, distance
 - [ ] Race calendar map view (interactive, search by location)
 - [ ] Similar races list / race recommendations
@@ -621,7 +624,7 @@ PLATFORM_CUT_PCT=10
 | 1 | Club core — members, attendance, challenges | Month 1 ✅ |
 | 2 | Trust score, rolling leaderboards, analytics, inventory, messaging | Month 2 ✅ |
 | 3 | Payments (Razorpay + Stripe), GPX, desktop admin, paid inventory | Month 3 |
-| 4 | GPS tracking, race calendar, finisher certificates, city leaderboard | Month 4 🚧 |
+| 4 | GPS tracking, interactive maps, race calendar, city leaderboard | Month 4 🚧 |
 | 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 |
 | 6+ | Europe launch, leagues, coaches, physical events, white-label | Month 7+ |
 

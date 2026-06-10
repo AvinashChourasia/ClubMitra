@@ -31,8 +31,9 @@ func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Post("/", h.create)
 	r.Get("/", h.list)
-	// Static routes before the {id} param so "stats" isn't parsed as an id.
+	// Static routes before the {id} param so they aren't parsed as an id.
 	r.Get("/stats", h.stats)
+	r.Get("/city-leaderboard", h.cityLeaderboard)
 	// chi captures the {id} path segment; read it with chi.URLParam.
 	r.Get("/{id}", h.get)
 	r.Get("/{id}/geojson", h.geojson)
@@ -144,6 +145,24 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, s)
+}
+
+// cityLeaderboard ranks GPS-verified runners in a city. ?period=week|month|all
+// (default week); ?city= overrides the requester's own city.
+func (h *Handler) cityLeaderboard(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	period := r.URL.Query().Get("period")
+	city := r.URL.Query().Get("city")
+	view, err := h.svc.CityLeaderboard(r.Context(), userID, city, period)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, view)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

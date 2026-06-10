@@ -66,6 +66,33 @@ export function getActivity(token: string, id: string): Promise<Activity> {
   return request<Activity>(`/activities/${id}`, { token });
 }
 
+// One row of the city leaderboard — a runner ranked by GPS-verified distance.
+export type CityBoardEntry = {
+  rank: number;
+  user_id: string;
+  display_name: string;
+  profile_photo: string | null;
+  distance_m: number;
+  runs: number;
+};
+
+export type CityPeriod = "week" | "month" | "all";
+
+// The city leaderboard response: the ranked rows plus the city/period they're for.
+export type CityBoardView = {
+  city: string;
+  period: CityPeriod;
+  entries: CityBoardEntry[];
+};
+
+// cityLeaderboard ranks GPS-verified runners in a city over a rolling window.
+// Omit city to default to the signed-in user's own city (resolved server-side).
+export function cityLeaderboard(token: string, period: CityPeriod, city?: string): Promise<CityBoardView> {
+  const q = new URLSearchParams({ period });
+  if (city) q.set("city", city);
+  return request<CityBoardView>(`/activities/city-leaderboard?${q.toString()}`, { token });
+}
+
 // A GeoJSON LineString geometry, as PostGIS/our API returns it. Coordinates are
 // [longitude, latitude] or [longitude, latitude, altitude] (we store 3D routes,
 // but older runs may be 2D — altitude is optional).

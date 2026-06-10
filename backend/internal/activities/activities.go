@@ -181,6 +181,71 @@ func (r *Repository) RouteWithMeta(ctx context.Context, userID string, id uuid.U
 	return geojson, offsets, nil
 }
 
+// CityBoardEntry is one row of the city leaderboard — a runner ranked by total
+// GPS-verified distance in the window.
+type CityBoardEntry struct {
+	Rank         int     `json:"rank"`
+	UserID       string  `json:"user_id"`
+	DisplayName  string  `json:"display_name"`
+	ProfilePhoto *string `json:"profile_photo"`
+	DistanceM    float64 `json:"distance_m"`
+	Runs         int     `json:"runs"`
+}
+
+// CityBoardView wraps the ranked rows with the city + period they're for, so the
+// client can label the screen without guessing.
+type CityBoardView struct {
+	City    string           `json:"city"`
+	Period  string           `json:"period"`
+	Entries []CityBoardEntry `json:"entries"`
+}
+
+// UserCity returns a user's city (empty string if unset). Used to default the
+// city leaderboard to the requester's own city.
+func (r *Repository) UserCity(ctx context.Context, userID string) (string, error) {
+	var city *string
+	if err := r.db.QueryRow(ctx, `SELECT city FROM users WHERE id = $1`, userID).Scan(&city); err != nil {
+		return "", err
+	}
+	if city == nil {
+		return "", nil
+	}
+	return *city, nil
+}
+
+// CityBoardEntries ranks every runner in a city by total GPS distance since
+// `from`. Only the activities table feeds this (so it's truly verified), joined
+// to users for the city + display fields. Case-insensitive city match.
+func (r *Repository) CityBoardEntries(ctx context.Context, city string, from time.Time) ([]CityBoardEntry, error) {
+	const q = `
+		SELECT a.user_id, u.name, u.profile_photo,
+		       SUM(a.distance_m)::float8 AS dist, COUNT(*)::int AS runs
+		FROM activities a
+		JOIN users u ON u.id = a.user_id
+		WHERE u.city IS NOT NULL AND lower(u.city) = lower($1)
+		  AND a.started_at >= $2
+		GROUP BY a.user_id, u.name, u.profile_photo
+		ORDER BY dist DESC, runs DESC
+		LIMIT 100`
+	rows, err := r.db.Query(ctx, q, city, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]CityBoardEntry, 0)
+	rank := 0
+	for rows.Next() {
+		rank++
+		e := CityBoardEntry{Rank: rank}
+		if err := rows.Scan(&e.UserID, &e.DisplayName, &e.ProfilePhoto, &e.DistanceM, &e.Runs); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // Stats holds aggregate numbers for the profile/home dashboard. Pointers are
 // used where "no runs yet" should be null rather than a misleading 0 (e.g.
 // best pace).
