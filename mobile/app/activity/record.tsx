@@ -7,7 +7,7 @@
 // StatCard owns the tile look. The screen just wires them together.
 
 import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, Switch, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Constants from "expo-constants";
@@ -21,10 +21,12 @@ import { RouteTrace } from "../../components/RouteTrace";
 import type { LatLng } from "../../lib/activities";
 import { colors } from "../../lib/theme";
 
-// Native map only in a dev/standalone build; Expo Go uses the SVG trace.
+// Native map only on iOS builds (Apple Maps — free, no key); Expo Go and
+// Android use the SVG trace (Google Maps would need an API key + billing).
 const isExpoGo = Constants.appOwnership === "expo";
+const nativeMapAvailable = !isExpoGo && Platform.OS === "ios";
 const RunMap: React.ComponentType<{ coords: LatLng[]; times?: number[]; height?: number; live?: boolean }> | null =
-  isExpoGo ? null : require("../../components/RunMap").RunMap;
+  nativeMapAvailable ? require("../../components/RunMap").RunMap : null;
 
 export default function RecordRun() {
   const { getAccessToken } = useAuth();
