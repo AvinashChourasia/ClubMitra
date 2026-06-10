@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/avinash/clubmitra/backend/internal/leaderboard"
-	"github.com/avinash/clubmitra/backend/internal/trust"
 )
 
 // ValidationError carries a client-safe 400 message.
@@ -38,14 +37,6 @@ type notifier interface {
 	NotifyUsers(ctx context.Context, userIDs []string, title, body string, data map[string]string)
 }
 
-// trustService reads a runner's trust score (to route proof at submit time) and
-// recomputes it after a proof is decided. A narrow interface so challenges
-// depends on trust's behaviour, not its concrete type (and there's no cycle).
-type trustService interface {
-	Score(ctx context.Context, userID string) (float64, error)
-	Recompute(ctx context.Context, userID, reason, triggeredBy string) error
-}
-
 // Service holds challenge business logic: durable data in Postgres (repo) plus
 // the fast Redis leaderboard (board), with user names resolved via names.
 type Service struct {
@@ -53,13 +44,11 @@ type Service struct {
 	board  *leaderboard.Leaderboard
 	names  nameLookup
 	notify notifier
-	trust  trustService
 }
 
-// NewService wires the service together. trust may be nil (trust recompute +
-// auto-approve are then skipped — useful in tests).
-func NewService(repo *Repository, board *leaderboard.Leaderboard, names nameLookup, notify notifier, trust trustService) *Service {
-	return &Service{repo: repo, board: board, names: names, notify: notify, trust: trust}
+// NewService wires the service together.
+func NewService(repo *Repository, board *leaderboard.Leaderboard, names nameLookup, notify notifier) *Service {
+	return &Service{repo: repo, board: board, names: names, notify: notify}
 }
 
 var validTypes = map[string]bool{TypeDistance: true, TypeDays: true, TypeStreak: true}
@@ -205,9 +194,11 @@ func (s *Service) JoinAsChapter(ctx context.Context, challengeID, chapterID uuid
 	return err
 }
 
-// validProofMethods are the accepted submission methods (see the trust package
-// for their weights).
+// validProofMethods are the accepted submission methods; methodWeight is how
+// hard each is to fake — credited km are multiplied by it.
 var validProofMethods = map[string]bool{"manual": true, "screenshot": true, "strava": true, "gpx": true}
+
+var methodWeight = map[string]float64{"manual": 0.70, "screenshot": 0.85, "strava": 1.00, "gpx": 1.10}
 
 // inferMethod picks a submission method from whichever evidence was supplied,
 // used when the client doesn't send one explicitly (back-compat).
@@ -228,8 +219,8 @@ func nonEmpty(s *string) bool { return s != nil && strings.TrimSpace(*s) != "" }
 
 // SubmitProof records a Phase 1 proof. The challenge must exist (and be visible
 // enough to fetch); progress isn't credited until an admin verifies it. The
-// submission method sets the proof's trust weight; if omitted it's inferred from
-// the evidence supplied.
+// submission method sets the proof's evidence weight; if omitted it's inferred
+// from the evidence supplied.
 func (s *Service) SubmitProof(ctx context.Context, userID string, challengeID uuid.UUID, method string, stravaLink, screenshotURL, gpxURL *string, kmClaimed *float64, proofDate *string) (*Proof, error) {
 	method = strings.TrimSpace(method)
 	if method == "" {
@@ -249,43 +240,7 @@ func (s *Service) SubmitProof(ctx context.Context, userID string, challengeID uu
 	if _, err := s.repo.Get(ctx, userID, challengeID); err != nil {
 		return nil, err // ErrNotFound bubbles up
 	}
-	proof, err := s.repo.SubmitProof(ctx, challengeID, userID, method, stravaLink, screenshotURL, gpxURL, kmClaimed, proofDate, trust.Weight(method))
-	if err != nil {
-		return nil, err
-	}
-
-	// Trust routing (pipeline stage 3): a high-trust runner's proof skips the
-	// admin queue and is credited immediately. Best-effort — if the trust lookup
-	// fails we just leave the proof pending for normal admin review.
-	if s.trust != nil {
-		if score, err := s.trust.Score(ctx, userID); err != nil {
-			log.Printf("challenges: trust score lookup for auto-approve failed: %v", err)
-		} else if autoApprove(trust.Tier(score), method) {
-			if verified, firstTime, err := s.repo.MarkProofVerified(ctx, proof.ID, nil); err != nil {
-				log.Printf("challenges: auto-approve mark failed: %v", err)
-			} else if firstTime {
-				if err := s.creditVerifiedProof(ctx, verified); err != nil {
-					log.Printf("challenges: auto-approve credit failed: %v", err)
-				}
-				proof = verified
-			}
-		}
-	}
-	return proof, nil
-}
-
-// autoApprove implements the trust-tier routing: verified runners skip review
-// for every method; trusted runners skip it for everything but bare manual
-// entry; basic runners are always queued.
-func autoApprove(tier, method string) bool {
-	switch tier {
-	case "verified":
-		return true
-	case "trusted":
-		return method != "manual"
-	default: // basic
-		return false
-	}
+	return s.repo.SubmitProof(ctx, challengeID, userID, method, stravaLink, screenshotURL, gpxURL, kmClaimed, proofDate, methodWeight[method])
 }
 
 // ListProof returns a challenge's proof submissions (admin review queue).
@@ -309,18 +264,21 @@ func (s *Service) VerifyProof(ctx context.Context, verifierID string, proofID uu
 	return proof, nil
 }
 
-// proofWeight is the trust weight to apply to a proof's credit — the stored
+// proofWeight is the evidence weight to apply to a proof's credit — the stored
 // per-proof weight, falling back to the method's base weight for older rows.
 func proofWeight(p *Proof) float64 {
 	if p.TrustWeight != nil {
 		return *p.TrustWeight
 	}
-	return trust.Weight(p.SubmissionMethod)
+	if w, ok := methodWeight[p.SubmissionMethod]; ok {
+		return w
+	}
+	return 1.0
 }
 
-// creditVerifiedProof credits a just-verified proof: km × trust weight for
-// distance challenges, +1 day otherwise; updates the leaderboard; recomputes the
-// submitter's trust; and notifies them. Shared by admin verify and auto-approve.
+// creditVerifiedProof credits a just-verified proof: km × evidence weight for
+// distance challenges, +1 day otherwise; updates the leaderboard and notifies
+// the submitter. Shared by the admin verify path.
 func (s *Service) creditVerifiedProof(ctx context.Context, proof *Proof) error {
 	ch, err := s.repo.Get(ctx, proof.UserID, proof.ChallengeID)
 	if err != nil {
@@ -367,13 +325,6 @@ func (s *Service) creditVerifiedProof(ctx context.Context, proof *Proof) error {
 
 	if err := s.board.SetScore(ctx, proof.ChallengeID, proof.UserID, newScore); err != nil {
 		log.Printf("challenges: leaderboard SetScore on verify failed: %v", err)
-	}
-	// Approving a proof feeds the submitter's trust score (best-effort — a trust
-	// hiccup shouldn't fail the verification just performed).
-	if s.trust != nil {
-		if err := s.trust.Recompute(ctx, proof.UserID, "activity_approved", proof.ID.String()); err != nil {
-			log.Printf("challenges: trust recompute on verify failed: %v", err)
-		}
 	}
 	if s.notify != nil {
 		s.notify.NotifyUsers(ctx, []string{proof.UserID}, "Proof verified ✅",

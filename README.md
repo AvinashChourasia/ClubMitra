@@ -17,7 +17,7 @@ replaces that stack with:
 
 - One place to manage all club members, attendance, fees, and inventory
 - Challenges with leaderboards — public, chapter, city-wide, org-wide, and rolling daily/weekly/monthly
-- Trust-scored activity validation — replacing screenshot chaos with a credibility system
+- GPS-verified activity — recorded runs credit challenges and leaderboards automatically
 - Private group messaging — per-club, per-event chats replacing WhatsApp (Phase 2)
 - In-app payment collection with automatic platform split — Razorpay Route in India, Stripe Connect globally (Phase 3)
 - GPS run tracking replacing manual Strava proof
@@ -95,14 +95,14 @@ clubmitra/
 │   │       └── main.go
 │   ├── internal/
 │   │   ├── auth/              # JWT, refresh tokens, registration
-│   │   ├── users/             # Profiles, trust score, stats, aggregates
+│   │   ├── users/             # Profiles, stats, aggregates, search
 │   │   ├── organisations/     # Org + chapter + roles + membership
 │   │   ├── permissions/       # Role-based access control middleware
 │   │   ├── members/           # Member lifecycle, status, invites      [Phase 2]
 │   │   ├── attendance/        # Run scheduling, post-run check-in
 │   │   ├── challenges/        # Challenge engine, visibility rules, proof
 │   │   ├── leaderboard/       # Redis sorted sets — challenge + rolling
-│   │   ├── activities/        # Activity submission, trust pipeline, GPS [Phase 4]
+│   │   ├── activities/        # GPS runs: record, stats, routes        [Phase 4]
 │   │   ├── inventory/         # Items, stock, issue/return            [Phase 2]
 │   │   ├── messaging/         # Club + event chats, announcements      [Phase 2]
 │   │   ├── analytics/         # Drop-off metrics, engagement dashboard  [Phase 2]
@@ -133,7 +133,7 @@ clubmitra/
 │   │   ├── club/              # [id] detail, new, join, edit
 │   │   ├── challenge/         # [id] detail + leaderboard, new
 │   │   ├── run/               # [id] detail, new, edit
-│   │   ├── profile/           # edit (achievements, trust score → Phase 2/5)
+│   │   ├── profile/           # edit (achievements → Phase 5)
 │   │   ├── schedule.tsx       # personal + club run schedule
 │   │   └── activity/          # GPS run screens (Phase 4)
 │   ├── components/            # Avatar, ChipSelect, CityPicker, Calendar,
@@ -215,7 +215,7 @@ clubmitra/
 
 ---
 
-### Phase 2 — Trust + Leaderboards + Analytics + Inventory + Messaging `(Month 2)` ✅ COMPLETE
+### Phase 2 — Leaderboards + Analytics + Inventory + Messaging `(Month 2)` ✅ COMPLETE
 
 > Self-contained work with no external setup — builds immediately. Real payments
 > moved to Phase 3 (gated by Razorpay/Stripe merchant KYC). Start the merchant
@@ -225,16 +225,14 @@ clubmitra/
 - [x] Members log a run (km) → `run_logs`, the data source for the boards
 - [x] Daily / weekly / monthly / all-time boards per chapter (IST), in the club screen
 - [x] Boards live at chapter level, independent of specific challenges
-- [ ] Apply `trust_weight` to scores — currently raw km; lands with Trust Score below
 - [ ] _(Deferred)_ Redis sorted-set + Lua ZINCRBY — Postgres aggregation is fine at current scale; revisit if it gets slow
 
-#### Trust Score
-- [x] Trust score per runner: proof submission rate + approval rate + account age
-- [x] High trust (80+) → activity auto-approved; low trust → manual review queue
-- [x] Trust score visible on runner profile (badge tier: Basic / Trusted / Verified)
-- [x] Activity submission method tiers: Manual → Screenshot → Strava link → GPX file
-- [x] `trust_score_log` audit table
-- [ ] Apply `trust_weight` to the rolling run-log board (challenge credit already weighted)
+#### Trust Score — REMOVED (June 2026)
+> Built in Phase 2, retired once GPS verification shipped: recorded runs are
+> self-verifying, so a separate credibility score added complexity without
+> value. Backend package, profile endpoint, and user columns dropped
+> (migration 00027). Proof-method evidence weighting (manual .70 → gpx 1.10)
+> survives inside challenges — that's proof math, not trust scoring.
 
 #### Analytics — Drop-off Dashboard
 - [x] Members with no activity in 7 / 14 / 30 / 60 days — visible to chapter admin
@@ -408,7 +406,6 @@ POST   /api/v1/auth/logout
 GET    /api/v1/users/me
 PUT    /api/v1/users/me
 GET    /api/v1/users/me/stats
-GET    /api/v1/users/me/trust-score            # (Phase 2)
 
 # Organisations + Chapters
 POST   /api/v1/organisations
@@ -548,7 +545,7 @@ GET    /api/v1/races/similar/:id
 3. **Provider-agnostic payments** — all payment logic goes through the `pkg/payments/` interface. Razorpay for INR, Stripe for EUR/USD. Currency detected at payment initiation. Every club collecting money must complete provider KYC before enabling fees.
 4. **No manual settlements** — Razorpay Route (India) or Stripe Connect (Global) auto-split every transaction.
 5. **Invite-first onboarding** — each chapter gets a unique invite link. Runner clicks → signs up with full profile → auto-joins chapter.
-6. **Trust-first activity validation** — every submitted activity flows through the trust pipeline. High trust auto-approves. Proof method sets the trust weight.
+6. **GPS-first activity validation** — recorded runs are the credible source: they credit challenges and every active club's leaderboard automatically. Manual proof (with per-method evidence weights) remains only for challenge submissions.
 7. **Redis leaderboard** — self-heals from Postgres. Sorted sets per challenge AND per rolling period (daily/weekly/monthly/all-time).
 8. **Global-ready from day one** — multi-currency pricing, provider-agnostic payments, country + timezone-aware chapters. India first, Europe Month 7+.
 9. **Standalone** — ClubMitra owns identity. No external auth dependency, no shared DB, no linked accounts required with MarathonMitra.
@@ -645,7 +642,7 @@ PLATFORM_CUT_PCT=10
 | Phase | Focus | Timeline |
 |---|---|---|
 | 1 | Club core — members, attendance, challenges | Month 1 ✅ |
-| 2 | Trust score, rolling leaderboards, analytics, inventory, messaging | Month 2 ✅ |
+| 2 | Rolling leaderboards, analytics, inventory, messaging | Month 2 ✅ |
 | 3 | Payments (Razorpay + Stripe), GPX, desktop admin, paid inventory | Month 3 |
 | 4 | GPS tracking, interactive maps, race calendar, city leaderboard | Month 4 🚧 |
 | 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 |

@@ -36,7 +36,6 @@ import (
 	"github.com/avinash/clubmitra/backend/internal/permissions"
 	"github.com/avinash/clubmitra/backend/internal/realtime"
 	"github.com/avinash/clubmitra/backend/internal/runlog"
-	"github.com/avinash/clubmitra/backend/internal/trust"
 	"github.com/avinash/clubmitra/backend/internal/uploads"
 	"github.com/avinash/clubmitra/backend/internal/users"
 )
@@ -91,11 +90,7 @@ func main() {
 	authSvc := auth.NewService(userRepo, refreshRepo, tokenMgr, cfg.RefreshTokenTTL)
 	authHandler := auth.NewHandler(authSvc)
 
-	// Trust score: per-runner credibility, recomputed when proof is decided and
-	// surfaced on the profile. Shared by the users + challenges wiring below.
-	trustSvc := trust.NewService(trust.NewRepository(pool))
-
-	usersHandler := users.NewHandler(userRepo, trustSvc)
+	usersHandler := users.NewHandler(userRepo)
 
 	// Push notifications: store device tokens and fan domain events out to the
 	// right users' devices (best-effort, async).
@@ -119,7 +114,7 @@ func main() {
 	activitiesHandler := activities.NewHandler(activitiesSvc)
 
 	board := leaderboard.New(rdb)
-	challengesSvc := challenges.NewService(challenges.NewRepository(pool), board, userRepo, notifier, trustSvc)
+	challengesSvc := challenges.NewService(challenges.NewRepository(pool), board, userRepo, notifier)
 	challengesHandler := challenges.NewHandler(challengesSvc, permChecker)
 
 	// Run logging + chapter rolling leaderboards (daily/weekly/monthly/all-time).
