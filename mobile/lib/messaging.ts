@@ -18,6 +18,7 @@ export type Message = {
   is_pinned: boolean;
   reply_to?: ReplyRef | null;
   reactions?: Reaction[] | null;
+  edited_at?: string | null;
   created_at: string;
 };
 
@@ -76,6 +77,11 @@ export async function searchUsers(token: string, q: string) {
 // deleteMessage soft-deletes a message you sent (delete for everyone).
 export function deleteMessage(token: string, messageId: string) {
   return request<void>(`/messaging/messages/${messageId}`, { method: "DELETE", token });
+}
+
+// editMessage rewrites the text of a message you sent (shows an "edited" label).
+export function editMessage(token: string, messageId: string, body: string) {
+  return request<void>(`/messaging/messages/${messageId}`, { method: "PUT", body: { body }, token });
 }
 
 // setReaction sets your one reaction on a message; "" clears it.

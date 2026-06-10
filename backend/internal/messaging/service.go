@@ -339,6 +339,23 @@ func (s *Service) DeleteMessage(ctx context.Context, userID string, messageID uu
 	return s.repo.softDeleteMessage(ctx, messageID, userID)
 }
 
+// EditMessage rewrites the caller's own message text and nudges the
+// conversation so other clients refresh (and shows them the "edited" label).
+func (s *Service) EditMessage(ctx context.Context, userID string, messageID uuid.UUID, body string) error {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ValidationError{Msg: "message can't be empty"}
+	}
+	if err := s.repo.editMessage(ctx, messageID, userID, body); err != nil {
+		return err
+	}
+	convID, convType, chapterID, err := s.repo.messageConversation(ctx, messageID)
+	if err == nil {
+		s.fanout(ctx, convType, chapterID, convID, "update", nil)
+	}
+	return nil
+}
+
 // SetReaction sets (or clears, with an empty emoji) the caller's reaction on a
 // message they can see, then nudges the conversation so other clients refresh.
 func (s *Service) SetReaction(ctx context.Context, userID string, messageID uuid.UUID, emoji string) error {

@@ -32,6 +32,7 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/dm/{userID}", h.dmList)  // open/start a 1:1 chat
 	r.Post("/dm/{userID}", h.dmPost) // send to a 1:1 chat
 	r.Delete("/messages/{messageID}", h.deleteMessage)
+	r.Put("/messages/{messageID}", h.editMessage)          // {"body":"..."} (own messages)
 	r.Put("/messages/{messageID}/reaction", h.setReaction) // {"emoji":"❤️"} ("" clears)
 	r.Put("/prefs", h.setPrefs)                            // mute / archive a conversation
 	return r
@@ -39,6 +40,33 @@ func (h *Handler) Routes() http.Handler {
 
 type reactionRequest struct {
 	Emoji string `json:"emoji"`
+}
+
+type editRequest struct {
+	Body string `json:"body"`
+}
+
+func (h *Handler) editMessage(w http.ResponseWriter, r *http.Request) {
+	uid, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "messageID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid message id")
+		return
+	}
+	var req editRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.EditMessage(r.Context(), uid, id, req.Body); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
 }
 
 func (h *Handler) setReaction(w http.ResponseWriter, r *http.Request) {

@@ -68,6 +68,7 @@ type Message struct {
 	IsPinned       bool       `json:"is_pinned"`
 	ReplyTo        *ReplyRef  `json:"reply_to,omitempty"`
 	Reactions      []Reaction `json:"reactions,omitempty"`
+	EditedAt       *time.Time `json:"edited_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 }
 
@@ -143,7 +144,7 @@ func (r *Repository) ensureRunConversation(ctx context.Context, chapterID, runID
 func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID, viewerID string) ([]Message, error) {
 	const q = `
 		SELECT m.id, m.sender_id, u.name, m.body, m.media_url, m.media_type,
-		       m.is_announcement, m.is_pinned, m.created_at,
+		       m.is_announcement, m.is_pinned, m.edited_at, m.created_at,
 		       rm.id, ru.name, rm.body, rm.media_type,
 		       COALESCE(rx.agg, '[]'::json)::text
 		FROM messages m
@@ -172,7 +173,7 @@ func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID,
 		var rName, rBody, rMedia *string
 		var reactionsJSON string
 		if err := rows.Scan(&m.ID, &m.SenderID, &m.SenderName, &m.Body, &m.MediaURL, &m.MediaType,
-			&m.IsAnnouncement, &m.IsPinned, &m.CreatedAt,
+			&m.IsAnnouncement, &m.IsPinned, &m.EditedAt, &m.CreatedAt,
 			&rID, &rName, &rBody, &rMedia, &reactionsJSON); err != nil {
 			return nil, err
 		}
@@ -230,6 +231,22 @@ func (r *Repository) postMessage(ctx context.Context, conversationID uuid.UUID, 
 		m.ReplyTo = &ReplyRef{ID: *rID, SenderName: deref(rName), Preview: deref(preview(rBody, rMedia))}
 	}
 	return &m, nil
+}
+
+// editMessage rewrites the text of a message the sender owns (media stays).
+// Returns ErrNotFound when the message isn't theirs / is deleted.
+func (r *Repository) editMessage(ctx context.Context, messageID uuid.UUID, userID, body string) error {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE messages SET body = $3, edited_at = now()
+		WHERE id = $1 AND sender_id = $2 AND deleted_at IS NULL`,
+		messageID, userID, body)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // setReaction upserts the viewer's single reaction on a message (one per user,

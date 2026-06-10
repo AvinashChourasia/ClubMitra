@@ -32,6 +32,8 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useRouter } from "expo-router";
+import { Swipeable } from "react-native-gesture-handler";
+import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -78,6 +80,7 @@ type Props = {
   uploadFile?: (localUri: string, name: string, mime: string) => Promise<string>;
   deleteMessage?: (id: string) => Promise<void>;
   react?: (id: string, emoji: string) => Promise<void>;
+  edit?: (id: string, body: string) => Promise<void>;
   canAnnounce?: boolean;
   announce?: (body: string) => Promise<void>;
   onSenderPress?: (senderId: string, senderName: string) => void;
@@ -88,7 +91,7 @@ type Props = {
 
 export function ChatThread({
   title, subtitle, avatarName, avatarUri, meId, isGroup, isDirect, otherLastReadAt,
-  load, send, uploadImage, uploadFile, deleteMessage, react, canAnnounce, announce, onSenderPress,
+  load, send, uploadImage, uploadFile, deleteMessage, react, edit, canAnnounce, announce, onSenderPress,
   realtime, getToken,
 }: Props) {
   const router = useRouter();
@@ -97,11 +100,13 @@ export function ChatThread({
   const seq = useRef(0);
   const nearBottom = useRef(true);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const swipeRefs = useRef<Record<string, Swipeable | null>>({});
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [pending, setPending] = useState<Pending[]>([]);
   const [text, setText] = useState("");
   const [staged, setStaged] = useState<Staged | null>(null);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [editing, setEditing] = useState<Message | null>(null);
   const [actionFor, setActionFor] = useState<Message | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
   const [announceMode, setAnnounceMode] = useState(false);
@@ -219,6 +224,20 @@ export function ChatThread({
   async function onSend() {
     const body = text.trim();
     if (!body && !staged) return;
+
+    // Edit mode: apply the rewrite in place (no optimistic bubble needed).
+    if (editing && edit) {
+      const target = editing;
+      setEditing(null);
+      setText("");
+      try {
+        await edit(target.id, body);
+        await reload(false);
+      } catch (e) {
+        Alert.alert("Couldn't edit", e instanceof ApiError ? e.message : "Something went wrong");
+      }
+      return;
+    }
     const cap = staged;
     const quote = replyTo;
     const isAnnounce = announceMode && !!announce && !cap;
@@ -280,6 +299,19 @@ export function ChatThread({
     if (m.body) void Clipboard.setStringAsync(m.body);
   }
 
+  function startEdit(m: Message) {
+    setActionFor(null);
+    setReplyTo(null);
+    setStaged(null);
+    setEditing(m);
+    setText(m.body ?? "");
+  }
+
+  function openActions(m: Message) {
+    Haptics.selectionAsync().catch(() => {});
+    setActionFor(m);
+  }
+
   function doDelete(m: Message) {
     setActionFor(null);
     deleteMessage?.(m.id)
@@ -298,6 +330,7 @@ export function ChatThread({
       kind?: string;
       name?: string;
       replyTo?: { sender_name: string; preview: string } | null;
+      edited?: boolean;
     },
     time: string,
     status?: "sent" | "read" | "sending" | "failed"
@@ -368,6 +401,7 @@ export function ChatThread({
         <View style={{ flexDirection: "row", alignItems: "flex-end", flexWrap: "wrap", justifyContent: "flex-end", paddingHorizontal: 9, paddingTop: isImage || isFile ? 2 : 6, paddingBottom: 5 }}>
           {opts.body ? <Text style={{ color: fg, fontSize: 15, flexShrink: 1, marginRight: 8 }}>{opts.body}</Text> : null}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: "auto" }}>
+            {opts.edited ? <Text style={{ color: footFg, fontSize: 10, fontStyle: "italic" }}>edited · </Text> : null}
             <Text style={{ color: footFg, fontSize: 10 }}>{time}</Text>
             {status ? <Ionicons name={icon[status].name} size={13} color={icon[status].color} /> : null}
           </View>
@@ -445,16 +479,36 @@ export function ChatThread({
                         <Text style={{ color: colors.muted, fontSize: 10, marginTop: 4 }}>{timeOf(m.created_at)}</Text>
                       </View>
                     ) : (
+                      <Swipeable
+                        friction={2}
+                        leftThreshold={42}
+                        overshootLeft={false}
+                        renderLeftActions={() => (
+                          <View style={{ justifyContent: "center", paddingHorizontal: 14 }}>
+                            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
+                              <Ionicons name="arrow-undo" size={16} color={colors.muted} />
+                            </View>
+                          </View>
+                        )}
+                        onSwipeableWillOpen={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setReplyTo(m);
+                          setTimeout(() => swipeRefs.current[m.id]?.close(), 120);
+                        }}
+                        ref={(ref) => {
+                          if (ref) swipeRefs.current[m.id] = ref;
+                        }}
+                      >
                       <View style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "80%", marginTop: showName ? 8 : 2, marginBottom: hasReactions ? 12 : 0 }}>
                         {showName && (
                           <Pressable onPress={() => onSenderPress?.(m.sender_id, m.sender_name)} disabled={!onSenderPress}>
                             <Text style={{ color: colors.accent, fontSize: 12, marginLeft: 10, marginBottom: 2, fontWeight: "700" }}>{m.sender_name}</Text>
                           </Pressable>
                         )}
-                        <Pressable onLongPress={() => setActionFor(m)} delayLongPress={250}>
+                        <Pressable onLongPress={() => openActions(m)} delayLongPress={250}>
                           {bubble(
                             mine,
-                            { body: m.body, mediaUrl: m.media_url, mediaType: m.media_type, replyTo: m.reply_to },
+                            { body: m.body, mediaUrl: m.media_url, mediaType: m.media_type, replyTo: m.reply_to, edited: !!m.edited_at },
                             timeOf(m.created_at),
                             mine ? (read ? "read" : "sent") : undefined
                           )}
@@ -472,7 +526,7 @@ export function ChatThread({
                                   gap: 3,
                                   backgroundColor: colors.bg,
                                   borderWidth: 1,
-                                  borderColor: r.mine ? colors.primary : colors.border,
+                                  borderColor: r.mine ? colors.accent : colors.border,
                                   borderRadius: 11,
                                   paddingHorizontal: 6,
                                   paddingVertical: 2,
@@ -485,6 +539,7 @@ export function ChatThread({
                           </View>
                         )}
                       </View>
+                      </Swipeable>
                     )}
                   </View>
                 );
@@ -536,6 +591,20 @@ export function ChatThread({
           </Pressable>
         )}
 
+        {/* Edit bar — rewriting one of your messages */}
+        {editing && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.bg }}>
+            <Ionicons name="pencil" size={16} color={colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.accent, fontWeight: "800", fontSize: 12 }}>Editing message</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={1}>{editing.body}</Text>
+            </View>
+            <Pressable onPress={() => { setEditing(null); setText(""); }} hitSlop={8}>
+              <Ionicons name="close-circle" size={20} color={colors.muted} />
+            </Pressable>
+          </View>
+        )}
+
         {/* Reply bar — what you're quoting, with a clear X */}
         {replyTo && (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.bg }}>
@@ -578,21 +647,21 @@ export function ChatThread({
             </Pressable>
           )}
           <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
-            {(uploadImage || uploadFile) && !announceMode && !staged && (
+            {(uploadImage || uploadFile) && !announceMode && !staged && !editing && (
               <Pressable onPress={() => setAttachMenu(true)} hitSlop={6} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}>
                 <Ionicons name="add" size={24} color={colors.text} />
               </Pressable>
             )}
             <TextInput
               style={[styles.input, { flex: 1, maxHeight: 110, borderRadius: 22 }]}
-              placeholder={announceMode ? "Announcement…" : staged ? "Add a caption…" : "Message"}
+              placeholder={editing ? "Edit message…" : announceMode ? "Announcement…" : staged ? "Add a caption…" : "Message"}
               placeholderTextColor={colors.muted}
               value={text}
               onChangeText={onTextChange}
               multiline
             />
             <Pressable onPress={onSend} disabled={!text.trim() && !staged} style={{ backgroundColor: text.trim() || staged ? colors.primary : colors.bgSecondary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name="send" size={18} color={text.trim() || staged ? "#fff" : colors.muted} />
+              <Ionicons name={editing ? "checkmark" : "send"} size={18} color={text.trim() || staged ? "#fff" : colors.muted} />
             </Pressable>
           </View>
         </View>
@@ -604,6 +673,13 @@ export function ChatThread({
           <Pressable onPress={() => setActionFor(null)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
           <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 34, gap: 4 }}>
             <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 10 }} />
+            {/* What you're acting on */}
+            <View style={{ backgroundColor: colors.bgSecondary, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 }}>
+              <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800" }}>{actionFor.sender_id === meId ? "You" : actionFor.sender_name}</Text>
+              <Text style={{ color: colors.text, fontSize: 13 }} numberOfLines={2}>
+                {actionFor.body ?? (actionFor.media_type === "image" ? "📷 Photo" : "📎 File")}
+              </Text>
+            </View>
             {/* Quick reactions */}
             {react && (
               <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 6, paddingBottom: 12 }}>
@@ -617,9 +693,9 @@ export function ChatThread({
                         width: 46,
                         height: 46,
                         borderRadius: 23,
-                        backgroundColor: minePicked ? colors.primarySoft : colors.bgSecondary,
+                        backgroundColor: colors.bgSecondary,
                         borderWidth: minePicked ? 1.5 : 0,
-                        borderColor: colors.primary,
+                        borderColor: colors.accent,
                         alignItems: "center",
                         justifyContent: "center",
                       }}
@@ -631,6 +707,9 @@ export function ChatThread({
               </View>
             )}
             <SheetRow icon="arrow-undo" label="Reply" onPress={() => { setReplyTo(actionFor); setActionFor(null); }} />
+            {actionFor.sender_id === meId && actionFor.body && edit ? (
+              <SheetRow icon="pencil" label="Edit" onPress={() => startEdit(actionFor)} />
+            ) : null}
             {actionFor.body ? <SheetRow icon="copy" label="Copy" onPress={() => doCopy(actionFor)} /> : null}
             {actionFor.sender_id === meId && deleteMessage ? (
               <SheetRow icon="trash" label="Delete for everyone" danger onPress={() => doDelete(actionFor)} />
