@@ -327,7 +327,6 @@ clubmitra/
 - [ ] GPX file import from any GPS device (Garmin, Polar, Suunto)
 - [x] Runs auto-credit to active challenges (replaces manual Strava proof)
 - [x] Runs auto-credit to rolling leaderboards
-- [ ] Trust score update on GPS-verified activity (highest trust tier)
 - [x] Personal stats: total km, streak, personal records
 - [ ] Activity feed per chapter
 - [ ] Streak freeze: 2 per month to protect streaks during planned rest
