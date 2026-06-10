@@ -27,15 +27,18 @@ export type Activity = {
 
 // uploadRun posts a recorded run and returns the server-computed activity.
 // countTowardChallenges defaults to true; pass false for warm-ups/test runs.
+// pausedS is the auto-paused time (seconds) the server subtracts so the stored
+// duration/pace reflect MOVING time, matching the live HUD.
 export function uploadRun(
   token: string,
   points: RunPoint[],
-  countTowardChallenges = true
+  countTowardChallenges = true,
+  pausedS = 0
 ): Promise<Activity> {
   return request<Activity>("/activities", {
     method: "POST",
     token,
-    body: { points, count_toward_challenges: countTowardChallenges },
+    body: { points, count_toward_challenges: countTowardChallenges, paused_s: pausedS },
   });
 }
 

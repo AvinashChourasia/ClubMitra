@@ -11,13 +11,20 @@ import * as TaskManager from "expo-task-manager";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { evaluateSample, type GpsSample } from "./gpsFilter";
+import { evaluateSample, haversineMeters, type GpsSample } from "./gpsFilter";
+import { initPause, updatePause, pausedMsAt, type PauseState } from "./autopause";
 import type { RunPoint } from "./activities";
 
 export const RUN_TASK = "clubmitra-run-location";
 const ACTIVE_KEY = "run_active";
 
-type Active = { startMs: number; distanceM: number; points: RunPoint[]; lastAccepted: GpsSample | null };
+type Active = {
+  startMs: number;
+  distanceM: number;
+  points: RunPoint[];
+  lastAccepted: GpsSample | null;
+  pause: PauseState;
+};
 
 async function readActive(): Promise<Active | null> {
   const raw = await AsyncStorage.getItem(ACTIVE_KEY);
@@ -36,6 +43,7 @@ TaskManager.defineTask(RUN_TASK, async ({ data, error }) => {
   if (!locations?.length) return;
   const active = await readActive();
   if (!active) return; // not recording
+  if (!active.pause) active.pause = initPause(); // tolerate a pre-upgrade buffer
 
   for (const loc of locations) {
     const sample: GpsSample = {
@@ -45,6 +53,16 @@ TaskManager.defineTask(RUN_TASK, async ({ data, error }) => {
       accuracy: loc.coords.accuracy ?? 9999,
       timestamp: loc.timestamp,
     };
+    // Auto-pause from OS speed, falling back to distance/dt vs the last accepted
+    // fix. Updated on every fix, before the noise filter may drop this sample.
+    const reported = loc.coords.speed;
+    const speed = reported != null && reported >= 0
+      ? reported
+      : active.lastAccepted
+        ? haversineMeters(active.lastAccepted, sample) / Math.max(0.001, (sample.timestamp - active.lastAccepted.timestamp) / 1000)
+        : 0;
+    active.pause = updatePause(active.pause, speed, sample.timestamp);
+
     const { accept, distanceM } = evaluateSample(active.lastAccepted, sample);
     if (!accept) continue;
     active.lastAccepted = sample;
@@ -56,7 +74,7 @@ TaskManager.defineTask(RUN_TASK, async ({ data, error }) => {
 
 // startRun resets the buffer and begins background-capable location updates.
 export async function startRun(): Promise<void> {
-  await writeActive({ startMs: Date.now(), distanceM: 0, points: [], lastAccepted: null });
+  await writeActive({ startMs: Date.now(), distanceM: 0, points: [], lastAccepted: null, pause: initPause() });
   await Location.startLocationUpdatesAsync(RUN_TASK, {
     accuracy: Location.Accuracy.BestForNavigation,
     timeInterval: 1000,
@@ -71,8 +89,9 @@ export async function startRun(): Promise<void> {
   });
 }
 
-// stopRun ends updates and returns the full captured track, clearing the buffer.
-export async function stopRun(): Promise<RunPoint[]> {
+// stopRun ends updates and returns the full captured track + auto-paused seconds,
+// clearing the buffer.
+export async function stopRun(): Promise<{ points: RunPoint[]; pausedS: number }> {
   try {
     if (await Location.hasStartedLocationUpdatesAsync(RUN_TASK)) {
       await Location.stopLocationUpdatesAsync(RUN_TASK);
@@ -82,12 +101,14 @@ export async function stopRun(): Promise<RunPoint[]> {
   }
   const active = await readActive();
   await AsyncStorage.removeItem(ACTIVE_KEY);
-  return active?.points ?? [];
+  const pausedS = active?.pause ? pausedMsAt(active.pause, Date.now()) / 1000 : 0;
+  return { points: active?.points ?? [], pausedS };
 }
 
 // activeStats is the live HUD source while recording (polled by the screen).
-// Returns the full point track so the screen can draw the live route trace.
-export async function activeStats(): Promise<{ startMs: number; distanceM: number; points: RunPoint[] } | null> {
+// Returns the full point track (for the live route) plus the auto-pause state
+// (so the screen can show "paused" and compute moving time).
+export async function activeStats(): Promise<{ startMs: number; distanceM: number; points: RunPoint[]; pause: PauseState } | null> {
   const a = await readActive();
-  return a ? { startMs: a.startMs, distanceM: a.distanceM, points: a.points } : null;
+  return a ? { startMs: a.startMs, distanceM: a.distanceM, points: a.points, pause: a.pause ?? initPause() } : null;
 }

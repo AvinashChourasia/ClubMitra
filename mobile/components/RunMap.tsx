@@ -9,11 +9,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View, type ViewStyle } from "react-native";
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT, type Region } from "react-native-maps";
+import MapView, { Marker, Polyline, PROVIDER_DEFAULT, type MapType, type Region } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 
 import type { LatLng } from "../lib/activities";
 import { computeSplits, paceColorRamp } from "../lib/pace";
+import { useReplay } from "../lib/useReplay";
 import { colors } from "../lib/theme";
 
 type Props = {
@@ -36,8 +37,11 @@ export function RunMap({ coords, times, height = 260, live = false, selectedKm =
   const ramp = useMemo(() => (times ? paceColorRamp(coords, times) : null), [coords, times]);
   const splits = useMemo(() => (live ? [] : computeSplits(coords, times)), [coords, times, live]);
   const [ready, setReady] = useState(false);
+  const [mapType, setMapType] = useState<MapType>("standard");
+  const replay = useReplay(coords, times); // animated retrace (saved runs only)
 
   const head = coords[coords.length - 1];
+  const satellite = mapType !== "standard";
 
   // Frame the whole route once the map is ready (and when the route changes, for
   // the static detail view). Live mode skips this — the follow effect owns the camera.
@@ -77,6 +81,7 @@ export function RunMap({ coords, times, height = 260, live = false, selectedKm =
         provider={PROVIDER_DEFAULT}
         style={{ flex: 1 }}
         initialRegion={region}
+        mapType={mapType}
         userInterfaceStyle="dark"
         onMapReady={() => setReady(true)}
         scrollEnabled
@@ -126,16 +131,48 @@ export function RunMap({ coords, times, height = 260, live = false, selectedKm =
         <Marker coordinate={head} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={live}>
           <Dot color={live ? colors.primary : colors.danger} ring pulse={live} />
         </Marker>
+
+        {/* Replay cursor retracing the run (saved runs only). */}
+        {!live && replay.cursor && (
+          <Marker coordinate={replay.cursor} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={replay.playing}>
+            <Dot color={colors.accent} ring pulse />
+          </Marker>
+        )}
       </MapView>
 
-      {/* Recenter control */}
-      <Pressable
-        onPress={() => mapRef.current?.fitToCoordinates(coords, { edgePadding: EDGE, animated: true })}
-        style={{ position: "absolute", top: 10, right: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(15,23,42,0.85)", alignItems: "center", justifyContent: "center" }}
-        hitSlop={8}
-      >
-        <Ionicons name="scan-outline" size={18} color="#fff" />
-      </Pressable>
+      {/* Controls: recenter + standard/satellite toggle */}
+      <View style={{ position: "absolute", top: 10, right: 10, gap: 8 }}>
+        <CtrlButton icon="scan-outline" onPress={() => mapRef.current?.fitToCoordinates(coords, { edgePadding: EDGE, animated: true })} />
+        <CtrlButton
+          icon={satellite ? "map" : "earth"}
+          active={satellite}
+          onPress={() => setMapType(satellite ? "standard" : "hybrid")}
+        />
+      </View>
+
+      {/* Replay: retrace the run with an animated cursor (saved runs only) */}
+      {!live && coords.length >= 2 && (
+        <Pressable
+          onPress={replay.toggle}
+          style={{
+            position: "absolute",
+            bottom: 10,
+            right: 10,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            backgroundColor: replay.playing ? colors.primary : "rgba(15,23,42,0.85)",
+            borderRadius: 999,
+            paddingLeft: 10,
+            paddingRight: 12,
+            paddingVertical: 7,
+          }}
+          hitSlop={8}
+        >
+          <Ionicons name={replay.playing ? "pause" : "play"} size={14} color="#fff" />
+          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Replay</Text>
+        </Pressable>
+      )}
 
       {/* Pace legend */}
       {ramp && (
@@ -146,6 +183,26 @@ export function RunMap({ coords, times, height = 260, live = false, selectedKm =
         </View>
       )}
     </View>
+  );
+}
+
+// CtrlButton is a round map overlay button (recenter, layer toggle).
+function CtrlButton({ icon, onPress, active }: { icon: keyof typeof Ionicons.glyphMap; onPress: () => void; active?: boolean }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={8}
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: active ? colors.primary : "rgba(15,23,42,0.85)",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Ionicons name={icon} size={18} color="#fff" />
+    </Pressable>
   );
 }
 

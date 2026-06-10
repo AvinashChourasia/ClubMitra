@@ -67,6 +67,9 @@ type createRequest struct {
 	// Pointer so we can tell "omitted" (older clients / queued runs) from an
 	// explicit false. Omitted defaults to true: count toward challenges.
 	CountTowardChallenges *bool `json:"count_toward_challenges"`
+	// Auto-paused seconds the client detected; subtracted from duration so the
+	// stored time/pace reflect MOVING time. Omitted (older clients) → 0.
+	PausedS *float64 `json:"paused_s"`
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +94,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// Default to counting toward challenges unless the client explicitly opts out.
 	count := req.CountTowardChallenges == nil || *req.CountTowardChallenges
 
-	act, err := h.svc.Record(r.Context(), userID, points, count)
+	var pausedS float64
+	if req.PausedS != nil && *req.PausedS > 0 {
+		pausedS = *req.PausedS
+	}
+
+	act, err := h.svc.Record(r.Context(), userID, points, count, pausedS)
 	if err != nil {
 		var ve ValidationError
 		if errors.As(err, &ve) {

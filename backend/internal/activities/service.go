@@ -53,7 +53,7 @@ func (s *Service) SetRecordedHook(h RecordedHook) {
 // countTowardChallenges lets the caller exclude a run (a warm-up, a treadmill
 // test) from challenge progress. The run is still stored either way — only the
 // challenge-credit hook is skipped.
-func (s *Service) Record(ctx context.Context, userID string, points []geo.Point, countTowardChallenges bool) (*Activity, error) {
+func (s *Service) Record(ctx context.Context, userID string, points []geo.Point, countTowardChallenges bool, pausedS float64) (*Activity, error) {
 	if len(points) < minPoints {
 		return nil, ValidationError{Msg: "a run needs at least 2 GPS points"}
 	}
@@ -74,6 +74,13 @@ func (s *Service) Record(ctx context.Context, userID string, points []geo.Point,
 		return nil, ValidationError{Msg: "run duration must be positive"}
 	}
 
+	// Moving time = elapsed minus auto-paused time. Guard against a bogus paused
+	// value that would zero/negate the duration by falling back to elapsed.
+	movingDuration := duration - time.Duration(pausedS*float64(time.Second))
+	if movingDuration < time.Second {
+		movingDuration = duration
+	}
+
 	// Seconds-from-start of each point, aligned 1:1 with the route's vertices —
 	// the client uses these to colour the route by pace.
 	start := points[0].Timestamp
@@ -86,7 +93,7 @@ func (s *Service) Record(ctx context.Context, userID string, points []geo.Point,
 		UserID:         userID,
 		StartedAt:      points[0].Timestamp,
 		EndedAt:        points[len(points)-1].Timestamp,
-		DurationS:      int(duration / time.Second),
+		DurationS:      int(movingDuration / time.Second),
 		ElevationGainM: geo.ElevationGain(points, elevationNoiseThresholdM),
 		RouteEWKT:      geo.LineStringEWKT(points),
 		PointOffsets:   offsets,

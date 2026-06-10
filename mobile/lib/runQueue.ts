@@ -23,6 +23,8 @@ export type QueuedRun = {
   // Whether this run counts toward challenges. Optional for backward-compat with
   // any runs queued before this field existed (treated as true on upload).
   countTowardChallenges?: boolean;
+  // Auto-paused seconds to subtract server-side (moving time). Optional/back-compat.
+  pausedS?: number;
 };
 
 async function readQueue(): Promise<QueuedRun[]> {
@@ -44,7 +46,8 @@ async function writeQueue(runs: QueuedRun[]): Promise<void> {
 // run survives even if everything else fails.
 export async function enqueue(
   points: RunPoint[],
-  countTowardChallenges = true
+  countTowardChallenges = true,
+  pausedS = 0
 ): Promise<QueuedRun> {
   const run: QueuedRun = {
     // Date.now()+random is plenty unique for a local id; no uuid dep needed.
@@ -52,6 +55,7 @@ export async function enqueue(
     points,
     queuedAt: new Date().toISOString(),
     countTowardChallenges,
+    pausedS,
   };
   const queue = await readQueue();
   queue.push(run);
@@ -89,7 +93,7 @@ export async function flush(getToken: () => Promise<string | null>): Promise<Flu
     try {
       const run = queue[index];
       // Omitted flag (older queued runs) defaults to counting.
-      const activity = await uploadRun(token, run.points, run.countTowardChallenges !== false);
+      const activity = await uploadRun(token, run.points, run.countTowardChallenges !== false, run.pausedS ?? 0);
       uploaded.push(activity);
     } catch {
       // Network/server failure: stop here, keep this and the rest for later.

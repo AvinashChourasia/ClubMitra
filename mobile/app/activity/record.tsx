@@ -29,14 +29,14 @@ const RunMap: React.ComponentType<{ coords: LatLng[]; times?: number[]; height?:
 export default function RecordRun() {
   const { getAccessToken } = useAuth();
   const router = useRouter();
-  const { status, elapsedS, distanceM, livePaceSPerKm, route, times, start, stop } = useRunRecorder();
+  const { status, elapsedS, distanceM, livePaceSPerKm, route, times, paused, start, stop } = useRunRecorder();
   const [uploading, setUploading] = useState(false);
   // Whether this run should count toward joined challenges. Default yes; the
   // user can flip it off for a warm-up / test run before finishing.
   const [countToward, setCountToward] = useState(true);
 
   async function onFinish() {
-    const points = await stop();
+    const { points, pausedS } = await stop();
     if (points.length < 2) {
       Alert.alert("Run too short", "We didn't capture enough GPS points. Try moving around a bit.");
       return;
@@ -45,7 +45,7 @@ export default function RecordRun() {
     try {
       // 1. Persist locally FIRST — from here the run can never be lost, even if
       //    the upload fails or the app is killed.
-      await enqueue(points, countToward);
+      await enqueue(points, countToward, pausedS);
 
       // 2. Try to upload now (plus any previously queued runs).
       const { uploaded, remaining } = await flush(getAccessToken);
@@ -84,7 +84,7 @@ export default function RecordRun() {
               flexDirection: "row",
               alignItems: "center",
               gap: 8,
-              backgroundColor: recording ? "#FEE2E2" : colors.bgSecondary,
+              backgroundColor: paused ? "#FEF3C7" : recording ? "#FEE2E2" : colors.bgSecondary,
               paddingHorizontal: 14,
               paddingVertical: 6,
               borderRadius: 999,
@@ -95,11 +95,11 @@ export default function RecordRun() {
                 width: 8,
                 height: 8,
                 borderRadius: 4,
-                backgroundColor: recording ? colors.primary : colors.muted,
+                backgroundColor: paused ? "#D97706" : recording ? colors.primary : colors.muted,
               }}
             />
-            <Text style={{ color: recording ? colors.primaryDark : colors.muted, fontWeight: "600" }}>
-              {recording ? "Recording" : "Ready to run"}
+            <Text style={{ color: paused ? "#B45309" : recording ? colors.primaryDark : colors.muted, fontWeight: "600" }}>
+              {paused ? "Auto-paused" : recording ? "Recording" : "Ready to run"}
             </Text>
           </View>
         </View>

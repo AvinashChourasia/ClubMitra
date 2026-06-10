@@ -11,11 +11,13 @@
 // view never needs a dev build.
 
 import { useMemo } from "react";
-import { Text, View, type ViewStyle } from "react-native";
+import { Pressable, Text, View, type ViewStyle } from "react-native";
 import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
+import { Ionicons } from "@expo/vector-icons";
 
 import type { LatLng } from "../lib/activities";
 import { haversine, paceColorRamp } from "../lib/pace";
+import { useReplay } from "../lib/useReplay";
 import { colors } from "../lib/theme";
 
 type Props = {
@@ -42,6 +44,17 @@ export function RouteTrace({ coords, height = 220, times, weight = 5, live = fal
     const ramp = paceColorRamp(coords, times);
     return ramp ? paceSegments(fitted.pts, ramp) : null;
   }, [fitted, coords, times]);
+
+  // Animated retrace (saved runs only). Cursor position lives in viewBox space,
+  // interpolated from the replay's float index between the fitted points.
+  const replay = useReplay(coords, times);
+  const cursor = useMemo(() => {
+    if (live || !fitted || replay.index <= 0) return null;
+    const i = Math.floor(replay.index);
+    const j = Math.min(i + 1, fitted.pts.length - 1);
+    const f = replay.index - i;
+    return { x: fitted.pts[i].x + (fitted.pts[j].x - fitted.pts[i].x) * f, y: fitted.pts[i].y + (fitted.pts[j].y - fitted.pts[i].y) * f };
+  }, [live, fitted, replay.index]);
 
   if (!fitted || coords.length < 2) {
     return (
@@ -108,7 +121,40 @@ export function RouteTrace({ coords, height = 220, times, weight = 5, live = fal
         {/* Finish / current position */}
         <Circle cx={end.x} cy={end.y} r={DOT + 2} fill="#fff" />
         <Circle cx={end.x} cy={end.y} r={DOT} fill={live ? colors.primary : colors.danger} />
+
+        {/* Replay cursor retracing the run */}
+        {cursor && (
+          <>
+            <Circle cx={cursor.x} cy={cursor.y} r={DOT + 4} fill={colors.accent} opacity={0.25} />
+            <Circle cx={cursor.x} cy={cursor.y} r={DOT + 1.5} fill="#fff" />
+            <Circle cx={cursor.x} cy={cursor.y} r={DOT - 1} fill={colors.accent} />
+          </>
+        )}
       </Svg>
+
+      {/* Replay control (saved runs only) */}
+      {!live && coords.length >= 2 && (
+        <Pressable
+          onPress={replay.toggle}
+          hitSlop={8}
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            backgroundColor: replay.playing ? colors.primary : "rgba(15,23,42,0.85)",
+            borderRadius: 999,
+            paddingLeft: 10,
+            paddingRight: 12,
+            paddingVertical: 6,
+          }}
+        >
+          <Ionicons name={replay.playing ? "pause" : "play"} size={13} color="#fff" />
+          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Replay</Text>
+        </Pressable>
+      )}
 
       {/* Pace legend (only when we drew a gradient) */}
       {segments && (
