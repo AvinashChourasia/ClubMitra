@@ -290,6 +290,79 @@ func (r *Repository) setPrefs(ctx context.Context, conversationID uuid.UUID, use
 	return err
 }
 
+// Reader is one person who has read a message (per-message info).
+type Reader struct {
+	UserID string     `json:"user_id"`
+	Name   string     `json:"name"`
+	Photo  *string    `json:"profile_photo,omitempty"`
+	ReadAt time.Time  `json:"read_at"`
+}
+
+// MessageInfo is the sender-facing "message info" view: when it was sent, how
+// many people it addressed, and who has read it (conversation-level reads at or
+// after the message's timestamp).
+type MessageInfo struct {
+	SentAt     time.Time `json:"sent_at"`
+	Recipients int       `json:"recipients"`
+	Readers    []Reader  `json:"readers"`
+}
+
+// messageInfo computes read receipts for one message. Only the sender may ask —
+// anyone else gets ErrNotFound (no leaking message existence).
+func (r *Repository) messageInfo(ctx context.Context, messageID uuid.UUID, requesterID string) (*MessageInfo, error) {
+	var convID uuid.UUID
+	var senderID, convType string
+	var chapterID *uuid.UUID
+	var createdAt time.Time
+	err := r.db.QueryRow(ctx, `
+		SELECT m.conversation_id, m.sender_id, m.created_at, c.type, c.chapter_id
+		FROM messages m JOIN conversations c ON c.id = m.conversation_id
+		WHERE m.id = $1 AND m.deleted_at IS NULL`, messageID).
+		Scan(&convID, &senderID, &createdAt, &convType, &chapterID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if senderID != requesterID {
+		return nil, ErrNotFound
+	}
+
+	info := &MessageInfo{SentAt: createdAt, Readers: make([]Reader, 0)}
+
+	// How many people the message addressed (everyone but the sender).
+	if convType == "chapter" || convType == "event" {
+		if chapterID != nil {
+			_ = r.db.QueryRow(ctx, `
+				SELECT count(*) FROM chapter_members
+				WHERE chapter_id = $1 AND deleted_at IS NULL AND user_id <> $2`,
+				*chapterID, senderID).Scan(&info.Recipients)
+		}
+	} else {
+		info.Recipients = 1
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT u.id, u.name, u.profile_photo, mr.last_read_at
+		FROM message_reads mr JOIN users u ON u.id = mr.user_id
+		WHERE mr.conversation_id = $1 AND mr.user_id <> $2 AND mr.last_read_at >= $3
+		ORDER BY mr.last_read_at DESC
+		LIMIT 100`, convID, senderID, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rd Reader
+		if err := rows.Scan(&rd.UserID, &rd.Name, &rd.Photo, &rd.ReadAt); err != nil {
+			return nil, err
+		}
+		info.Readers = append(info.Readers, rd)
+	}
+	return info, rows.Err()
+}
+
 // directMemberIDs returns both participants of a direct conversation.
 func (r *Repository) directMemberIDs(ctx context.Context, conversationID uuid.UUID) ([]string, error) {
 	rows, err := r.db.Query(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id = $1`, conversationID)
@@ -496,6 +569,8 @@ func preview(body, mediaType *string) *string {
 			label = "🎥 Video"
 		} else if *mediaType == "file" {
 			label = "📎 File"
+		} else if *mediaType == "audio" {
+			label = "🎤 Voice note"
 		}
 		return &label
 	}

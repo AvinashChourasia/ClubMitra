@@ -84,6 +84,14 @@ export function editMessage(token: string, messageId: string, body: string) {
   return request<void>(`/messaging/messages/${messageId}`, { method: "PUT", body: { body }, token });
 }
 
+// Per-message info (sender-only): who has read it, out of how many.
+export type MessageReader = { user_id: string; name: string; profile_photo?: string | null; read_at: string };
+export type MessageInfo = { sent_at: string; recipients: number; readers: MessageReader[] };
+
+export function getMessageInfo(token: string, messageId: string) {
+  return request<MessageInfo>(`/messaging/messages/${messageId}/info`, { token });
+}
+
 // setReaction sets your one reaction on a message; "" clears it.
 export function setReaction(token: string, messageId: string, emoji: string) {
   return request<void>(`/messaging/messages/${messageId}/reaction`, { method: "PUT", body: { emoji }, token });

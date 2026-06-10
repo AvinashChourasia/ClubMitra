@@ -7,7 +7,9 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "runtimeVersion": { "policy": "appVersion" },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "updates": {
       "url": "https://u.expo.dev/de1b0ad2-1303-40eb-91c4-d44955b619e6"
     },
@@ -48,7 +50,13 @@
           "cameraPermission": "ClubMitra uses your camera so you can take photos to send in chat."
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "ClubMitra uses the microphone to record voice notes in chat."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

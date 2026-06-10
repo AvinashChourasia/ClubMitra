@@ -35,17 +35,26 @@ import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Swipeable } from "react-native-gesture-handler";
 import * as Haptics from "expo-haptics";
+import {
+  AudioModule,
+  RecordingPresets,
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioPlayerStatus,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from "expo-audio";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { ApiError } from "../lib/api";
-import { inbox, postChapter, postDirect, type InboxItem, type Message, type OutMsg } from "../lib/messaging";
+import { inbox, postChapter, postDirect, getMessageInfo, type InboxItem, type Message, type MessageInfo, type OutMsg } from "../lib/messaging";
 import { ensureConnected, subscribe, sendTyping, isLive, type RTEvent } from "../lib/realtime";
 import { Avatar } from "./Avatar";
 import { colors, styles } from "../lib/theme";
 
 type Staged = { uri: string; kind: "image" | "file"; name?: string; mime?: string };
-type Pending = { tempId: string; body?: string; localUri?: string; kind?: "image" | "file"; name?: string; failed?: boolean };
+type Pending = { tempId: string; body?: string; localUri?: string; kind?: "image" | "file" | "audio"; name?: string; failed?: boolean };
 
 const REACTIONS = ["👍", "❤️", "😂", "🔥", "👏", "🎉"];
 
@@ -111,6 +120,11 @@ export function ChatThread({
   const [actionFor, setActionFor] = useState<Message | null>(null);
   const [forwardFor, setForwardFor] = useState<Message | null>(null);
   const [forwardTargets, setForwardTargets] = useState<InboxItem[] | null>(null);
+  const [infoFor, setInfoFor] = useState<Message | null>(null);
+  const [infoData, setInfoData] = useState<MessageInfo | null>(null);
+  const [recordingVoice, setRecordingVoice] = useState(false);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(recorder);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const rowYs = useRef<Record<string, number>>({});
@@ -372,6 +386,73 @@ export function ChatThread({
       .catch((e) => Alert.alert("Couldn't delete", e instanceof ApiError ? e.message : "Something went wrong"));
   }
 
+  // --- voice notes ---
+  async function startVoice() {
+    const perm = await AudioModule.requestRecordingPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Microphone needed", "Enable microphone access for ClubMitra to record voice notes.");
+      return;
+    }
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setRecordingVoice(true);
+  }
+
+  async function cancelVoice() {
+    setRecordingVoice(false);
+    try {
+      await recorder.stop();
+    } catch {
+      /* never recorded */
+    }
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+  }
+
+  async function sendVoice() {
+    setRecordingVoice(false);
+    let uri: string | null = null;
+    try {
+      await recorder.stop();
+      uri = recorder.uri;
+    } catch {
+      uri = null;
+    }
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+    if (!uri || !uploadFile) return;
+
+    const tempId = `tmp-${seq.current++}`;
+    setPending((p) => [...p, { tempId, localUri: uri!, kind: "audio" }]);
+    scrollEnd(true);
+    try {
+      const mediaUrl = await uploadFile(uri, `voice-${Date.now()}.m4a`, "audio/m4a");
+      await send({ media_url: mediaUrl, media_type: "audio" });
+      const msgs = await load();
+      countRef.current = msgs.length;
+      setMessages(msgs);
+      setPending((p) => p.filter((x) => x.tempId !== tempId));
+      scrollEnd(true);
+    } catch (e) {
+      setPending((p) => p.map((x) => (x.tempId === tempId ? { ...x, failed: true } : x)));
+      Alert.alert("Couldn't send", e instanceof ApiError ? e.message : "Something went wrong");
+    }
+  }
+
+  // --- per-message info (read receipts) ---
+  async function openInfo(m: Message) {
+    setActionFor(null);
+    setInfoFor(m);
+    setInfoData(null);
+    try {
+      const token = getToken ? await getToken() : null;
+      if (!token) return;
+      setInfoData(await getMessageInfo(token, m.id));
+    } catch {
+      /* sheet shows a spinner-less fallback */
+    }
+  }
+
   // bubble: a WhatsApp-style message bubble shared by real + pending messages.
   function bubble(
     mine: boolean,
@@ -391,7 +472,8 @@ export function ChatThread({
   ) {
     const imgUri = opts.mediaUrl ?? opts.localUri;
     const isImage = !!((opts.mediaType === "image" || opts.kind === "image") && imgUri);
-    const isFile = opts.mediaType === "file" || opts.kind === "file";
+    const isAudio = opts.mediaType === "audio" || opts.kind === "audio";
+    const isFile = !isAudio && (opts.mediaType === "file" || opts.kind === "file");
     const fg = mine ? colors.bubbleMineText : colors.text;
     const footFg = mine ? colors.bubbleMineText + "B3" : colors.muted; // ~70% alpha
     const icon: Record<string, { name: keyof typeof Ionicons.glyphMap; color: string }> = {
@@ -443,6 +525,9 @@ export function ChatThread({
             <Image source={{ uri: imgUri! }} style={{ width: 216, height: 216, borderRadius: 15 }} resizeMode="cover" />
           </Pressable>
         ) : null}
+        {isAudio ? (
+          <VoiceBubble uri={(opts.mediaUrl ?? opts.localUri)!} mine={mine} />
+        ) : null}
         {isFile ? (
           <Pressable
             onPress={() => opts.mediaUrl && Linking.openURL(opts.mediaUrl)}
@@ -454,7 +539,7 @@ export function ChatThread({
             <Text style={{ color: fg, fontWeight: "600", maxWidth: 150 }} numberOfLines={1}>{opts.name ?? "Document"}</Text>
           </Pressable>
         ) : null}
-        <View style={{ flexDirection: "row", alignItems: "flex-end", flexWrap: "wrap", justifyContent: "flex-end", paddingHorizontal: 9, paddingTop: isImage || isFile ? 2 : 6, paddingBottom: 5 }}>
+        <View style={{ flexDirection: "row", alignItems: "flex-end", flexWrap: "wrap", justifyContent: "flex-end", paddingHorizontal: 9, paddingTop: isImage || isFile || isAudio ? 2 : 6, paddingBottom: 5 }}>
           {opts.body ? <Text style={{ color: fg, fontSize: 15, flexShrink: 1, marginRight: 8 }}>{opts.body}</Text> : null}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: "auto" }}>
             {opts.edited ? <Text style={{ color: footFg, fontSize: 10, fontStyle: "italic" }}>edited · </Text> : null}
@@ -718,6 +803,23 @@ export function ChatThread({
               <Text style={{ color: announceMode ? colors.primary : colors.muted, fontSize: 12, fontWeight: "700" }}>{announceMode ? "Announcing (pushes to all members)" : "Send as announcement"}</Text>
             </Pressable>
           )}
+          {recordingVoice ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <Pressable onPress={() => void cancelVoice()} hitSlop={8} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="trash" size={19} color={colors.danger} />
+              </Pressable>
+              <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.bgSecondary, borderRadius: 22, paddingHorizontal: 16, height: 44 }}>
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.danger }} />
+                <Text style={{ color: colors.text, fontWeight: "700", fontSize: 15, fontVariant: ["tabular-nums"] }}>
+                  {fmtClock(recorderState.durationMillis ?? 0)}
+                </Text>
+                <Text style={{ color: colors.muted, fontSize: 13 }}>Recording…</Text>
+              </View>
+              <Pressable onPress={() => void sendVoice()} style={{ backgroundColor: colors.primary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="send" size={18} color="#fff" />
+              </Pressable>
+            </View>
+          ) : (
           <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
             {(uploadImage || uploadFile) && !announceMode && !staged && !editing && (
               <Pressable onPress={() => setAttachMenu(true)} hitSlop={6} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}>
@@ -732,10 +834,21 @@ export function ChatThread({
               onChangeText={onTextChange}
               multiline
             />
-            <Pressable onPress={onSend} disabled={!text.trim() && !staged} style={{ backgroundColor: text.trim() || staged ? colors.primary : colors.bgSecondary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name={editing ? "checkmark" : "send"} size={18} color={text.trim() || staged ? "#fff" : colors.muted} />
-            </Pressable>
+            {text.trim() || staged || editing ? (
+              <Pressable onPress={onSend} style={{ backgroundColor: colors.primary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name={editing ? "checkmark" : "send"} size={18} color="#fff" />
+              </Pressable>
+            ) : uploadFile && !announceMode ? (
+              <Pressable onPress={() => void startVoice()} style={{ backgroundColor: colors.primary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="mic" size={19} color="#fff" />
+              </Pressable>
+            ) : (
+              <Pressable disabled style={{ backgroundColor: colors.bgSecondary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="send" size={18} color={colors.muted} />
+              </Pressable>
+            )}
           </View>
+          )}
         </View>
       </KeyboardAvoidingView>
 
@@ -829,6 +942,9 @@ export function ChatThread({
               {actionFor.sender_id === meId && actionFor.body && edit ? (
                 <MenuRow label="Edit" icon="pencil" onPress={() => startEdit(actionFor)} />
               ) : null}
+              {actionFor.sender_id === meId && getToken ? (
+                <MenuRow label="Info" icon="information-circle-outline" onPress={() => void openInfo(actionFor)} />
+              ) : null}
               {actionFor.sender_id === meId && deleteMessage ? (
                 <MenuRow label="Delete" icon="trash-outline" danger last onPress={() => doDelete(actionFor)} />
               ) : null}
@@ -870,6 +986,47 @@ export function ChatThread({
         </View>
       )}
 
+      {/* Message info — who's read it (sender-only) */}
+      {infoFor && (
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
+          <Pressable onPress={() => setInfoFor(null)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
+          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 30, maxHeight: 440 }}>
+            <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 10 }} />
+            <Text style={{ color: colors.text, fontWeight: "800", fontSize: 17 }}>Message info</Text>
+            <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2, marginBottom: 10 }}>
+              Sent {new Date(infoFor.created_at).toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
+            </Text>
+            {infoData === null ? (
+              <ActivityIndicator color={colors.primary} style={{ marginVertical: 18 }} />
+            ) : (
+              <>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 }}>
+                  <Ionicons name="checkmark-done" size={18} color="#38BDF8" />
+                  <Text style={{ color: colors.text, fontWeight: "700", fontSize: 14 }}>
+                    Read by {infoData.readers.length}{isGroup ? ` of ${infoData.recipients}` : ""}
+                  </Text>
+                </View>
+                {infoData.readers.length === 0 ? (
+                  <Text style={{ color: colors.muted, paddingVertical: 8 }}>Not read yet.</Text>
+                ) : (
+                  <ScrollView style={{ maxHeight: 280 }}>
+                    {infoData.readers.map((rd) => (
+                      <View key={rd.user_id} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9 }}>
+                        <Avatar name={rd.name} uri={rd.profile_photo} size={38} bg={colors.accent} />
+                        <Text style={{ flex: 1, color: colors.text, fontWeight: "600", fontSize: 14 }} numberOfLines={1}>{rd.name}</Text>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>
+                          {new Date(rd.read_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                )}
+              </>
+            )}
+          </View>
+        </View>
+      )}
+
       {/* Attachment menu — inline overlay (NOT a Modal): launching the native
           picker from inside a dismissing Modal crashes on iOS. */}
       {attachMenu && (
@@ -905,6 +1062,54 @@ export function ChatThread({
         </Pressable>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+// fmtClock renders milliseconds as m:ss.
+function fmtClock(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+// VoiceBubble: play/pause + progress + duration for a voice note. One player
+// per bubble (expo-audio hook), streams local or remote m4a.
+function VoiceBubble({ uri, mine }: { uri: string; mine: boolean }) {
+  const player = useAudioPlayer(uri);
+  const status = useAudioPlayerStatus(player);
+  const fg = mine ? colors.bubbleMineText : colors.text;
+  const sub = mine ? colors.bubbleMineText + "B3" : colors.muted;
+
+  const playing = status.playing;
+  const duration = status.duration ?? 0;
+  const current = status.currentTime ?? 0;
+  const frac = duration > 0 ? Math.min(1, current / duration) : 0;
+
+  function toggle() {
+    if (playing) {
+      player.pause();
+    } else {
+      if (status.didJustFinish || (duration > 0 && current >= duration - 0.05)) player.seekTo(0);
+      player.play();
+    }
+  }
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 9, width: 210 }}>
+      <Pressable onPress={toggle} style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: mine ? colors.bubbleMineText + "26" : colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name={playing ? "pause" : "play"} size={18} color={mine ? colors.bubbleMineText : colors.primary} />
+      </Pressable>
+      <View style={{ flex: 1, gap: 5 }}>
+        <View style={{ height: 4, borderRadius: 2, backgroundColor: mine ? colors.bubbleMineText + "33" : colors.border, overflow: "hidden" }}>
+          <View style={{ width: `${frac * 100}%`, height: "100%", backgroundColor: fg, borderRadius: 2 }} />
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          <Ionicons name="mic" size={11} color={sub} />
+          <Text style={{ color: sub, fontSize: 11, fontVariant: ["tabular-nums"] }}>
+            {fmtClock((playing || current > 0 ? current : duration) * 1000)}
+          </Text>
+        </View>
+      </View>
+    </View>
   );
 }
 

@@ -356,6 +356,11 @@ func (s *Service) EditMessage(ctx context.Context, userID string, messageID uuid
 	return nil
 }
 
+// MessageInfo returns sender-only read receipts for one message.
+func (s *Service) MessageInfo(ctx context.Context, userID string, messageID uuid.UUID) (*MessageInfo, error) {
+	return s.repo.messageInfo(ctx, messageID, userID)
+}
+
 // SetReaction sets (or clears, with an empty emoji) the caller's reaction on a
 // message they can see, then nudges the conversation so other clients refresh.
 func (s *Service) SetReaction(ctx context.Context, userID string, messageID uuid.UUID, emoji string) error {
