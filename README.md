@@ -253,14 +253,38 @@ clubmitra/
 - [x] Inventory dashboard: stock levels (mobile manage screen) + transaction history (API)
 - [ ] _(Paid purchase + platform cut depends on payments → Phase 3)_
 
-#### Messaging
-- [x] Club-wide group chat (one per chapter)
+#### Messaging — upgraded to WhatsApp-grade (June 2026)
+- [x] Club-wide group chat (one per chapter) + 1:1 direct messages
 - [x] Event chat (one per run, members of the chapter)
 - [x] Club-wide announcement broadcast (push; email via SendGrid → Phase 3)
-- [x] Read markers (`message_reads`) for unread badges later
-- [ ] Photo, video, file sharing in chats (schema ready; UI is text-only)
-- [ ] Pinned messages per chat (schema ready; no UI yet)
+- [x] **Realtime delivery + typing indicators** (WebSocket hub, poll fallback)
+- [x] Inbox: pinned club chats, unread badges (+ tab badge), "You:" previews, search
+- [x] Swipe actions: mute (silences badges) + archive (collapsed section)
+- [x] Photo / camera / document attachments, fullscreen viewer
+- [x] **Voice notes** (record → upload → in-bubble player) — needs APK rebuild (expo-audio)
+- [x] Reactions (one per person, live), reply-quoting (+ tap-quote-to-jump), edit, delete
+- [x] Forward to any conversation; WhatsApp-style long-press overlay menu
+- [x] Per-message info: "Read by X of Y" with reader times (sender-only)
+- [x] Read receipts: sent ✓ → read ✓✓ (sky blue); WhatsApp bubble palette + wallpaper
+- [ ] Push notifications for new chat messages (announcements already push)
+- [ ] Message search inside a conversation; voice-note waveforms
 - [ ] _(Desktop admin web panel → Phase 3)_
+
+#### 🧪 Chat test checklist (needs two accounts; voice notes need the new APK)
+- [ ] Realtime: send from device A → lands on B instantly (no refresh)
+- [ ] Typing: type on A → B's thread header + chat-list row show "typing…"
+- [ ] Inbox: clubs pinned on top, unread badge counts, "You:" prefix, search filters
+- [ ] Tab badge: unread total on the Chat tab; clears after reading
+- [ ] Swipe a row → Mute (badge goes grey + tab total drops) and Archive (bottom section)
+- [ ] Long-press a message → overlay: emoji pill above, menu below (spring + haptic)
+- [ ] React from the pill → chip appears live on both devices; tap chip to clear
+- [ ] Swipe a message right → reply bar arms; send → quote block; tap quote → jumps + flashes
+- [ ] Edit your own message → "edited" label on both sides
+- [ ] Forward a message (text + a photo) to another conversation
+- [ ] Voice note: mic → record (timer) → send → playable bubble both sides; "🎤 Voice note" preview
+- [ ] Message info (long-press your msg → Info): "Read by X of Y" updates after B opens the chat
+- [ ] Delete for everyone; scroll up while B sends → jump-FAB with count (no yank)
+- [ ] Attachments: photo library, camera, document; staged preview + caption
 
 #### Cleanup
 - [ ] ClubMitra rename (Go module, DB name, env vars, ports) — see naming note

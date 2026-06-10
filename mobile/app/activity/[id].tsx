@@ -4,7 +4,7 @@
 // (no map tiles / API key), and show the full stat breakdown.
 
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Platform, ScrollView, Share, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -71,6 +71,23 @@ export default function ActivityDetail() {
   // wall-clock from start to finish. Their difference is time spent paused.
   const elapsedS = activity ? Math.max(0, Math.round((Date.parse(activity.ended_at) - Date.parse(activity.started_at)) / 1000)) : 0;
   const pausedS = activity ? Math.max(0, elapsedS - activity.duration_s) : 0;
+  const bestSplit = splits.length > 0 ? Math.min(...splits.map((s) => s.paceSPerKm)) : null;
+
+  // Share the run as a brag-ready line (image cards can come later).
+  async function onShare() {
+    if (!activity) return;
+    const when = new Date(activity.started_at).toLocaleDateString([], { day: "numeric", month: "short" });
+    const lines = [
+      `🏃 ${formatDistance(activity.distance_m)} in ${formatDuration(activity.duration_s)} (${formatPace(activity.avg_pace_s_per_km)})`,
+      bestSplit ? `⚡ Best km ${formatPace(bestSplit)}` : null,
+      `📍 ${when} · tracked on ClubMitra`,
+    ].filter(Boolean);
+    try {
+      await Share.share({ message: lines.join("\n") });
+    } catch {
+      /* user dismissed */
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -121,6 +138,27 @@ export default function ActivityDetail() {
       >
         <Ionicons name="chevron-back" size={22} color="#fff" />
       </Tap>
+      {activity && (
+        <Tap
+          onPress={() => void onShare()}
+          hitSlop={10}
+          haptic={false}
+          style={{
+            position: "absolute",
+            top: 58,
+            right: 24,
+            zIndex: 10,
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: "rgba(15,23,42,0.55)",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons name="share-outline" size={19} color="#fff" />
+        </Tap>
+      )}
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -166,6 +204,7 @@ export default function ActivityDetail() {
             <StatCard label="Speed" value={formatSpeed(activity.distance_m, activity.duration_s)} />
           </StatRow>
           <StatRow>
+            {bestSplit !== null && <StatCard label="Best km" value={formatPace(bestSplit)} valueColor={colors.primary} />}
             <StatCard
               label="Elev gain"
               value={formatElevation(activity.elevation_gain_m)}
