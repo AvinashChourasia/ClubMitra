@@ -61,6 +61,11 @@ export default function ActivityDetail() {
 
   const splits = useMemo(() => computeSplits(route, times), [route, times]);
 
+  // duration_s is MOVING time (server already subtracted auto-pauses); elapsed is
+  // wall-clock from start to finish. Their difference is time spent paused.
+  const elapsedS = activity ? Math.max(0, Math.round((Date.parse(activity.ended_at) - Date.parse(activity.started_at)) / 1000)) : 0;
+  const pausedS = activity ? Math.max(0, elapsedS - activity.duration_s) : 0;
+
   useEffect(() => {
     let active = true;
     (async () => {
@@ -126,18 +131,23 @@ export default function ActivityDetail() {
             </Text>
           </View>
 
-          {/* Stat tiles */}
+          {/* Stat tiles — moving vs elapsed up top (they match for a run with no
+              auto-pauses; elapsed is longer when you stopped along the way). */}
           <StatRow>
-            <StatCard label="Time" value={formatDuration(activity.duration_s)} />
-            <StatCard label="Pace" value={formatPace(activity.avg_pace_s_per_km)} />
+            <StatCard label="Moving" value={formatDuration(activity.duration_s)} />
+            <StatCard label="Elapsed" value={formatDuration(elapsedS)} valueColor={pausedS >= 1 ? colors.muted : undefined} />
           </StatRow>
           <StatRow>
+            <StatCard label="Pace" value={formatPace(activity.avg_pace_s_per_km)} />
             <StatCard label="Speed" value={formatSpeed(activity.distance_m, activity.duration_s)} />
+          </StatRow>
+          <StatRow>
             <StatCard
               label="Elev gain"
               value={formatElevation(activity.elevation_gain_m)}
               valueColor={colors.success}
             />
+            {pausedS >= 1 && <StatCard label="Paused" value={formatDuration(pausedS)} valueColor={colors.muted} />}
           </StatRow>
 
           {/* Per-km splits — tapping a row flies the map to that kilometre */}
