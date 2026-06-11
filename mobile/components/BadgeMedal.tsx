@@ -1,7 +1,9 @@
-// BadgeMedal: a 3D-feeling medal rendered in SVG — hanging ribbon, metallic
-// ring with a radial sheen, inner disc, gloss highlight, and the badge emoji at
-// the center. Locked badges render as grey silhouettes (the wall pairs them
-// with a progress bar).
+// BadgeMedal: a medal rendered in SVG. Two faithful sizes:
+//  - compact (< 90px): a crisp coin — metallic ring + inner disc + emoji.
+//    No ribbon: at grid sizes the straps just turn to visual mush.
+//  - ceremonial (>= 90px): the full medal with hanging ribbon, for the unlock
+//    moment and detail views.
+// Locked badges render as grey silhouettes (the wall pairs them with progress).
 
 import { Text, View } from "react-native";
 import Svg, { Circle, Defs, Path, Polygon, RadialGradient, Stop } from "react-native-svg";
@@ -25,15 +27,17 @@ type Props = {
 };
 
 export function BadgeMedal({ emoji, color, size = 72, locked = false }: Props) {
-  const c = locked ? "#9AA4B2" : color;
-  const cx = size / 2;
-  const ribbonW = size * 0.2;
-  const cy = size * 0.58; // medal hangs below the ribbon
-  const r = size * 0.36;
+  const c = locked ? "#A6B0BD" : color;
   const gid = `medal-${c.replace(/[^a-zA-Z0-9]/g, "")}-${size}`;
+  const ceremonial = size >= 90;
+
+  // Coin geometry: centered for compact; hung below the ribbon for ceremonial.
+  const cx = size / 2;
+  const cy = ceremonial ? size * 0.58 : size / 2;
+  const r = ceremonial ? size * 0.36 : size * 0.44;
 
   return (
-    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center", opacity: locked ? 0.55 : 1 }}>
+    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center", opacity: locked ? 0.45 : 1 }}>
       <Svg width={size} height={size}>
         <Defs>
           <RadialGradient id={gid} cx="38%" cy="32%" r="80%">
@@ -42,24 +46,27 @@ export function BadgeMedal({ emoji, color, size = 72, locked = false }: Props) {
             <Stop offset="100%" stopColor={blend(c, -0.3)} />
           </RadialGradient>
         </Defs>
-        {/* Ribbon straps */}
-        <Polygon
-          points={`${cx - ribbonW},0 ${cx - ribbonW * 0.1},0 ${cx},${cy - r * 0.6} ${cx - ribbonW * 0.55},${cy - r * 0.45}`}
-          fill={locked ? "#7C8794" : blend(c, -0.25)}
-        />
-        <Polygon
-          points={`${cx + ribbonW * 0.1},0 ${cx + ribbonW},0 ${cx + ribbonW * 0.55},${cy - r * 0.45} ${cx},${cy - r * 0.6}`}
-          fill={locked ? "#8B96A5" : blend(c, -0.1)}
-        />
+        {ceremonial && (
+          <>
+            {/* Ribbon straps — only at sizes where they read cleanly */}
+            <Polygon
+              points={`${cx - size * 0.2},0 ${cx - size * 0.02},0 ${cx},${cy - r * 0.6} ${cx - size * 0.11},${cy - r * 0.45}`}
+              fill={locked ? "#7C8794" : blend(c, -0.25)}
+            />
+            <Polygon
+              points={`${cx + size * 0.02},0 ${cx + size * 0.2},0 ${cx + size * 0.11},${cy - r * 0.45} ${cx},${cy - r * 0.6}`}
+              fill={locked ? "#8B96A5" : blend(c, -0.1)}
+            />
+          </>
+        )}
         {/* Medal body: sheen ring + inner disc */}
         <Circle cx={cx} cy={cy} r={r} fill={`url(#${gid})`} />
-        <Circle cx={cx} cy={cy} r={r * 0.78} fill={blend(c, locked ? 0.18 : 0.3)} />
-        <Circle cx={cx} cy={cy} r={r * 0.78} stroke={blend(c, -0.2)} strokeWidth={1} fill="none" />
-        {/* Gloss arc, top-left */}
+        <Circle cx={cx} cy={cy} r={r * 0.76} fill={blend(c, locked ? 0.22 : 0.34)} />
+        {/* Gloss arc, top-left — one clean highlight, no extra ornament */}
         <Path
-          d={`M ${cx - r * 0.62} ${cy - r * 0.28} A ${r * 0.7} ${r * 0.7} 0 0 1 ${cx + r * 0.1} ${cy - r * 0.68}`}
-          stroke="rgba(255,255,255,0.7)"
-          strokeWidth={size * 0.035}
+          d={`M ${cx - r * 0.58} ${cy - r * 0.3} A ${r * 0.68} ${r * 0.68} 0 0 1 ${cx + r * 0.08} ${cy - r * 0.64}`}
+          stroke="rgba(255,255,255,0.65)"
+          strokeWidth={Math.max(1.5, size * 0.03)}
           strokeLinecap="round"
           fill="none"
         />
@@ -67,9 +74,10 @@ export function BadgeMedal({ emoji, color, size = 72, locked = false }: Props) {
       <Text
         style={{
           position: "absolute",
-          top: cy - size * 0.17,
-          fontSize: size * 0.3,
-          opacity: locked ? 0.6 : 1,
+          top: cy - r * 0.52,
+          fontSize: r * 1.0,
+          lineHeight: r * 1.15,
+          opacity: locked ? 0.55 : 1,
         }}
       >
         {emoji}

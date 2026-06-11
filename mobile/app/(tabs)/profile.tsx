@@ -34,16 +34,17 @@ import { RouteTrace } from "../../components/RouteTrace";
 import { Tap } from "../../components/Tap";
 import { GuestProfile } from "../../components/GuestScreens";
 
-// medalStrip: what the profile teaser shows — every earned badge (newest
-// first), then the locked ones closest to unlocking.
+// medalStrip: the profile teaser — latest pride (6 newest medals) plus the
+// 3 nearest unlocks. A glance, not the whole wall; "See all" carries the rest.
 function medalStrip(gam: GamificationProfile): BadgeStatus[] {
   const earned = gam.badges
     .filter((b) => b.earned)
-    .sort((a, b) => (b.earned_at ?? "").localeCompare(a.earned_at ?? ""));
+    .sort((a, b) => (b.earned_at ?? "").localeCompare(a.earned_at ?? ""))
+    .slice(0, 6);
   const next = gam.badges
     .filter((b) => !b.earned && b.target > 0)
     .sort((a, b) => b.current / b.target - a.current / a.target)
-    .slice(0, 4);
+    .slice(0, 3);
   return [...earned, ...next];
 }
 
