@@ -4,7 +4,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -227,6 +227,18 @@ export default function Home() {
                 <Text style={{ color: colors.muted, fontSize: 13 }}>
                   {clubs.length > 0 ? `${clubs.length} ${clubs.length === 1 ? "club" : "clubs"} · tap to manage` : "Join or create a running club"}
                 </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
+            </Tap>
+
+            {/* Race calendar */}
+            <Tap onPress={() => router.push("/races" as Href)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
+              <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: "#FEF3C7", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="flag" size={22} color="#F59E0B" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Race calendar</Text>
+                <Text style={{ color: colors.muted, fontSize: 13 }}>Upcoming races — mark yourself going</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
             </Tap>

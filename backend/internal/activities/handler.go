@@ -2,8 +2,11 @@ package activities
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"errors"
+	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -35,6 +38,7 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/stats", h.stats)
 	r.Get("/city-leaderboard", h.cityLeaderboard)
 	r.Get("/feed/{chapterID}", h.chapterFeed) // club activity feed (members only)
+	r.Post("/import-gpx", h.importGPX)        // watch exports (Garmin/Polar/Suunto)
 	// chi captures the {id} path segment; read it with chi.URLParam.
 	r.Get("/{id}", h.get)
 	r.Get("/{id}/geojson", h.geojson)
@@ -164,6 +168,88 @@ func (h *Handler) cityLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, view)
+}
+
+// gpxFile mirrors the GPX track structure we care about: every <trkpt> in
+// every segment of every track, in document order.
+type gpxFile struct {
+	Tracks []struct {
+		Segments []struct {
+			Points []struct {
+				Lat  float64    `xml:"lat,attr"`
+				Lon  float64    `xml:"lon,attr"`
+				Ele  float64    `xml:"ele"`
+				Time *time.Time `xml:"time"`
+			} `xml:"trkpt"`
+		} `xml:"trkseg"`
+	} `xml:"trk"`
+}
+
+// importGPX accepts a GPX file (multipart field "file") from a watch export and
+// records it through the exact same pipeline as a live run — PostGIS distance,
+// pace, route, challenge + leaderboard credit.
+func (h *Handler) importGPX(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	if err := r.ParseMultipartForm(16 << 20); err != nil { // 16MB cap
+		httpx.Error(w, http.StatusBadRequest, "couldn't read the upload")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "attach the GPX as the \"file\" field")
+		return
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, 16<<20))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "couldn't read the upload")
+		return
+	}
+
+	var gpx gpxFile
+	if err := xml.Unmarshal(raw, &gpx); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "that doesn't look like a valid GPX file")
+		return
+	}
+	points := make([]geo.Point, 0, 1024)
+	missingTime := 0
+	for _, trk := range gpx.Tracks {
+		for _, seg := range trk.Segments {
+			for _, pt := range seg.Points {
+				if pt.Time == nil || pt.Time.IsZero() {
+					missingTime++
+					continue
+				}
+				points = append(points, geo.Point{Lat: pt.Lat, Lng: pt.Lon, Altitude: pt.Ele, Timestamp: pt.Time.UTC()})
+			}
+		}
+	}
+	if len(points) < 2 {
+		msg := "this GPX has no track points"
+		if missingTime > 0 {
+			msg = "this GPX has no timestamps — export it with time data"
+		}
+		httpx.Error(w, http.StatusBadRequest, msg)
+		return
+	}
+	// Some exporters interleave segments oddly; sort defensively by time.
+	sort.Slice(points, func(i, j int) bool { return points[i].Timestamp.Before(points[j].Timestamp) })
+
+	act, err := h.svc.Record(r.Context(), userID, points, true, 0)
+	if err != nil {
+		var ve ValidationError
+		if errors.As(err, &ve) {
+			httpx.Error(w, http.StatusBadRequest, ve.Msg)
+			return
+		}
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, act)
 }
 
 // chapterFeed lists a club's recent member runs for the club page Feed tab.

@@ -3,13 +3,15 @@
 // Profile tab.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
+import * as DocumentPicker from "expo-document-picker";
+
 import { useAuth } from "../../lib/auth";
-import { listActivities, getStats, type Activity, type Stats } from "../../lib/activities";
+import { listActivities, getStats, importGPX, type Activity, type Stats } from "../../lib/activities";
 import { formatDistance, formatDuration, formatPace } from "../../lib/format";
 import { Tap } from "../../components/Tap";
 import { colors, styles } from "../../lib/theme";
@@ -60,6 +62,26 @@ export default function RunHistory() {
     setRefreshing(false);
   }
 
+  // Import a GPX from a watch export (Garmin / Polar / Suunto / Strava export).
+  async function onImportGPX() {
+    try {
+      const r = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
+      if (r.canceled || !r.assets[0]) return;
+      const a = r.assets[0];
+      if (!a.name.toLowerCase().endsWith(".gpx")) {
+        Alert.alert("Not a GPX", "Pick a .gpx file exported from your watch or app.");
+        return;
+      }
+      const token = await getAccessToken();
+      if (!token) return;
+      const act = await importGPX(token, a.uri, a.name);
+      Alert.alert("Run imported 🎉", `${(act.distance_m / 1000).toFixed(2)} km added — it counts toward your clubs & challenges.`);
+      await load();
+    } catch (e) {
+      Alert.alert("Import failed", e instanceof Error ? e.message : "Try a different file.");
+    }
+  }
+
   if (!user) return <Redirect href="/login" />;
 
   return (
@@ -77,7 +99,11 @@ export default function RunHistory() {
           >
             <Ionicons name="chevron-back" size={28} color={colors.text} />
           </Tap>
-          <Text style={{ fontSize: 24, fontWeight: "800", color: colors.text }}>Your runs</Text>
+          <Text style={{ fontSize: 24, fontWeight: "800", color: colors.text, flex: 1 }}>Your runs</Text>
+          <Tap onPress={() => void onImportGPX()} hitSlop={8} haptic={false} style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.bg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 }}>
+            <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
+            <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 13 }}>GPX</Text>
+          </Tap>
         </View>
 
         {/* All-time stats */}

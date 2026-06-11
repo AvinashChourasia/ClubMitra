@@ -234,6 +234,12 @@ export default function Profile() {
             <StatCell value={stats?.best_pace_s_per_km ? formatPace(stats.best_pace_s_per_km) : "—"} label="Best pace" />
           </View>
           <WeeklyBars activities={activities} />
+          {stats && (
+            <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "600" }}>
+              ❄️ {stats.streak_freezes_left} streak freeze{stats.streak_freezes_left === 1 ? "" : "s"} left this month — a
+              rest day won't break your streak.
+            </Text>
+          )}
         </View>
 
         {/* Last run — the route shape is the athlete card's "photo" */}

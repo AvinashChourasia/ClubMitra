@@ -309,6 +309,7 @@ type Stats struct {
 	LongestRunM     float64  `json:"longest_run_m"`
 	BestPaceSPerKM  *float64 `json:"best_pace_s_per_km"`
 	CurrentStreakDays int    `json:"current_streak_days"`
+	FreezesLeft     int      `json:"streak_freezes_left"` // this month's unused allowance
 }
 
 // Stats computes all-time totals for a user in a single aggregate query, then
@@ -335,14 +336,22 @@ func (r *Repository) Stats(ctx context.Context, userID string) (*Stats, error) {
 		return nil, err
 	}
 	s.CurrentStreakDays = streak
+	left, err := r.freezesLeft(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	s.FreezesLeft = left
 	return &s, nil
 }
 
+// freezesPerMonth is each runner's streak-freeze allowance per calendar month.
+const freezesPerMonth = 2
+
 // currentStreakDays returns how many consecutive days up to today the user has
-// run. We fetch the distinct run-days (newest first) and walk them: the streak
-// is unbroken while each day is exactly one day before the previous. It counts
-// only if the most recent run was today or yesterday (today not yet run is still
-// a live streak).
+// run — with streak freezes: a missed day is bridged automatically (and the
+// freeze consumed, max 2 per calendar month) as long as a real run day sits on
+// the far side of the gap. Today not yet run is still a live streak and never
+// costs a freeze. Frozen days bridge the walk but don't increment the count.
 func (r *Repository) currentStreakDays(ctx context.Context, userID string) (int, error) {
 	const q = `
 		SELECT DISTINCT (started_at AT TIME ZONE 'UTC')::date AS d
@@ -369,20 +378,85 @@ func (r *Repository) currentStreakDays(ctx context.Context, userID string) (int,
 		return 0, nil
 	}
 
-	today := time.Now().UTC().Truncate(24 * time.Hour)
-	// Most recent run must be today or yesterday for the streak to be "current".
-	gap := int(today.Sub(days[0]) / (24 * time.Hour))
-	if gap > 1 {
-		return 0, nil
+	// Existing freezes: they bridge for free and count toward their month's use.
+	frozen := map[string]bool{}
+	monthUsed := map[string]int{}
+	fr, err := r.db.Query(ctx, `SELECT frozen_on FROM streak_freezes WHERE user_id = $1`, userID)
+	if err != nil {
+		return 0, err
+	}
+	for fr.Next() {
+		var d time.Time
+		if err := fr.Scan(&d); err != nil {
+			fr.Close()
+			return 0, err
+		}
+		frozen[d.Format("2006-01-02")] = true
+		monthUsed[d.Format("2006-01")]++
+	}
+	fr.Close()
+	if err := fr.Err(); err != nil {
+		return 0, err
 	}
 
-	streak := 1
-	for i := 1; i < len(days); i++ {
-		if int(days[i-1].Sub(days[i])/(24*time.Hour)) == 1 {
-			streak++
-		} else {
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	cursor := today
+	if !days[0].Equal(today) {
+		cursor = today.AddDate(0, 0, -1) // today is optional — there's still time to run
+	}
+
+	streak := 0
+	var newFreezes []time.Time
+	for _, runDay := range days {
+		if runDay.After(cursor) {
+			continue // already covered (e.g. today's run when cursor started at today)
+		}
+		// Bridge the missing days between the cursor and this run day. Every one
+		// must be frozen (existing or freshly consumable), or the streak ends here.
+		ok := true
+		for d := cursor; d.After(runDay); d = d.AddDate(0, 0, -1) {
+			key := d.Format("2006-01-02")
+			if frozen[key] {
+				continue
+			}
+			month := d.Format("2006-01")
+			if monthUsed[month] >= freezesPerMonth {
+				ok = false
+				break
+			}
+			monthUsed[month]++
+			frozen[key] = true
+			newFreezes = append(newFreezes, d)
+		}
+		if !ok {
 			break
 		}
+		streak++
+		cursor = runDay.AddDate(0, 0, -1)
+	}
+
+	// Persist the freezes this walk consumed (idempotent via the PK).
+	for _, d := range newFreezes {
+		_, _ = r.db.Exec(ctx,
+			`INSERT INTO streak_freezes (user_id, frozen_on) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			userID, d)
 	}
 	return streak, nil
+}
+
+// freezesLeft returns the unused streak-freeze allowance for the current month.
+func (r *Repository) freezesLeft(ctx context.Context, userID string) (int, error) {
+	var used int
+	err := r.db.QueryRow(ctx, `
+		SELECT count(*) FROM streak_freezes
+		WHERE user_id = $1 AND date_trunc('month', frozen_on) = date_trunc('month', now())`,
+		userID).Scan(&used)
+	if err != nil {
+		return 0, err
+	}
+	left := freezesPerMonth - used
+	if left < 0 {
+		left = 0
+	}
+	return left, nil
 }

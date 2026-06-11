@@ -1,7 +1,7 @@
 // Typed client for the activities API. Thin wrappers over the shared request()
 // helper so screens deal in domain types (Activity, RunPoint), not URLs.
 
-import { request } from "./api";
+import { BASE_URL, ApiError, request } from "./api";
 
 // One GPS sample we send to the server. Matches the backend's pointInput shape
 // (lat/lng in human order; the server handles PostGIS lng-first internally).
@@ -50,6 +50,7 @@ export type Stats = {
   longest_run_m: number;
   best_pace_s_per_km: number | null;
   current_streak_days: number;
+  streak_freezes_left: number; // this month's unused freeze allowance
 };
 
 export function getStats(token: string): Promise<Stats> {
@@ -66,6 +67,23 @@ export function listActivities(token: string, limit = 20): Promise<Activity[]> {
 // getActivity fetches a single run by id.
 export function getActivity(token: string, id: string): Promise<Activity> {
   return request<Activity>(`/activities/${id}`, { token });
+}
+
+// importGPX uploads a watch export (Garmin/Polar/Suunto .gpx) as a recorded
+// run — same pipeline as live GPS, so it credits challenges + leaderboards.
+// Posted as multipart straight from the picker uri (no filesystem read needed).
+export async function importGPX(token: string, uri: string, name: string): Promise<Activity> {
+  const form = new FormData();
+  // React Native FormData accepts {uri, name, type} file descriptors.
+  form.append("file", { uri, name, type: "application/gpx+xml" } as unknown as Blob);
+  const res = await fetch(`${BASE_URL}/activities/import-gpx`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? `Import failed (${res.status})`);
+  return data as Activity;
 }
 
 // One club-feed entry: a member's recorded run with display fields.

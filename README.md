@@ -346,15 +346,15 @@ clubmitra/
 - [x] Animated route replay (retrace the run)
 - [x] Auto-pause detection (moving vs elapsed time)
 - [x] Run history + all-time stats (runs, distance, time, streak)
-- [ ] GPX file import from any GPS device (Garmin, Polar, Suunto)
+- [x] GPX file import from any GPS device (Garmin, Polar, Suunto)
 - [x] Runs auto-credit to active challenges (replaces manual Strava proof)
 - [x] Runs auto-credit to rolling leaderboards
 - [x] Personal stats: total km, streak, personal records
-- [ ] Activity feed per chapter
-- [ ] Streak freeze: 2 per month to protect streaks during planned rest
+- [x] Activity feed per chapter (club page Feed tab)
+- [x] Streak freeze: 2 per month, auto-applied to bridge missed days
 - [x] Background GPS (requires EAS dev build)
 - [x] City leaderboard: all verified runners in a city ranked collectively
-- [ ] Race calendar: discover races by type, city, distance
+- [x] Race calendar: community-listed races by city, "I'm going", add to phone/Google calendar
 - [ ] Race calendar map view (interactive, search by location)
 - [ ] Similar races list / race recommendations
 - [ ] Calendar embed widget for club websites
