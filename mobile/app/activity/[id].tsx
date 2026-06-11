@@ -74,12 +74,18 @@ export default function ActivityDetail() {
   const bestSplit = splits.length > 0 ? Math.min(...splits.map((s) => s.paceSPerKm)) : null;
 
   // Share the run as a brag-ready line (image cards can come later).
+  // Pace and best-km only appear on runs of 1 km+ — pace on a short test
+  // loop is noise, not a brag.
   async function onShare() {
     if (!activity) return;
     const when = new Date(activity.started_at).toLocaleDateString([], { day: "numeric", month: "short" });
+    const fullKm = activity.distance_m >= 1000;
+    const headline = fullKm
+      ? `🏃 ${formatDistance(activity.distance_m)} in ${formatDuration(activity.duration_s)} — ${formatPace(activity.avg_pace_s_per_km)}`
+      : `🏃 ${formatDistance(activity.distance_m)} in ${formatDuration(activity.duration_s)}`;
     const lines = [
-      `🏃 ${formatDistance(activity.distance_m)} in ${formatDuration(activity.duration_s)} (${formatPace(activity.avg_pace_s_per_km)})`,
-      bestSplit ? `⚡ Best km ${formatPace(bestSplit)}` : null,
+      headline,
+      fullKm && bestSplit ? `⚡ Best km ${formatPace(bestSplit)}` : null,
       `📍 ${when} · tracked on ClubMitra`,
     ].filter(Boolean);
     try {
