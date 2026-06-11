@@ -294,28 +294,56 @@ func (s *Service) Evaluate(ctx context.Context, userID string) (*Profile, error)
 		return nil, err
 	}
 
-	var statuses []BadgeStatus
-	var fresh []Badge
+	// Non-nil slices so the JSON is always [] (a nil slice marshals to null,
+	// which crashes clients doing .length on it).
+	statuses := make([]BadgeStatus, 0, len(Catalog))
+	fresh := []Badge{}
 	now := time.Now()
+	var award []string
 	for _, b := range Catalog {
 		cur := progressOf(b, m)
 		st := BadgeStatus{Badge: b, Current: cur}
 		if at, ok := earned[b.ID]; ok {
 			st.Earned, st.EarnedAt = true, &at
 		} else if cur >= b.Target {
-			tag, err := s.db.Exec(ctx,
-				`INSERT INTO user_badges (user_id, badge_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-				userID, b.ID)
-			if err != nil {
-				return nil, err
-			}
 			st.Earned, st.EarnedAt = true, &now
 			earned[b.ID] = now
-			if tag.RowsAffected() > 0 { // we won the race — this unlock is ours to celebrate
+			award = append(award, b.ID)
+		}
+		statuses = append(statuses, st)
+	}
+
+	// Award everything new in ONE round trip (a first evaluation can unlock a
+	// dozen badges at once — per-badge inserts would crawl on a remote DB).
+	// RETURNING tells us which rows WE inserted: those are ours to celebrate;
+	// conflicts mean a concurrent evaluation beat us to them.
+	if len(award) > 0 {
+		rows, err := s.db.Query(ctx, `
+			INSERT INTO user_badges (user_id, badge_id)
+			SELECT $1, unnest($2::text[])
+			ON CONFLICT DO NOTHING
+			RETURNING badge_id`, userID, award)
+		if err != nil {
+			return nil, err
+		}
+		won := map[string]bool{}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			won[id] = true
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		for _, b := range Catalog {
+			if won[b.ID] {
 				fresh = append(fresh, b)
 			}
 		}
-		statuses = append(statuses, st)
 	}
 
 	// XP: verified work + badge bonuses. No ledger — always recomputed.

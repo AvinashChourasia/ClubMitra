@@ -30,28 +30,27 @@ export default function Achievements() {
   const router = useRouter();
   useThemeMode();
   const [profile, setProfile] = useState<GamificationProfile | null>(null);
+  const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState<BadgeStatus | null>(null);
   const [celebrate, setCelebrate] = useState<Badge[]>([]);
 
+  const load = useCallback(async () => {
+    setFailed(false);
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+      const p = await getGamification(token);
+      setProfile(p);
+      if (p.new_badges.length > 0) setCelebrate(p.new_badges);
+    } catch {
+      setFailed(true); // error state with retry — never an endless spinner
+    }
+  }, [getAccessToken]);
+
   useFocusEffect(
     useCallback(() => {
-      let active = true;
-      (async () => {
-        try {
-          const token = await getAccessToken();
-          if (!token) return;
-          const p = await getGamification(token);
-          if (!active) return;
-          setProfile(p);
-          if (p.new_badges.length > 0) setCelebrate(p.new_badges);
-        } catch {
-          if (active) setProfile(null);
-        }
-      })();
-      return () => {
-        active = false;
-      };
-    }, [getAccessToken])
+      void load();
+    }, [load])
   );
 
   if (!user) return <Redirect href="/login" />;
@@ -80,7 +79,18 @@ export default function Achievements() {
           </View>
         </View>
 
-        {profile === null ? (
+        {failed && profile === null ? (
+          <View style={[styles.card, { alignItems: "center", paddingVertical: 32, gap: 8 }]}>
+            <Ionicons name="cloud-offline-outline" size={30} color={colors.subtle} />
+            <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Couldn't load your achievements</Text>
+            <Text style={{ color: colors.muted, fontSize: 13, textAlign: "center" }}>
+              The server may be waking up — give it another try.
+            </Text>
+            <Tap onPress={() => void load()} style={{ backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 24, paddingVertical: 10, marginTop: 6 }}>
+              <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Retry</Text>
+            </Tap>
+          </View>
+        ) : profile === null ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
         ) : (
           <>

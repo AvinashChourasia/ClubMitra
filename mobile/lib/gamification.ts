@@ -38,8 +38,10 @@ export type GamificationProfile = {
   announce_badges: boolean;
 };
 
-export function getGamification(token: string): Promise<GamificationProfile> {
-  return request<GamificationProfile>("/gamification", { token });
+export async function getGamification(token: string): Promise<GamificationProfile> {
+  const p = await request<GamificationProfile>("/gamification", { token });
+  // Defensive: older backends marshal empty Go slices as null.
+  return { ...p, badges: p.badges ?? [], new_badges: p.new_badges ?? [] };
 }
 
 export function setBadgeAnnounce(token: string, enabled: boolean): Promise<{ enabled: boolean }> {
