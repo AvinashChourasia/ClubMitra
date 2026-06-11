@@ -177,37 +177,48 @@ export default function Races() {
             </View>
             <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, marginTop: 12 }}>No upcoming races{myCityOnly && user.city ? ` in ${user.city}` : ""}</Text>
             <Text style={{ color: colors.muted, marginTop: 4, textAlign: "center" }}>
-              Races land here from MarathonMitra — tap + to get yours listed.
+              {myCityOnly && user.city
+                ? "Try All cities — races sync in from MarathonMitra."
+                : "Syncing from MarathonMitra — pull down to refresh in a moment."}
             </Text>
           </View>
         ) : (
           races.map((r) => {
             const d = dateBlock(r.race_date);
+            const openDetails = r.url ? () => Linking.openURL(r.url!).catch(() => {}) : undefined;
             return (
-              <View key={r.id} style={[styles.card, { gap: 12 }]}>
+              <Tap key={r.id} onPress={openDetails ?? (() => {})} haptic={!!openDetails} style={[styles.card, { gap: 12 }]}>
                 <View style={{ flexDirection: "row", gap: 14 }}>
                   {/* Date block */}
-                  <View style={{ width: 56, borderRadius: 14, backgroundColor: colors.primarySoft, alignItems: "center", paddingVertical: 10 }}>
+                  <View style={{ width: 56, borderRadius: 14, backgroundColor: colors.primarySoft, alignItems: "center", paddingVertical: 10, alignSelf: "flex-start" }}>
                     <Text style={{ color: colors.primary, fontSize: 22, fontWeight: "800", letterSpacing: -0.5 }}>{d.day}</Text>
                     <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 1 }}>{d.month}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16 }} numberOfLines={2}>{r.title}</Text>
                     <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>
-                      {d.weekday} · {r.city}{r.distances ? ` · ${r.distances}` : ""}
+                      {d.weekday} · {r.location ?? r.city}{r.distances ? ` · ${r.distances}` : ""}
                     </Text>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 }}>
                       <Ionicons name="people" size={13} color={colors.muted} />
                       <Text style={{ color: colors.muted, fontSize: 12 }}>
                         {r.going_count} going{r.going ? " · including you" : ""}
                       </Text>
+                      {openDetails && (
+                        <>
+                          <Text style={{ color: colors.subtle, fontSize: 12 }}> · </Text>
+                          <Text style={{ color: colors.accent, fontSize: 12, fontWeight: "700" }}>details ↗</Text>
+                        </>
+                      )}
                     </View>
                   </View>
-                  {r.created_by === user.id && (
+                  {r.created_by === user.id ? (
                     <Pressable onPress={() => onDelete(r)} hitSlop={8}>
                       <Ionicons name="trash-outline" size={18} color={colors.subtle} />
                     </Pressable>
-                  )}
+                  ) : openDetails ? (
+                    <Ionicons name="open-outline" size={16} color={colors.subtle} />
+                  ) : null}
                 </View>
 
                 <View style={{ flexDirection: "row", gap: 10 }}>
@@ -237,7 +248,7 @@ export default function Races() {
                     <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 13 }}>Calendar</Text>
                   </Tap>
                 </View>
-              </View>
+              </Tap>
             );
           })
         )}

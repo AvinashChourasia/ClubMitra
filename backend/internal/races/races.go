@@ -1,15 +1,20 @@
-// Package races is the community race calendar: anyone lists a race, everyone
-// browses upcoming ones by city and marks themselves going. Deliberately small —
-// discovery map view / recommendations are later phases.
+// Package races is the race calendar, fed by MarathonMitra: their events pages
+// embed schema.org JSON-LD (SportsEvent ItemList — an SEO contract, far more
+// stable than scraping markup), which we walk page by page and upsert locally.
+// Everyone browses upcoming races by city, marks themselves going, and taps
+// through to the MarathonMitra event page for full details.
 package races
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"path"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,124 +50,185 @@ type Race struct {
 type Handler struct {
 	db *pgxpool.Pool
 
-	// MarathonMitra feed: races are submitted + approved over there and pulled
-	// from its get-all-marathons API here. Empty sourceURL = local rows only.
+	// MarathonMitra base URL. Races are submitted + approved over there; we
+	// pull the upcoming-events pages and parse their embedded JSON-LD.
 	sourceURL string
 	client    *http.Client
 	syncMu    sync.Mutex
 	lastSync  time.Time
+	syncing   bool
 }
 
-// NewHandler wires the race calendar to the database pool and the (optional)
-// MarathonMitra API.
+// NewHandler wires the race calendar to the database pool and MarathonMitra.
+// The env var (MARATHONMITRA_API_URL) overrides the base for testing; empty
+// means the real site.
 func NewHandler(db *pgxpool.Pool, marathonMitraURL string) *Handler {
+	src := strings.TrimSpace(marathonMitraURL)
+	if src == "" {
+		src = "https://marathonmitra.com"
+	}
 	return &Handler{
 		db:        db,
-		sourceURL: strings.TrimSpace(marathonMitraURL),
-		client:    &http.Client{Timeout: 6 * time.Second},
+		sourceURL: strings.TrimRight(src, "/"),
+		client:    &http.Client{Timeout: 12 * time.Second},
 	}
 }
 
-// mmRace tolerates the field-name variants a marathon feed is likely to use.
-type mmRace struct {
-	ID        any    `json:"id"`
-	Title     string `json:"title"`
+// ldJSONRe pulls the schema.org <script type="application/ld+json"> blocks out
+// of a MarathonMitra events page.
+var ldJSONRe = regexp.MustCompile(`(?s)<script type="application/ld\+json">(.*?)</script>`)
+
+// ldEvent is one schema.org SportsEvent from the events page's ItemList.
+type ldEvent struct {
 	Name      string `json:"name"`
-	City      string `json:"city"`
-	Date      string `json:"date"`
-	RaceDate  string `json:"race_date"`
-	Distances string `json:"distances"`
-	Location  string `json:"location"`
 	URL       string `json:"url"`
-	Link      string `json:"link"`
+	StartDate string `json:"startDate"`
+	Location  struct {
+		Address struct {
+			AddressLocality string `json:"addressLocality"` // "Manali, Kullu"
+		} `json:"address"`
+	} `json:"location"`
 }
 
-func (m mmRace) title() string {
-	if m.Title != "" {
-		return m.Title
-	}
-	return m.Name
-}
-func (m mmRace) date() string {
-	if m.RaceDate != "" {
-		return m.RaceDate
-	}
-	return m.Date
-}
-func (m mmRace) link() string {
-	if m.URL != "" {
-		return m.URL
-	}
-	return m.Link
+// ldPage matches the CollectionPage/ItemList JSON-LD. The page also carries
+// FAQPage/Organization blocks — those fail to unmarshal into this shape or
+// yield zero items, and are skipped either way.
+type ldPage struct {
+	MainEntity struct {
+		ItemListElement []struct {
+			Item ldEvent `json:"item"`
+		} `json:"itemListElement"`
+	} `json:"mainEntity"`
 }
 
-// syncFromMarathonMitra pulls the feed and upserts by external_id. Throttled to
-// once per 10 minutes and always best-effort: a dead feed must never take the
-// calendar down — stale rows keep serving.
-func (h *Handler) syncFromMarathonMitra(ctx context.Context) {
-	if h.sourceURL == "" {
-		return
-	}
-	h.syncMu.Lock()
-	if time.Since(h.lastSync) < 10*time.Minute {
-		h.syncMu.Unlock()
-		return
-	}
-	h.lastSync = time.Now()
-	h.syncMu.Unlock()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.sourceURL, nil)
+// fetchEventsPage downloads one paginated events page and returns its events.
+func (h *Handler) fetchEventsPage(ctx context.Context, page int) ([]ldEvent, error) {
+	u := h.sourceURL + "/events?status=upcoming&page=" + strconv.Itoa(page)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return
+		return nil, err
 	}
+	req.Header.Set("User-Agent", "ClubMitra/1.0 (race calendar sync)")
 	resp, err := h.client.Do(req)
 	if err != nil {
-		log.Printf("races: marathonmitra fetch failed: %v", err)
-		return
+		return nil, err
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil || resp.StatusCode != http.StatusOK {
-		log.Printf("races: marathonmitra fetch status=%d err=%v", resp.StatusCode, err)
+		return nil, err
+	}
+
+	var events []ldEvent
+	for _, m := range ldJSONRe.FindAllSubmatch(raw, -1) {
+		var pg ldPage
+		if err := json.Unmarshal(m[1], &pg); err != nil {
+			continue // FAQ/Organization blocks — not the ItemList
+		}
+		for _, el := range pg.MainEntity.ItemListElement {
+			if el.Item.Name != "" {
+				events = append(events, el.Item)
+			}
+		}
+		if len(events) > 0 {
+			break // the page has one ItemList; done
+		}
+	}
+	return events, nil
+}
+
+// syncFromMarathonMitra refreshes the calendar from MarathonMitra — throttled
+// to once per 10 minutes, and run in the BACKGROUND so a list request never
+// waits on multi-page fetches. Best-effort by contract: a dead site must never
+// take the calendar down; stale rows keep serving.
+func (h *Handler) syncFromMarathonMitra() {
+	if h.sourceURL == "" {
+		return
+	}
+	h.syncMu.Lock()
+	if h.syncing || time.Since(h.lastSync) < 10*time.Minute {
+		h.syncMu.Unlock()
+		return
+	}
+	h.lastSync = time.Now()
+	h.syncing = true
+	h.syncMu.Unlock()
+
+	go func() {
+		defer func() {
+			h.syncMu.Lock()
+			h.syncing = false
+			h.syncMu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		total := 0
+		for page := 1; page <= 10; page++ { // 10-page ceiling = 200 events, plenty
+			events, err := h.fetchEventsPage(ctx, page)
+			if err != nil {
+				log.Printf("races: marathonmitra page %d fetch failed: %v", page, err)
+				break
+			}
+			if len(events) == 0 {
+				break // walked past the last page
+			}
+			for _, e := range events {
+				h.upsertEvent(ctx, e)
+			}
+			total += len(events)
+		}
+		log.Printf("races: marathonmitra sync done, %d events", total)
+	}()
+}
+
+// upsertEvent maps one JSON-LD SportsEvent onto the races table. The event's
+// URL slug is the stable external id, so repeat syncs update in place and
+// "I'm going" interest rows survive.
+func (h *Handler) upsertEvent(ctx context.Context, e ldEvent) {
+	title := strings.TrimSpace(e.Name)
+	link := strings.TrimSpace(e.URL)
+	if title == "" || link == "" {
+		return
+	}
+	parsed, err := url.Parse(link)
+	if err != nil {
+		return
+	}
+	extID := path.Base(strings.TrimRight(parsed.Path, "/"))
+	if extID == "" || extID == "." || extID == "/" {
 		return
 	}
 
-	// Accept a bare array or an object wrapping it ({"races":[…]} / {"data":[…]}).
-	var list []mmRace
-	if err := json.Unmarshal(raw, &list); err != nil {
-		var wrapped struct {
-			Races []mmRace `json:"races"`
-			Data  []mmRace `json:"data"`
-		}
-		if err := json.Unmarshal(raw, &wrapped); err != nil {
-			log.Printf("races: marathonmitra feed didn't parse: %v", err)
-			return
-		}
-		list = wrapped.Races
-		if len(list) == 0 {
-			list = wrapped.Data
-		}
+	// startDate is RFC3339 ("2026-06-13T00:00:00.000Z"); fall back to a bare date.
+	var day time.Time
+	if t, err := time.Parse(time.RFC3339, e.StartDate); err == nil {
+		day = t
+	} else if t, err := time.Parse("2006-01-02", e.StartDate); err == nil {
+		day = t
+	} else {
+		return
 	}
 
-	for _, m := range list {
-		extID := strings.TrimSpace(fmt.Sprint(m.ID))
-		title := strings.TrimSpace(m.title())
-		city := strings.TrimSpace(m.City)
-		d, err := time.Parse("2006-01-02", strings.TrimSpace(m.date()))
-		if extID == "" || extID == "<nil>" || title == "" || city == "" || err != nil {
-			continue // skip rows we can't represent
-		}
-		_, err = h.db.Exec(ctx, `
-			INSERT INTO races (external_id, title, city, race_date, distances, location, url)
-			VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''))
-			ON CONFLICT (external_id) DO UPDATE SET
-				title = EXCLUDED.title, city = EXCLUDED.city, race_date = EXCLUDED.race_date,
-				distances = EXCLUDED.distances, location = EXCLUDED.location, url = EXCLUDED.url,
-				deleted_at = NULL`,
-			extID, title, city, d, strings.TrimSpace(m.Distances), strings.TrimSpace(m.Location), strings.TrimSpace(m.link()))
-		if err != nil {
-			log.Printf("races: upsert %q failed: %v", title, err)
-		}
+	// "Manali, Kullu" → city "Manali"; the full locality stays as the location.
+	locality := strings.TrimSpace(e.Location.Address.AddressLocality)
+	city := locality
+	if i := strings.Index(locality, ","); i > 0 {
+		city = strings.TrimSpace(locality[:i])
+	}
+	if city == "" {
+		city = "India"
+	}
+
+	if _, err := h.db.Exec(ctx, `
+		INSERT INTO races (external_id, title, city, race_date, distances, location, url)
+		VALUES ($1, $2, $3, $4, '', NULLIF($5, ''), $6)
+		ON CONFLICT (external_id) DO UPDATE SET
+			title = EXCLUDED.title, city = EXCLUDED.city, race_date = EXCLUDED.race_date,
+			location = EXCLUDED.location, url = EXCLUDED.url,
+			deleted_at = NULL`,
+		extID, title, city, day.Format("2006-01-02"), locality, link); err != nil {
+		log.Printf("races: upsert %q failed: %v", title, err)
 	}
 }
 
@@ -184,8 +250,10 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
-	h.syncFromMarathonMitra(r.Context()) // refresh from MarathonMitra (throttled, best-effort)
+	h.syncFromMarathonMitra() // refresh from MarathonMitra (throttled, background)
 	city := strings.TrimSpace(r.URL.Query().Get("city"))
+	// City matching is prefix-tolerant both ways: a stored "Bengaluru Urban"
+	// matches a profile city "Bengaluru", and vice versa.
 	const q = `
 		SELECT rc.id, rc.title, rc.city, rc.race_date::text, rc.distances, rc.location, rc.url, rc.created_by,
 		       (SELECT count(*) FROM race_interests ri WHERE ri.race_id = rc.id)::int,
@@ -193,7 +261,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		FROM races rc
 		WHERE rc.deleted_at IS NULL
 		  AND rc.race_date >= CURRENT_DATE
-		  AND ($2 = '' OR lower(rc.city) = lower($2))
+		  AND ($2 = '' OR lower(rc.city) LIKE lower($2) || '%' OR lower($2) LIKE lower(rc.city) || '%')
 		ORDER BY rc.race_date ASC
 		LIMIT 100`
 	rows, err := h.db.Query(r.Context(), q, userID, city)
