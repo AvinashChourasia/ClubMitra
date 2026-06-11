@@ -50,6 +50,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ApiError } from "../lib/api";
 import { inbox, postChapter, postDirect, getMessageInfo, type InboxItem, type Message, type MessageInfo, type OutMsg } from "../lib/messaging";
 import { ensureConnected, subscribe, sendTyping, isLive, type RTEvent } from "../lib/realtime";
+import { setActiveThread, type ThreadKey } from "../lib/messageToast";
 import { Avatar } from "./Avatar";
 import { colors, styles } from "../lib/theme";
 
@@ -168,6 +169,9 @@ export function ChatThread({
         }
       })();
 
+      // Mark this thread active: the in-app banner + foreground push skip it.
+      if (realtime) setActiveThread(`${realtime.scope}:${realtime.id}` as ThreadKey);
+
       // Realtime: instant delivery + typing for THIS conversation.
       let unsub: (() => void) | undefined;
       if (realtime && getToken) {
@@ -196,6 +200,7 @@ export function ChatThread({
         clearInterval(timer);
         unsub?.();
         if (typingTimer.current) clearTimeout(typingTimer.current);
+        setActiveThread(null);
       };
     }, [reload, realtime, getToken, meId])
   );

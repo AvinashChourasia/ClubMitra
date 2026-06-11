@@ -20,6 +20,7 @@ import {
 import "../lib/applyFont"; // patch Text -> Inter (by weight), before any render
 import "../lib/locationTask"; // register the background run-tracking task at launch
 import { AuthProvider } from "../lib/auth";
+import { MessageToast } from "../components/MessageToast";
 import { ThemeProvider, useThemeMode, colors } from "../lib/theme";
 
 SplashScreen.preventAutoHideAsync();
@@ -55,7 +56,11 @@ export default function RootLayout() {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as Record<string, string> | undefined;
       if (!data) return;
-      if (data.run_id) router.push(`/run/${data.run_id}`);
+      if (data.type === "chat_message" && data.scope && data.id) {
+        // Deep-link straight into the conversation the push came from.
+        if (data.scope === "chapter") router.push(`/thread/club/${data.id}`);
+        else router.push(`/thread/dm/${data.id}`);
+      } else if (data.run_id) router.push(`/run/${data.run_id}`);
       else if (data.challenge_id) router.push(`/challenge/${data.challenge_id}`);
       else if (data.chapter_id) router.push(`/club/${data.chapter_id}`);
     });
@@ -71,6 +76,7 @@ export default function RootLayout() {
           <AuthProvider>
             <ThemedStatusBar />
             <ThemedStack />
+            <MessageToast />
           </AuthProvider>
         </ThemeProvider>
       </SafeAreaProvider>

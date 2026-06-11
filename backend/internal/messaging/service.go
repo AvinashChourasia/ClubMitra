@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +26,7 @@ func (e ValidationError) Error() string { return e.Msg }
 // notifications package so messaging doesn't depend on its concrete type.
 type notifier interface {
 	NotifyChapterMembers(ctx context.Context, chapterID uuid.UUID, exclude, title, body string, data map[string]string)
+	NotifyUsers(ctx context.Context, userIDs []string, title, body string, data map[string]string)
 }
 
 // adminChecker reports whether a user holds an admin role for a chapter (used to
@@ -57,11 +59,17 @@ type Service struct {
 	check  adminChecker
 	notify notifier
 	rt     Publisher
+
+	// Push throttle: at most one chat push per conversation+recipient per
+	// window, so a burst of 30 messages buzzes once, not 30 times. In-memory is
+	// fine — a restart just means one extra buzz.
+	pushMu   sync.Mutex
+	lastPush map[string]time.Time
 }
 
 // NewService wires the service together.
 func NewService(repo *Repository, check adminChecker, notify notifier) *Service {
-	return &Service{repo: repo, check: check, notify: notify}
+	return &Service{repo: repo, check: check, notify: notify, lastPush: make(map[string]time.Time)}
 }
 
 // SetRealtime registers the websocket hub (optional — nil means poll-only).
@@ -127,6 +135,96 @@ func (s *Service) RelayTyping(ctx context.Context, senderID, scope, id string) {
 	}
 }
 
+const pushThrottleWindow = 25 * time.Second
+
+// throttledRecipients filters out recipients pushed for this conversation
+// within the window, and stamps the survivors.
+func (s *Service) throttledRecipients(convID uuid.UUID, ids []string) []string {
+	now := time.Now()
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		key := convID.String() + ":" + id
+		if now.Sub(s.lastPush[key]) < pushThrottleWindow {
+			continue
+		}
+		s.lastPush[key] = now
+		out = append(out, id)
+	}
+	// Opportunistic sweep so the map doesn't grow forever.
+	if len(s.lastPush) > 4096 {
+		for k, t := range s.lastPush {
+			if now.Sub(t) > pushThrottleWindow {
+				delete(s.lastPush, k)
+			}
+		}
+	}
+	return out
+}
+
+// pushMessage sends the device push for a new chat message: muted users and
+// the sender are skipped, bursts are throttled per recipient, and the payload
+// deep-links straight into the right thread. Best-effort — chat must never
+// fail because push did.
+func (s *Service) pushMessage(ctx context.Context, convType string, chapterID *uuid.UUID, convID uuid.UUID, msg *Message) {
+	if s.notify == nil || msg.IsAnnouncement { // announcements already push
+		return
+	}
+	preview := deref(preview(msg.Body, msg.MediaType))
+	if preview == "" {
+		preview = "New message"
+	}
+	muted, err := s.repo.mutedUserIDs(ctx, convID)
+	if err != nil {
+		muted = map[string]bool{}
+	}
+
+	switch {
+	case convType == "chapter" && chapterID != nil:
+		name, err := s.repo.chapterName(ctx, *chapterID)
+		if err != nil || name == "" {
+			name = "Club chat"
+		}
+		ids, err := s.repo.ListChapterMemberIDs(ctx, *chapterID)
+		if err != nil {
+			return
+		}
+		recipients := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if id != msg.SenderID && !muted[id] {
+				recipients = append(recipients, id)
+			}
+		}
+		recipients = s.throttledRecipients(convID, recipients)
+		if len(recipients) == 0 {
+			return
+		}
+		s.notify.NotifyUsers(ctx, recipients, name, msg.SenderName+": "+preview, map[string]string{
+			"type": "chat_message", "scope": "chapter", "id": chapterID.String(),
+		})
+	case convType == "direct":
+		ids, err := s.repo.directMemberIDs(ctx, convID)
+		if err != nil || len(ids) != 2 {
+			return
+		}
+		other := ids[0]
+		if other == msg.SenderID {
+			other = ids[1]
+		}
+		if muted[other] {
+			return
+		}
+		if len(s.throttledRecipients(convID, []string{other})) == 0 {
+			return
+		}
+		// The receiver's thread key for this DM is the sender's id.
+		s.notify.NotifyUsers(ctx, []string{other}, msg.SenderName, preview, map[string]string{
+			"type": "chat_message", "scope": "dm", "id": msg.SenderID,
+		})
+	}
+}
+
 // requireMember returns ErrForbidden unless the user can access the chapter's chat.
 func (s *Service) requireMember(ctx context.Context, chapterID uuid.UUID, userID string) error {
 	ok, err := s.repo.IsChapterMember(ctx, chapterID, userID)
@@ -173,6 +271,7 @@ func (s *Service) PostChapter(ctx context.Context, userID string, chapterID uuid
 		return nil, err
 	}
 	s.fanout(ctx, "chapter", &chapterID, convID, "message", msg)
+	s.pushMessage(ctx, "chapter", &chapterID, convID, msg)
 	return msg, nil
 }
 
@@ -330,6 +429,7 @@ func (s *Service) PostDirect(ctx context.Context, userID, otherID string, body, 
 		return nil, err
 	}
 	s.fanout(ctx, "direct", nil, convID, "message", msg)
+	s.pushMessage(ctx, "direct", nil, convID, msg)
 	return msg, nil
 }
 

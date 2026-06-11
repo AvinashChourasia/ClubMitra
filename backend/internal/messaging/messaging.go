@@ -363,6 +363,31 @@ func (r *Repository) messageInfo(ctx context.Context, messageID uuid.UUID, reque
 	return info, rows.Err()
 }
 
+// mutedUserIDs returns users who muted a conversation (no pushes for them).
+func (r *Repository) mutedUserIDs(ctx context.Context, conversationID uuid.UUID) (map[string]bool, error) {
+	rows, err := r.db.Query(ctx, `SELECT user_id FROM conversation_prefs WHERE conversation_id = $1 AND muted`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// chapterName resolves a chapter's display name (push titles).
+func (r *Repository) chapterName(ctx context.Context, chapterID uuid.UUID) (string, error) {
+	var name string
+	err := r.db.QueryRow(ctx, `SELECT name FROM chapters WHERE id = $1`, chapterID).Scan(&name)
+	return name, err
+}
+
 // directMemberIDs returns both participants of a direct conversation.
 func (r *Repository) directMemberIDs(ctx context.Context, conversationID uuid.UUID) ([]string, error) {
 	rows, err := r.db.Query(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id = $1`, conversationID)

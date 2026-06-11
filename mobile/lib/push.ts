@@ -10,14 +10,19 @@ import { Platform } from "react-native";
 
 import { request } from "./api";
 
-// Show banners + play sound even when the app is foregrounded.
+// Foreground behaviour: chat messages are handled by the in-app banner
+// (components/MessageToast), so their OS notification stays silent while the
+// app is open; everything else still banners + sounds.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: async (n) => {
+    const isChat = (n.request.content.data as Record<string, unknown> | undefined)?.type === "chat_message";
+    return {
+      shouldPlaySound: !isChat,
+      shouldSetBadge: false,
+      shouldShowBanner: !isChat,
+      shouldShowList: true,
+    };
+  },
 });
 
 // The Expo token for this install, kept so we can unregister it on logout.
