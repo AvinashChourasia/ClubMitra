@@ -273,3 +273,5 @@ func handleVersion(w http.ResponseWriter, _ *http.Request) {
 		"env":     os.Getenv("ENV"),
 	})
 }
+
+// Deploy marker: gamification hardening (2416cd1) — non-nil arrays, batched awards.
