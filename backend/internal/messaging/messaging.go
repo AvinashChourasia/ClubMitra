@@ -57,10 +57,13 @@ type Reaction struct {
 }
 
 // Message is one chat message, joined with the sender's name for display.
+// Kind: "user" = a normal message; "badge" = an automatic achievement
+// announcement the client renders as a centered system chip.
 type Message struct {
 	ID             uuid.UUID  `json:"id"`
 	SenderID       string     `json:"sender_id"`
 	SenderName     string     `json:"sender_name"`
+	Kind           string     `json:"kind"`
 	Body           *string    `json:"body,omitempty"`
 	MediaURL       *string    `json:"media_url,omitempty"`
 	MediaType      *string    `json:"media_type,omitempty"`
@@ -143,7 +146,7 @@ func (r *Repository) ensureRunConversation(ctx context.Context, chapterID, runID
 // (with the viewer's own reaction flagged). Capped at 100 — pagination later.
 func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID, viewerID string) ([]Message, error) {
 	const q = `
-		SELECT m.id, m.sender_id, u.name, m.body, m.media_url, m.media_type,
+		SELECT m.id, m.sender_id, u.name, m.kind, m.body, m.media_url, m.media_type,
 		       m.is_announcement, m.is_pinned, m.edited_at, m.created_at,
 		       rm.id, ru.name, rm.body, rm.media_type,
 		       COALESCE(rx.agg, '[]'::json)::text
@@ -172,7 +175,7 @@ func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID,
 		var rID *uuid.UUID
 		var rName, rBody, rMedia *string
 		var reactionsJSON string
-		if err := rows.Scan(&m.ID, &m.SenderID, &m.SenderName, &m.Body, &m.MediaURL, &m.MediaType,
+		if err := rows.Scan(&m.ID, &m.SenderID, &m.SenderName, &m.Kind, &m.Body, &m.MediaURL, &m.MediaType,
 			&m.IsAnnouncement, &m.IsPinned, &m.EditedAt, &m.CreatedAt,
 			&rID, &rName, &rBody, &rMedia, &reactionsJSON); err != nil {
 			return nil, err
@@ -201,16 +204,17 @@ func deref(s *string) string {
 
 // postMessage inserts a message and returns it (joined with the sender name).
 // replyToID is kept only when it points at a message in the SAME conversation —
-// anything else is silently dropped rather than trusted.
-func (r *Repository) postMessage(ctx context.Context, conversationID uuid.UUID, senderID string, body, mediaURL, mediaType *string, isAnnouncement bool, replyToID *uuid.UUID) (*Message, error) {
+// anything else is silently dropped rather than trusted. kind is "user" for
+// normal messages, "badge" for automatic achievement announcements.
+func (r *Repository) postMessage(ctx context.Context, conversationID uuid.UUID, senderID string, body, mediaURL, mediaType *string, isAnnouncement bool, replyToID *uuid.UUID, kind string) (*Message, error) {
 	const q = `
 		WITH ins AS (
-			INSERT INTO messages (conversation_id, sender_id, body, media_url, media_type, is_announcement, reply_to_id)
-			VALUES ($1, $2, $3, $4, $5, $6,
+			INSERT INTO messages (conversation_id, sender_id, kind, body, media_url, media_type, is_announcement, reply_to_id)
+			VALUES ($1, $2, $8, $3, $4, $5, $6,
 			        (SELECT id FROM messages WHERE id = $7 AND conversation_id = $1 AND deleted_at IS NULL))
-			RETURNING id, sender_id, body, media_url, media_type, is_announcement, is_pinned, reply_to_id, created_at
+			RETURNING id, sender_id, kind, body, media_url, media_type, is_announcement, is_pinned, reply_to_id, created_at
 		)
-		SELECT ins.id, ins.sender_id, u.name, ins.body, ins.media_url, ins.media_type,
+		SELECT ins.id, ins.sender_id, u.name, ins.kind, ins.body, ins.media_url, ins.media_type,
 		       ins.is_announcement, ins.is_pinned, ins.created_at,
 		       rm.id, ru.name, rm.body, rm.media_type
 		FROM ins
@@ -220,8 +224,8 @@ func (r *Repository) postMessage(ctx context.Context, conversationID uuid.UUID, 
 	var m Message
 	var rID *uuid.UUID
 	var rName, rBody, rMedia *string
-	err := r.db.QueryRow(ctx, q, conversationID, senderID, body, mediaURL, mediaType, isAnnouncement, replyToID).Scan(
-		&m.ID, &m.SenderID, &m.SenderName, &m.Body, &m.MediaURL, &m.MediaType,
+	err := r.db.QueryRow(ctx, q, conversationID, senderID, body, mediaURL, mediaType, isAnnouncement, replyToID, kind).Scan(
+		&m.ID, &m.SenderID, &m.SenderName, &m.Kind, &m.Body, &m.MediaURL, &m.MediaType,
 		&m.IsAnnouncement, &m.IsPinned, &m.CreatedAt,
 		&rID, &rName, &rBody, &rMedia)
 	if err != nil {
@@ -231,6 +235,26 @@ func (r *Repository) postMessage(ctx context.Context, conversationID uuid.UUID, 
 		m.ReplyTo = &ReplyRef{ID: *rID, SenderName: deref(rName), Preview: deref(preview(rBody, rMedia))}
 	}
 	return &m, nil
+}
+
+// userChapterIDs returns the chapters where the user holds a live membership —
+// the rooms a badge announcement lands in.
+func (r *Repository) userChapterIDs(ctx context.Context, userID string) ([]uuid.UUID, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT chapter_id FROM chapter_members WHERE user_id = $1 AND deleted_at IS NULL`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // editMessage rewrites the text of a message the sender owns (media stays).

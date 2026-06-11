@@ -11,6 +11,9 @@ export type Message = {
   id: string;
   sender_id: string;
   sender_name: string;
+  // "user" = normal message; "badge" = automatic achievement announcement,
+  // rendered as a centered system chip.
+  kind: "user" | "badge";
   body?: string | null;
   media_url?: string | null;
   media_type?: string | null;

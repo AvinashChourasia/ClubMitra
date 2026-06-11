@@ -4,7 +4,7 @@
 // it instantly.
 
 import { useEffect, useState } from "react";
-import { Linking, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Linking, Platform, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { Redirect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,6 +13,7 @@ import * as Updates from "expo-updates";
 
 import { useAuth } from "../lib/auth";
 import { request } from "../lib/api";
+import { getGamification, setBadgeAnnounce } from "../lib/gamification";
 import { colors, styles, useThemeMode, type ThemeMode } from "../lib/theme";
 import { runningLevelLabel } from "../lib/profile";
 import { Avatar } from "../components/Avatar";
@@ -70,6 +71,58 @@ function DetailRow({ label, value, last }: { label: string; value?: string | num
       <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }}>
         {value === null || value === undefined || value === "" ? "—" : String(value)}
       </Text>
+    </View>
+  );
+}
+
+// BadgeAnnounceToggle: whether badge unlocks auto-post to your club chats.
+// Optimistic flip with revert on failure; state loads lazily from the API.
+function BadgeAnnounceToggle() {
+  const { getAccessToken } = useAuth();
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token) return;
+        const p = await getGamification(token);
+        if (active) setEnabled(p.announce_badges);
+      } catch {
+        if (active) setEnabled(true); // default-on; the PUT is the source of truth
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [getAccessToken]);
+
+  async function flip(next: boolean) {
+    setEnabled(next);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error("no token");
+      await setBadgeAnnounce(token, next);
+    } catch {
+      setEnabled(!next); // revert — the server didn't take it
+    }
+  }
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}>
+      <Ionicons name="trophy-outline" size={20} color={colors.muted} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: colors.text, fontSize: 15, fontWeight: "600" }}>Share badges in club chat</Text>
+        <Text style={{ color: colors.muted, fontSize: 12 }}>Celebrate unlocks with your clubs automatically</Text>
+      </View>
+      <Switch
+        value={enabled ?? true}
+        disabled={enabled === null}
+        onValueChange={flip}
+        trackColor={{ true: colors.primary, false: colors.border }}
+        thumbColor="#fff"
+      />
     </View>
   );
 }
@@ -164,6 +217,7 @@ export default function Settings() {
         {/* Preferences */}
         <View style={styles.card}>
           <Text style={[styles.sectionTitle, { marginBottom: 4 }]}>Preferences</Text>
+          <BadgeAnnounceToggle />
           <Row icon="notifications-outline" label="Notifications" disabled />
           <Row icon="lock-closed-outline" label="Privacy" disabled />
           <Row icon="chatbubble-ellipses-outline" label="Send feedback" onPress={sendFeedback} />

@@ -20,8 +20,14 @@ import { useRunRecorder } from "../../lib/useRunRecorder";
 import { enqueue, flush } from "../../lib/runQueue";
 import { computeSplits } from "../../lib/pace";
 import { formatDistance, formatDuration, formatPace, formatSpeed } from "../../lib/format";
+import { getGamification, type BadgeStatus } from "../../lib/gamification";
 import { RouteTrace } from "../../components/RouteTrace";
+import { BadgeUnlockModal } from "../../components/BadgeUnlockModal";
 import type { LatLng } from "../../lib/activities";
+
+// Badges already celebrated this app session (a second save inside the
+// freshness window must not replay the same unlock).
+const celebratedIds = new Set<string>();
 
 // Immersive dark palette — independent of the app theme so the HUD always
 // reads like a night dashboard.
@@ -48,6 +54,8 @@ export default function RecordRun() {
   // Whether this run should count toward joined challenges. Default yes; the
   // user can flip it off for a warm-up / test run before finishing.
   const [countToward, setCountToward] = useState(true);
+  // Badges this save unlocked — celebration modal, then on to the run detail.
+  const [unlocked, setUnlocked] = useState<{ badges: BadgeStatus[]; runId: string } | null>(null);
 
   const recording = status === "recording";
   const km = Math.floor(distanceM / 1000);
@@ -108,6 +116,27 @@ export default function RecordRun() {
       const justSaved = uploaded[uploaded.length - 1];
 
       if (remaining === 0 && justSaved) {
+        // The save already ran the badge pass server-side — anything earned in
+        // the last few minutes is THIS run's unlock. Celebrate it instead of
+        // the plain alert; the modal hands off to the run detail.
+        let fresh: BadgeStatus[] = [];
+        try {
+          const token = await getAccessToken();
+          if (token) {
+            const gp = await getGamification(token);
+            const cutoff = Date.now() - 10 * 60 * 1000;
+            fresh = gp.badges.filter(
+              (b) => b.earned && b.earned_at && new Date(b.earned_at).getTime() >= cutoff && !celebratedIds.has(b.id)
+            );
+          }
+        } catch {
+          /* badge check is a bonus, never blocks the save */
+        }
+        if (fresh.length > 0) {
+          fresh.forEach((b) => celebratedIds.add(b.id));
+          setUnlocked({ badges: fresh, runId: justSaved.id });
+          return;
+        }
         Alert.alert(
           "Run saved! 🎉",
           `Distance: ${formatDistance(justSaved.distance_m)}\n` +
@@ -263,6 +292,18 @@ export default function RecordRun() {
             {countdown}
           </Animated.Text>
         </View>
+      )}
+
+      {/* Badge unlock — the post-save celebration, then on to the run detail */}
+      {unlocked && (
+        <BadgeUnlockModal
+          badges={unlocked.badges}
+          onClose={() => {
+            const id = unlocked.runId;
+            setUnlocked(null);
+            router.replace(`/activity/${id}`);
+          }}
+        />
       )}
     </SafeAreaView>
   );

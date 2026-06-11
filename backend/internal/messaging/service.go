@@ -99,6 +99,29 @@ func (s *Service) fanout(ctx context.Context, convType string, chapterID *uuid.U
 	}
 }
 
+// AnnounceBadge drops an automatic achievement chip into every club chat the
+// user belongs to (called by gamification when a badge unlocks, respecting the
+// user's opt-out upstream). Realtime fanout only — no push: the runner gets
+// their own unlock push, and buzzing whole clubs per badge would be noise.
+func (s *Service) AnnounceBadge(ctx context.Context, userID, text string) {
+	chapters, err := s.repo.userChapterIDs(ctx, userID)
+	if err != nil {
+		return
+	}
+	for _, chapterID := range chapters {
+		convID, err := s.repo.ensureChapterConversation(ctx, chapterID)
+		if err != nil {
+			continue
+		}
+		msg, err := s.repo.postMessage(ctx, convID, userID, &text, nil, nil, false, nil, "badge")
+		if err != nil {
+			continue
+		}
+		cid := chapterID
+		s.fanout(ctx, "chapter", &cid, convID, "message", msg)
+	}
+}
+
 // RelayTyping forwards a typing signal to the conversation's other members.
 // Membership is enforced for chapters; DM typing goes only to the named peer.
 func (s *Service) RelayTyping(ctx context.Context, senderID, scope, id string) {
@@ -266,7 +289,7 @@ func (s *Service) PostChapter(ctx context.Context, userID string, chapterID uuid
 	if err != nil {
 		return nil, err
 	}
-	msg, err := s.repo.postMessage(ctx, convID, userID, body, mediaURL, mediaType, false, replyToID)
+	msg, err := s.repo.postMessage(ctx, convID, userID, body, mediaURL, mediaType, false, replyToID, "user")
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +316,7 @@ func (s *Service) Announce(ctx context.Context, userID string, chapterID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	msg, err := s.repo.postMessage(ctx, convID, userID, &body, nil, nil, true, nil)
+	msg, err := s.repo.postMessage(ctx, convID, userID, &body, nil, nil, true, nil, "user")
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +365,7 @@ func (s *Service) PostRun(ctx context.Context, userID string, runID uuid.UUID, b
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.postMessage(ctx, convID, userID, body, mediaURL, mediaType, false, nil)
+	return s.repo.postMessage(ctx, convID, userID, body, mediaURL, mediaType, false, nil, "user")
 }
 
 // DirectThread bundles the other participant + messages for the DM screen.
@@ -424,7 +447,7 @@ func (s *Service) PostDirect(ctx context.Context, userID, otherID string, body, 
 	if err != nil {
 		return nil, err
 	}
-	msg, err := s.repo.postMessage(ctx, convID, userID, body, mediaURL, mediaType, false, replyToID)
+	msg, err := s.repo.postMessage(ctx, convID, userID, body, mediaURL, mediaType, false, replyToID, "user")
 	if err != nil {
 		return nil, err
 	}

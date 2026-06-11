@@ -5,7 +5,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -23,14 +23,29 @@ import {
   type Stats,
   type LatLng,
 } from "../../lib/activities";
+import { getGamification, tierColor, type GamificationProfile, type BadgeStatus } from "../../lib/gamification";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { runningLevelLabel } from "../../lib/profile";
 import { formatDistance, formatDuration, formatPace } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
+import { BadgeMedal } from "../../components/BadgeMedal";
 import { GradientCard } from "../../components/GradientCard";
 import { RouteTrace } from "../../components/RouteTrace";
 import { Tap } from "../../components/Tap";
 import { GuestProfile } from "../../components/GuestScreens";
+
+// medalStrip: what the profile teaser shows — every earned badge (newest
+// first), then the locked ones closest to unlocking.
+function medalStrip(gam: GamificationProfile): BadgeStatus[] {
+  const earned = gam.badges
+    .filter((b) => b.earned)
+    .sort((a, b) => (b.earned_at ?? "").localeCompare(a.earned_at ?? ""));
+  const next = gam.badges
+    .filter((b) => !b.earned && b.target > 0)
+    .sort((a, b) => b.current / b.target - a.current / a.target)
+    .slice(0, 4);
+  return [...earned, ...next];
+}
 
 function Pill({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
   return (
@@ -110,6 +125,7 @@ export default function Profile() {
   const [lastRoute, setLastRoute] = useState<LatLng[]>([]);
   const [lastTimes, setLastTimes] = useState<number[] | undefined>(undefined);
   const [cityRank, setCityRank] = useState<number | null>(null);
+  const [gam, setGam] = useState<GamificationProfile | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -124,6 +140,7 @@ export default function Profile() {
       setClubs(c);
       setStats(s);
       setActivities(acts);
+      getGamification(token).then(setGam).catch(() => {});
 
       // Last run's route thumbnail + this week's city rank — both best-effort.
       const latest = acts[0];
@@ -208,11 +225,50 @@ export default function Profile() {
           </View>
           <Text style={{ color: "#fff", fontSize: 24, fontWeight: "800", letterSpacing: -0.3 }}>{user.name}</Text>
           <View style={{ flexDirection: "row", gap: 8, marginTop: 2, flexWrap: "wrap", justifyContent: "center" }}>
+            {gam && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(250,204,21,0.22)", borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 }}>
+                <Text style={{ fontSize: 11 }}>⚡</Text>
+                <Text style={{ color: "#FDE68A", fontSize: 12, fontWeight: "800" }}>{gam.level.title}</Text>
+              </View>
+            )}
             <Pill icon="flash" text={runningLevelLabel(user.running_level)} />
             {user.city ? <Pill icon="location" text={user.city} /> : null}
             {user.age ? <Pill icon="hourglass" text={`${user.age} yrs`} /> : null}
           </View>
         </GradientCard>
+
+        {/* Achievements — level runway + the medal strip */}
+        {gam && (
+          <Tap onPress={() => router.push("/achievements" as Href)} style={[styles.card, { gap: 10 }]}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <Text style={{ flex: 1, color: colors.muted, fontSize: 11, fontWeight: "800", letterSpacing: 0.8 }}>ACHIEVEMENTS</Text>
+              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "800" }}>See all ›</Text>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Text style={{ color: colors.text, fontWeight: "900", fontSize: 15 }}>
+                ⚡ {gam.xp.toLocaleString()} XP
+              </Text>
+              <View style={{ flex: 1, height: 7, backgroundColor: colors.border, borderRadius: 4, overflow: "hidden" }}>
+                <View style={{ width: `${Math.round(Math.min(1, Math.max(0, gam.level.progress)) * 100)}%`, height: "100%", backgroundColor: "#FACC15", borderRadius: 4 }} />
+              </View>
+              {gam.level.next_title ? (
+                <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "700" }}>{gam.level.next_title}</Text>
+              ) : (
+                <Text style={{ fontSize: 13 }}>🏆</Text>
+              )}
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
+              {medalStrip(gam).map((b) => (
+                <View key={b.id} style={{ alignItems: "center", width: 72 }}>
+                  <BadgeMedal emoji={b.emoji} color={tierColor(b.tier)} size={58} locked={!b.earned} />
+                  <Text numberOfLines={1} style={{ color: b.earned ? colors.text : colors.muted, fontSize: 10, fontWeight: "700" }}>
+                    {b.name}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          </Tap>
+        )}
 
         {/* This week */}
         <View style={[styles.card, { gap: 12 }]}>

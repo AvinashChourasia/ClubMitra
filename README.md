@@ -105,6 +105,7 @@ clubmitra/
 │   │   ├── activities/        # GPS runs: record, stats, routes        [Phase 4]
 │   │   ├── inventory/         # Items, stock, issue/return            [Phase 2]
 │   │   ├── messaging/         # Club + event chats, announcements      [Phase 2]
+│   │   ├── gamification/      # XP, levels, badge engine (GPS-verified) [Phase 5]
 │   │   ├── analytics/         # Drop-off metrics, engagement dashboard  [Phase 2]
 │   │   ├── finance/           # Transactions, platform cut, settlements [Phase 3]
 │   │   ├── payments/          # Routes to pkg/payments provider        [Phase 3]
@@ -368,18 +369,33 @@ clubmitra/
 
 ### Phase 5 — Social + Badges + Growth `(Month 5)`
 
+#### Gamification core — SHIPPED (June 2026)
+- [x] Badge engine: 26-badge catalog in code, awards evaluated from GPS-verified
+      data only (activities, attendance, challenges) — nothing hand-claimable
+      (migration 00032, `internal/gamification`)
+      - Distance: 25/100/500/1000 km lifetime · single-run 5K/10K/half/full
+      - Streak: 3/7/14/30-day · consistency: 3+ runs/week × 4 weeks
+      - Speed PRs: sub-30 5K, sub-60 10K (pace-based, from moving time)
+      - Personality: Early Bird, Night Owl, Weekend Warrior, Monsoon Runner 🌧️
+      - Club & challenge: first run/club, 10 check-ins, join/complete/5×/podium/win
+- [x] XP + 6 runner levels (Rookie → Jogger → Pacer → Front Runner → Podium
+      Hunter → Club Legend) — XP recomputed from stats + badges, no ledger to drift
+- [x] Achievement wall (`/achievements`): level hero + XP runway, badges by
+      family — earned in color, locked as grey medals with live progress bars
+- [x] 3D medal renders (SVG ribbon/sheen), full-screen unlock celebration with
+      confetti after a run save; lazy award pass on every wall/profile fetch
+      (challenge-end badges land on next look — no scheduler)
+- [x] Unlock push to the runner + auto-announcement chip in their club chats
+      (messages.kind='badge'; opt-out toggle in Settings)
+- [x] Profile: level pill on the hero + achievements strip (earned first, then
+      nearest-to-unlock) linking to the wall
+
+#### Remaining Phase 5
 - [ ] Public explore: discover clubs and challenges by city and sport
 - [ ] Club public profile page (discoverability for non-members)
 - [ ] Global club directory (searchable)
 - [ ] Follow individual runners
-- [ ] Badges and milestones:
-      - Distance: 50km, 100km, 500km, 1,000km, 5,000km
-      - Streak: 7-day, 30-day, 90-day consecutive activity
-      - Event: First Challenge, 5 Challenges, 10 Challenges
-      - Speed: First sub-30 5K, sub-60 10K, sub-2hr Half Marathon
-      - Club: Founding Member, Longest Serving, Club Record Holder
-- [ ] Lightweight XP system: earn XP for activities, challenges completed, streaks
-- [ ] Achievement wall on runner profile (all badges + certs earned)
+- [ ] Club XP + club levels + Member of the Week (gamification layer 2)
 - [ ] Org-wide challenge leaderboard (all chapters compete)
 - [ ] Push notifications full suite — rank changes, milestone alerts, re-engagement
 - [ ] Polls: admin creates quick polls for club members
@@ -454,6 +470,10 @@ PUT    /api/v1/challenges/:id          # organiser edit, until start date
 POST   /api/v1/challenges/:id/join
 POST   /api/v1/challenges/:id/leave
 GET    /api/v1/challenges/:id/leaderboard
+
+# Gamification (badges + XP, computed from GPS-verified data)
+GET    /api/v1/gamification            # XP, level, badge wall — also the award pass
+PUT    /api/v1/gamification/announce   # toggle badge announcements in club chats
 
 # Push Notifications
 POST   /api/v1/push/token

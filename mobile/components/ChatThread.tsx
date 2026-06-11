@@ -624,7 +624,25 @@ export function ChatThread({
                         <Text style={{ backgroundColor: colors.bg, color: colors.muted, fontSize: 11, fontWeight: "700", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: colors.border }}>{dayLabel(m.created_at)}</Text>
                       </View>
                     )}
-                    {m.is_announcement ? (
+                    {m.kind === "badge" ? (
+                      // Achievement chip — an automatic system line, centered
+                      // like a date pill (no bubble, no swipe, no long-press).
+                      <View style={{ alignItems: "center", marginVertical: 6 }}>
+                        <View
+                          style={{
+                            backgroundColor: "rgba(250,204,21,0.13)",
+                            borderWidth: 1,
+                            borderColor: "rgba(250,204,21,0.5)",
+                            borderRadius: 999,
+                            paddingHorizontal: 13,
+                            paddingVertical: 6,
+                            maxWidth: "88%",
+                          }}
+                        >
+                          <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: "700", textAlign: "center" }}>{m.body ?? ""}</Text>
+                        </View>
+                      </View>
+                    ) : m.is_announcement ? (
                       <View style={{ backgroundColor: colors.primarySoft, borderRadius: 14, padding: 12, marginVertical: 4, borderLeftWidth: 3, borderLeftColor: colors.primary }}>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
                           <Ionicons name="megaphone" size={14} color={colors.primary} />
