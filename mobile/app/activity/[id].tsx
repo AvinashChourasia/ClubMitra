@@ -3,8 +3,8 @@
 // the id. We fetch the run + its route GeoJSON, draw the route as an SVG trace
 // (no map tiles / API key), and show the full stat breakdown.
 
-import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, ScrollView, Share, Text, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, Share, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,6 +21,7 @@ import {
   type LatLng,
 } from "../../lib/activities";
 import { RouteTrace } from "../../components/RouteTrace";
+import { RunShareCard } from "../../components/RunShareCard";
 import { ElevationChart } from "../../components/ElevationChart";
 import { Tap } from "../../components/Tap";
 
@@ -54,7 +55,7 @@ import { colors } from "../../lib/theme";
 
 export default function ActivityDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getAccessToken } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const router = useRouter();
 
   const [activity, setActivity] = useState<Activity | null>(null);
@@ -73,10 +74,16 @@ export default function ActivityDetail() {
   const pausedS = activity ? Math.max(0, elapsedS - activity.duration_s) : 0;
   const bestSplit = splits.length > 0 ? Math.min(...splits.map((s) => s.paceSPerKm)) : null;
 
-  // Share the run as a brag-ready line (image cards can come later).
-  // Pace and best-km only appear on runs of 1 km+ — pace on a short test
-  // loop is noise, not a brag.
-  async function onShare() {
+  // Sharing: the share button opens a preview of the run as a picture (dark
+  // stat card with the route as the hero). "Share card" captures that view to
+  // a PNG and hands it to the OS share sheet; "Text" keeps the brag line.
+  const [showShare, setShowShare] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const cardRef = useRef<View>(null);
+
+  // Text fallback. Pace and best-km only appear on runs of 1 km+ — pace on a
+  // short test loop is noise, not a brag.
+  async function shareText() {
     if (!activity) return;
     const when = new Date(activity.started_at).toLocaleDateString([], { day: "numeric", month: "short" });
     const fullKm = activity.distance_m >= 1000;
@@ -92,6 +99,30 @@ export default function ActivityDetail() {
       await Share.share({ message: lines.join("\n") });
     } catch {
       /* user dismissed */
+    }
+  }
+
+  // Capture the preview card → PNG → OS share sheet. The capture/share
+  // modules are native; on a build that predates them we fall back to text
+  // (next APK build lights this up automatically — same pattern as calendar).
+  async function shareCard() {
+    setSharing(true);
+    try {
+      const { captureRef } = require("react-native-view-shot") as typeof import("react-native-view-shot");
+      const Sharing = require("expo-sharing") as typeof import("expo-sharing");
+      const uri = await captureRef(cardRef, { format: "png", quality: 1 });
+      setShowShare(false);
+      await Sharing.shareAsync(uri.startsWith("file://") ? uri : `file://${uri}`, {
+        mimeType: "image/png",
+        dialogTitle: "Share run",
+      });
+    } catch {
+      setShowShare(false);
+      Alert.alert("Image share needs the new app build", "Sharing as text for now.", [
+        { text: "OK", onPress: () => void shareText() },
+      ]);
+    } finally {
+      setSharing(false);
     }
   }
 
@@ -146,7 +177,7 @@ export default function ActivityDetail() {
       </Tap>
       {activity && (
         <Tap
-          onPress={() => void onShare()}
+          onPress={() => setShowShare(true)}
           hitSlop={10}
           haptic={false}
           style={{
@@ -228,6 +259,58 @@ export default function ActivityDetail() {
             <ElevationChart series={elevation} />
           </View>
         </ScrollView>
+      )}
+
+      {/* Share sheet: live preview of the picture card + the two ways out */}
+      {activity && showShare && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowShare(false)}>
+          <Pressable
+            onPress={() => setShowShare(false)}
+            style={{ flex: 1, backgroundColor: "rgba(2,6,23,0.78)", alignItems: "center", justifyContent: "center", padding: 20 }}
+          >
+            <Pressable onPress={() => {}}>
+              {/* collapsable=false so Android can snapshot this exact view */}
+              <View ref={cardRef} collapsable={false}>
+                <RunShareCard
+                  runnerName={user?.name ?? "ClubMitra runner"}
+                  startedAt={activity.started_at}
+                  distanceM={activity.distance_m}
+                  durationS={activity.duration_s}
+                  avgPaceSPerKm={activity.avg_pace_s_per_km}
+                  bestSplitSPerKm={bestSplit}
+                  coords={route}
+                  times={times}
+                />
+              </View>
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
+                <Pressable
+                  onPress={() => void shareCard()}
+                  disabled={sharing}
+                  style={{ flex: 1, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 7, backgroundColor: colors.primary, opacity: sharing ? 0.7 : 1, borderRadius: 999, paddingVertical: 13 }}
+                >
+                  {sharing ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="image" size={16} color="#fff" />
+                      <Text style={{ color: "#fff", fontWeight: "800", fontSize: 14 }}>Share card</Text>
+                    </>
+                  )}
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setShowShare(false);
+                    void shareText();
+                  }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: "rgba(255,255,255,0.14)", borderRadius: 999, paddingHorizontal: 18, paddingVertical: 13 }}
+                >
+                  <Ionicons name="text" size={15} color="#fff" />
+                  <Text style={{ color: "#fff", fontWeight: "800", fontSize: 14 }}>Text</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       )}
     </SafeAreaView>
   );
