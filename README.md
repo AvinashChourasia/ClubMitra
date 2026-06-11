@@ -17,10 +17,11 @@ replaces that stack with:
 
 - One place to manage all club members, attendance, fees, and inventory
 - Challenges with leaderboards — public, chapter, city-wide, org-wide, and rolling daily/weekly/monthly
-- GPS-verified activity — recorded runs credit challenges and leaderboards automatically
-- Private group messaging — per-club, per-event chats replacing WhatsApp (Phase 2)
+- GPS-verified activity — recorded runs credit challenges, leaderboards, and badges automatically
+- WhatsApp-grade messaging — club groups + DMs with realtime delivery, reactions, replies, voice notes, push
+- Gamification that runners feel — XP, 6 runner levels, 26 GPS-earned badges, achievement wall, unlock celebrations
+- Race calendar fed by MarathonMitra, with one-tap add to the phone calendar
 - In-app payment collection with automatic platform split — Razorpay Route in India, Stripe Connect globally (Phase 3)
-- GPS run tracking replacing manual Strava proof
 - Drop-off analytics so admins know who's drifting before they leave
 
 ---
@@ -104,14 +105,17 @@ clubmitra/
 │   │   ├── leaderboard/       # Redis sorted sets — challenge + rolling
 │   │   ├── activities/        # GPS runs: record, stats, routes        [Phase 4]
 │   │   ├── inventory/         # Items, stock, issue/return            [Phase 2]
-│   │   ├── messaging/         # Club + event chats, announcements      [Phase 2]
+│   │   ├── messaging/         # Club/event/direct chat: reactions, replies,
+│   │   │                      # voice notes, badge chips, push          [Phase 2]
+│   │   ├── realtime/          # WebSocket hub — instant messages + typing
+│   │   ├── runlog/            # Per-club run ledger → rolling boards (IST)
+│   │   ├── races/             # Race calendar + MarathonMitra sync     [Phase 4]
 │   │   ├── gamification/      # XP, levels, badge engine (GPS-verified) [Phase 5]
 │   │   ├── analytics/         # Drop-off metrics, engagement dashboard  [Phase 2]
+│   │   ├── uploads/           # Cloudinary signed-upload params
 │   │   ├── finance/           # Transactions, platform cut, settlements [Phase 3]
 │   │   ├── payments/          # Routes to pkg/payments provider        [Phase 3]
-│   │   ├── schedule/          # Training plan builder, pace groups      [Phase 3]
-│   │   ├── racecalendar/      # Race discovery, external events         [Phase 4]
-│   │   ├── badges/            # Milestones, achievement engine          [Phase 5]
+│   │   ├── schedule/          # Training-session fields on runs         [Phase 3]
 │   │   └── notifications/     # Push notification service
 │   ├── db/
 │   │   └── migrations/        # goose SQL migrations
@@ -387,8 +391,14 @@ clubmitra/
       (challenge-end badges land on next look — no scheduler)
 - [x] Unlock push to the runner + auto-announcement chip in their club chats
       (messages.kind='badge'; opt-out toggle in Settings)
-- [x] Profile: level pill on the hero + achievements strip (earned first, then
-      nearest-to-unlock) linking to the wall
+- [x] Profile: level pill on the hero + achievements strip (6 newest medals +
+      3 nearest unlocks) linking to the wall
+- [x] Wall redesigned around runner psychology: level hero → 🎯 Next up (3
+      nearest unlocks with exact remaining, goal-gradient effect) → 🏅 earned
+      medals → quiet locked grid; crisp coin medals at grid sizes (ribbon
+      reserved for ceremonial renders); error state with retry
+- [x] Hardening: non-nil JSON arrays from /gamification (null new_badges hung
+      the wall), badge awards batched into one INSERT…unnest round trip
 
 #### Remaining Phase 5
 - [ ] Public explore: discover clubs and challenges by city and sport
