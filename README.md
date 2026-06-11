@@ -268,21 +268,21 @@ clubmitra/
 - [ ] Message search inside a conversation; voice-note waveforms
 - [ ] _(Desktop admin web panel → Phase 3)_
 
-#### 🧪 Chat test checklist (needs two accounts; voice notes need the new APK)
-- [ ] Realtime: send from device A → lands on B instantly (no refresh)
-- [ ] Typing: type on A → B's thread header + chat-list row show "typing…"
-- [ ] Inbox: clubs pinned on top, unread badge counts, "You:" prefix, search filters
-- [ ] Tab badge: unread total on the Chat tab; clears after reading
-- [ ] Swipe a row → Mute (badge goes grey + tab total drops) and Archive (bottom section)
-- [ ] Long-press a message → overlay: emoji pill above, menu below (spring + haptic)
-- [ ] React from the pill → chip appears live on both devices; tap chip to clear
-- [ ] Swipe a message right → reply bar arms; send → quote block; tap quote → jumps + flashes
-- [ ] Edit your own message → "edited" label on both sides
-- [ ] Forward a message (text + a photo) to another conversation
-- [ ] Voice note: mic → record (timer) → send → playable bubble both sides; "🎤 Voice note" preview
-- [ ] Message info (long-press your msg → Info): "Read by X of Y" updates after B opens the chat
-- [ ] Delete for everyone; scroll up while B sends → jump-FAB with count (no yank)
-- [ ] Attachments: photo library, camera, document; staged preview + caption
+#### 🧪 Chat test checklist — ✅ verified on two accounts (June 12, 2026)
+- [x] Realtime: send from device A → lands on B instantly (no refresh)
+- [x] Typing: type on A → B's thread header + chat-list row show "typing…"
+- [x] Inbox: clubs pinned on top, unread badge counts, "You:" prefix, search filters
+- [x] Tab badge: unread total on the Chat tab; clears after reading
+- [x] Swipe a row → Mute (badge goes grey + tab total drops) and Archive (bottom section)
+- [x] Long-press a message → overlay: emoji pill above, menu below (spring + haptic)
+- [x] React from the pill → chip appears live on both devices; tap chip to clear
+- [x] Swipe a message right → reply bar arms; send → quote block; tap quote → jumps + flashes
+- [x] Edit your own message → "edited" label on both sides
+- [x] Forward a message (text + a photo) to another conversation
+- [x] Voice note: mic → record (timer) → send → playable bubble both sides; "🎤 Voice note" preview
+- [x] Message info (long-press your msg → Info): "Read by X of Y" updates after B opens the chat
+- [x] Delete for everyone; scroll up while B sends → jump-FAB with count (no yank)
+- [x] Attachments: photo library, camera, document; staged preview + caption
 
 #### Cleanup
 - [ ] ClubMitra rename (Go module, DB name, env vars, ports) — see naming note
