@@ -133,7 +133,7 @@ func main() {
 	messagingHandler := messaging.NewHandler(messagingSvc)
 
 	// Community race calendar: list, browse by city, "I'm going".
-	racesHandler := races.NewHandler(pool)
+	racesHandler := races.NewHandler(pool, cfg.MarathonMitraURL)
 
 	// Realtime: the websocket hub delivers new messages + typing instantly;
 	// clients keep a slow poll as fallback. Auth = the same access token, passed

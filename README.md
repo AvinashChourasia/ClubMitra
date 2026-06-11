@@ -354,7 +354,7 @@ clubmitra/
 - [x] Streak freeze: 2 per month, auto-applied to bridge missed days
 - [x] Background GPS (requires EAS dev build)
 - [x] City leaderboard: all verified runners in a city ranked collectively
-- [x] Race calendar: community-listed races by city, "I'm going", add to phone/Google calendar
+- [x] Race calendar: fed by MarathonMitra's marathons API (submission + approval live there); "I'm going", add to phone/Google calendar
 - [ ] Race calendar map view (interactive, search by location)
 - [ ] Similar races list / race recommendations
 - [ ] Calendar embed widget for club websites

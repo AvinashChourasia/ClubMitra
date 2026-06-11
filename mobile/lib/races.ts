@@ -14,7 +14,7 @@ export type Race = {
   distances: string;
   location?: string | null;
   url?: string | null;
-  created_by: string;
+  created_by?: string | null;
   going_count: number;
   going: boolean;
 };
@@ -24,18 +24,9 @@ export async function listRaces(token: string, city?: string): Promise<Race[]> {
   return (await request<Race[] | null>(`/races${qs}`, { token })) ?? [];
 }
 
-export type NewRace = {
-  title: string;
-  city: string;
-  race_date: string;
-  distances: string;
-  location?: string;
-  url?: string;
-};
-
-export function createRace(token: string, body: NewRace): Promise<Race> {
-  return request<Race>("/races", { method: "POST", body, token });
-}
+// Race submissions happen on MarathonMitra (their approval system feeds this
+// calendar via API). This is the page organizers are sent to.
+export const MARATHONMITRA_SUBMIT_URL = "https://marathonmitra.com";
 
 export function toggleGoing(token: string, raceId: string): Promise<{ going: boolean; going_count: number }> {
   return request(`/races/${raceId}/interest`, { method: "POST", token });

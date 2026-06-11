@@ -3,16 +3,14 @@
 // phone/Google calendar, and list a race for others with the + button.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
-import { listRaces, createRace, toggleGoing, deleteRace, addRaceToCalendar, type Race } from "../../lib/races";
-import { CityAutocomplete } from "../../components/CityAutocomplete";
+import { listRaces, toggleGoing, deleteRace, addRaceToCalendar, MARATHONMITRA_SUBMIT_URL, type Race } from "../../lib/races";
 import { Tap } from "../../components/Tap";
-import { Button } from "../../components/Button";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
@@ -34,16 +32,7 @@ export default function Races() {
   const [races, setRaces] = useState<Race[] | null>(null);
   const [myCityOnly, setMyCityOnly] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-
-  // Create-form state
-  const [title, setTitle] = useState("");
-  const [city, setCity] = useState(user?.city ?? "");
-  const [date, setDate] = useState("");
-  const [distances, setDistances] = useState("");
-  const [url, setUrl] = useState("");
-  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async (cityOnly: boolean) => {
     const token = await getAccessToken();
@@ -118,33 +107,17 @@ export default function Races() {
     ]);
   }
 
-  async function onCreate() {
-    if (!title.trim() || !city.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
-      Alert.alert("Almost there", "Race name, city, and a date in YYYY-MM-DD form are required.");
-      return;
-    }
-    setSaving(true);
-    try {
-      const token = await getAccessToken();
-      if (!token) return;
-      await createRace(token, {
-        title: title.trim(),
-        city: city.trim(),
-        race_date: date.trim(),
-        distances: distances.trim(),
-        url: url.trim() || undefined,
-      });
-      setCreating(false);
-      setTitle("");
-      setDate("");
-      setDistances("");
-      setUrl("");
-      await load(myCityOnly);
-    } catch (e) {
-      Alert.alert("Couldn't add race", e instanceof Error ? e.message : "Check the details and try again.");
-    } finally {
-      setSaving(false);
-    }
+  // Race listings flow in from MarathonMitra (their submission + approval
+  // system). The + button explains that and hands organizers over.
+  function onAddRace() {
+    Alert.alert(
+      "List your race 🏁",
+      "Races on this calendar come from MarathonMitra. Submit your marathon there — once it's approved, it appears here automatically.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Open MarathonMitra", onPress: () => Linking.openURL(MARATHONMITRA_SUBMIT_URL).catch(() => {}) },
+      ]
+    );
   }
 
   if (!user) return <Redirect href="/login" />;
@@ -170,7 +143,7 @@ export default function Races() {
             <Text style={{ fontSize: 24, fontWeight: "800", color: colors.text }}>Race calendar</Text>
             <Text style={{ color: colors.muted, fontSize: 13 }}>Find your next start line</Text>
           </View>
-          <Tap onPress={() => setCreating(true)} hitSlop={8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
+          <Tap onPress={onAddRace} hitSlop={8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="add" size={22} color="#fff" />
           </Tap>
         </View>
@@ -204,7 +177,7 @@ export default function Races() {
             </View>
             <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, marginTop: 12 }}>No upcoming races{myCityOnly && user.city ? ` in ${user.city}` : ""}</Text>
             <Text style={{ color: colors.muted, marginTop: 4, textAlign: "center" }}>
-              Know one? Add it with the + button so the whole community sees it.
+              Races land here from MarathonMitra — tap + to get yours listed.
             </Text>
           </View>
         ) : (
@@ -270,26 +243,6 @@ export default function Races() {
         )}
       </ScrollView>
 
-      {/* Add-a-race sheet */}
-      {creating && (
-        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
-          <Pressable onPress={() => setCreating(false)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-            <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 30, gap: 10 }}>
-              <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 6 }} />
-              <Text style={{ color: colors.text, fontWeight: "800", fontSize: 17 }}>List a race</Text>
-              <TextInput style={styles.input} placeholder="Race name (e.g. Bengaluru Half Marathon)" placeholderTextColor={colors.muted} value={title} onChangeText={setTitle} />
-              <CityAutocomplete value={city} onChange={setCity} placeholder="City" />
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <TextInput style={[styles.input, { flex: 1 }]} placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={date} onChangeText={setDate} autoCapitalize="none" />
-                <TextInput style={[styles.input, { flex: 1 }]} placeholder="Distances (5K · 10K)" placeholderTextColor={colors.muted} value={distances} onChangeText={setDistances} />
-              </View>
-              <TextInput style={styles.input} placeholder="Registration link (optional)" placeholderTextColor={colors.muted} value={url} onChangeText={setUrl} autoCapitalize="none" keyboardType="url" />
-              <Button label="Add race" onPress={() => void onCreate()} loading={saving} />
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      )}
     </SafeAreaView>
   );
 }

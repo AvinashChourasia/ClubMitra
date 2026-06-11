@@ -30,6 +30,10 @@ type Config struct {
 	CloudinaryKey    string
 	CloudinarySecret string
 
+	// MarathonMitra integration (optional): the get-all-marathons API that
+	// feeds the race calendar. Unset = calendar serves only local rows.
+	MarathonMitraURL string
+
 	// How long tokens stay valid. Access tokens are deliberately short
 	// (small damage window if stolen); refresh tokens are long (so users
 	// rarely have to log in again).
@@ -54,6 +58,7 @@ func Load() (*Config, error) {
 		JWTRefreshSecret: os.Getenv("JWT_REFRESH_SECRET"),
 		Port:             getEnv("PORT", "8080"),
 		Env:              getEnv("ENV", "development"),
+		MarathonMitraURL: os.Getenv("MARATHONMITRA_API_URL"),
 		AccessTokenTTL:   15 * time.Minute,
 		RefreshTokenTTL:  30 * 24 * time.Hour, // 30 days
 	}

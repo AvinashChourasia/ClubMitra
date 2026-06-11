@@ -4,8 +4,14 @@
 package races
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -29,7 +35,7 @@ type Race struct {
 	Distances  string    `json:"distances"`
 	Location   *string   `json:"location,omitempty"`
 	URL        *string   `json:"url,omitempty"`
-	CreatedBy  string    `json:"created_by"`
+	CreatedBy  *string   `json:"created_by,omitempty"`
 	GoingCount int       `json:"going_count"`
 	Going      bool      `json:"going"` // is the requester going?
 }
@@ -38,10 +44,127 @@ type Race struct {
 // them would be ceremony. Handler methods sit on the same type.
 type Handler struct {
 	db *pgxpool.Pool
+
+	// MarathonMitra feed: races are submitted + approved over there and pulled
+	// from its get-all-marathons API here. Empty sourceURL = local rows only.
+	sourceURL string
+	client    *http.Client
+	syncMu    sync.Mutex
+	lastSync  time.Time
 }
 
-// NewHandler wires the race calendar to the database pool.
-func NewHandler(db *pgxpool.Pool) *Handler { return &Handler{db: db} }
+// NewHandler wires the race calendar to the database pool and the (optional)
+// MarathonMitra API.
+func NewHandler(db *pgxpool.Pool, marathonMitraURL string) *Handler {
+	return &Handler{
+		db:        db,
+		sourceURL: strings.TrimSpace(marathonMitraURL),
+		client:    &http.Client{Timeout: 6 * time.Second},
+	}
+}
+
+// mmRace tolerates the field-name variants a marathon feed is likely to use.
+type mmRace struct {
+	ID        any    `json:"id"`
+	Title     string `json:"title"`
+	Name      string `json:"name"`
+	City      string `json:"city"`
+	Date      string `json:"date"`
+	RaceDate  string `json:"race_date"`
+	Distances string `json:"distances"`
+	Location  string `json:"location"`
+	URL       string `json:"url"`
+	Link      string `json:"link"`
+}
+
+func (m mmRace) title() string {
+	if m.Title != "" {
+		return m.Title
+	}
+	return m.Name
+}
+func (m mmRace) date() string {
+	if m.RaceDate != "" {
+		return m.RaceDate
+	}
+	return m.Date
+}
+func (m mmRace) link() string {
+	if m.URL != "" {
+		return m.URL
+	}
+	return m.Link
+}
+
+// syncFromMarathonMitra pulls the feed and upserts by external_id. Throttled to
+// once per 10 minutes and always best-effort: a dead feed must never take the
+// calendar down — stale rows keep serving.
+func (h *Handler) syncFromMarathonMitra(ctx context.Context) {
+	if h.sourceURL == "" {
+		return
+	}
+	h.syncMu.Lock()
+	if time.Since(h.lastSync) < 10*time.Minute {
+		h.syncMu.Unlock()
+		return
+	}
+	h.lastSync = time.Now()
+	h.syncMu.Unlock()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.sourceURL, nil)
+	if err != nil {
+		return
+	}
+	resp, err := h.client.Do(req)
+	if err != nil {
+		log.Printf("races: marathonmitra fetch failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		log.Printf("races: marathonmitra fetch status=%d err=%v", resp.StatusCode, err)
+		return
+	}
+
+	// Accept a bare array or an object wrapping it ({"races":[…]} / {"data":[…]}).
+	var list []mmRace
+	if err := json.Unmarshal(raw, &list); err != nil {
+		var wrapped struct {
+			Races []mmRace `json:"races"`
+			Data  []mmRace `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &wrapped); err != nil {
+			log.Printf("races: marathonmitra feed didn't parse: %v", err)
+			return
+		}
+		list = wrapped.Races
+		if len(list) == 0 {
+			list = wrapped.Data
+		}
+	}
+
+	for _, m := range list {
+		extID := strings.TrimSpace(fmt.Sprint(m.ID))
+		title := strings.TrimSpace(m.title())
+		city := strings.TrimSpace(m.City)
+		d, err := time.Parse("2006-01-02", strings.TrimSpace(m.date()))
+		if extID == "" || extID == "<nil>" || title == "" || city == "" || err != nil {
+			continue // skip rows we can't represent
+		}
+		_, err = h.db.Exec(ctx, `
+			INSERT INTO races (external_id, title, city, race_date, distances, location, url)
+			VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''))
+			ON CONFLICT (external_id) DO UPDATE SET
+				title = EXCLUDED.title, city = EXCLUDED.city, race_date = EXCLUDED.race_date,
+				distances = EXCLUDED.distances, location = EXCLUDED.location, url = EXCLUDED.url,
+				deleted_at = NULL`,
+			extID, title, city, d, strings.TrimSpace(m.Distances), strings.TrimSpace(m.Location), strings.TrimSpace(m.link()))
+		if err != nil {
+			log.Printf("races: upsert %q failed: %v", title, err)
+		}
+	}
+}
 
 // Routes returns the /races sub-router (mounted behind auth).
 func (h *Handler) Routes() http.Handler {
@@ -61,6 +184,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
+	h.syncFromMarathonMitra(r.Context()) // refresh from MarathonMitra (throttled, best-effort)
 	city := strings.TrimSpace(r.URL.Query().Get("city"))
 	const q = `
 		SELECT rc.id, rc.title, rc.city, rc.race_date::text, rc.distances, rc.location, rc.url, rc.created_by,
