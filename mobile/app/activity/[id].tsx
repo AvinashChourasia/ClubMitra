@@ -104,9 +104,11 @@ export default function ActivityDetail() {
 
   // Capture the card → PNG → OS share sheet. The snapshot target is the
   // HIDDEN off-screen copy in the main view hierarchy (capturing inside a
-  // Modal hangs/fails on Android). A timeout turns any silent native failure
-  // into the text fallback instead of an endless spinner; builds that predate
-  // the capture modules fall back the same way (next APK lights it up).
+  // Modal hangs/fails on Android). The modal stays OPEN until the share
+  // sheet is done — closing it first races the dismissal animation against
+  // the share intent and the sheet gets swallowed. A timeout turns silent
+  // native failures into a visible fallback; builds without the capture
+  // modules land there too (next APK lights them up).
   async function shareCard() {
     setSharing(true);
     try {
@@ -114,21 +116,31 @@ export default function ActivityDetail() {
       const Sharing = require("expo-sharing") as typeof import("expo-sharing");
       const uri = await Promise.race([
         captureRef(cardRef, { format: "png", quality: 1, result: "tmpfile" }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("capture timeout")), 6000)),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("capture timed out")), 6000)),
       ]);
-      if (!(await Sharing.isAvailableAsync())) throw new Error("sharing unavailable");
-      setShowShare(false);
-      setSharing(false);
+      if (!(await Sharing.isAvailableAsync())) throw new Error("sharing unavailable on this device");
       await Sharing.shareAsync(uri.startsWith("file://") ? uri : `file://${uri}`, {
         mimeType: "image/png",
         dialogTitle: "Share run",
       });
-    } catch {
-      setShowShare(false);
+      setShowShare(false); // only after the sheet has done its job
+    } catch (e) {
+      Alert.alert(
+        "Couldn't share the image",
+        e instanceof Error ? e.message : "Something went wrong.",
+        [
+          {
+            text: "Share as text",
+            onPress: () => {
+              setShowShare(false);
+              void shareText();
+            },
+          },
+          { text: "Cancel", style: "cancel" },
+        ]
+      );
+    } finally {
       setSharing(false);
-      Alert.alert("Couldn't make the image here", "Sharing as text instead — the image card works on the new app build.", [
-        { text: "OK", onPress: () => void shareText() },
-      ]);
     }
   }
 
