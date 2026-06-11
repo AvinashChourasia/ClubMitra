@@ -1,8 +1,8 @@
 // The root layout: loads the Inter brand font, then wraps the app in
 // ThemeProvider (light/dark) + AuthProvider and declares the top-level Stack.
 
-import { useEffect } from "react";
-import { Stack, useRouter } from "expo-router";
+import { useEffect, useRef } from "react";
+import { Stack, useRootNavigationState, useRouter, type Href } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -39,6 +39,19 @@ function ThemedStack() {
 
 export default function RootLayout() {
   const router = useRouter();
+  // Navigating before the root navigator mounts THROWS — and in a production
+  // build an uncaught throw kills the app. That's exactly what a notification
+  // tap does on cold start (the listener fires during boot), so deep links are
+  // queued until the navigator reports ready, then pushed.
+  const rootState = useRootNavigationState();
+  const navReady = !!rootState?.key;
+  const navReadyRef = useRef(false);
+  navReadyRef.current = navReady;
+  const pendingHref = useRef<Href | null>(null);
+  // The response that LAUNCHED the app is REPLAYED to fresh listeners on every
+  // mount — without this guard the same tap re-navigates (and used to re-crash)
+  // on each reopen. Handle each physical tap exactly once.
+  const handledTap = useRef<string | null>(null);
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -51,18 +64,49 @@ export default function RootLayout() {
     if (fontsLoaded) SplashScreen.hideAsync();
   }, [fontsLoaded]);
 
+  // Flush a queued deep link once the navigator exists (small delay so the
+  // initial route finishes mounting first).
+  useEffect(() => {
+    if (!navReady || !pendingHref.current) return;
+    const href = pendingHref.current;
+    pendingHref.current = null;
+    const t = setTimeout(() => {
+      try {
+        router.push(href);
+      } catch {
+        /* never crash over a deep link */
+      }
+    }, 150);
+    return () => clearTimeout(t);
+  }, [navReady, router]);
+
   // Deep-link when a push notification is tapped, based on its data payload.
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const tapId = `${response.notification.request.identifier}:${response.notification.date ?? ""}`;
+      if (handledTap.current === tapId) return;
+      handledTap.current = tapId;
+
       const data = response.notification.request.content.data as Record<string, string> | undefined;
       if (!data) return;
+      let href: string | null = null;
       if (data.type === "chat_message" && data.scope && data.id) {
-        // Deep-link straight into the conversation the push came from.
-        if (data.scope === "chapter") router.push(`/thread/club/${data.id}`);
-        else router.push(`/thread/dm/${data.id}`);
-      } else if (data.run_id) router.push(`/run/${data.run_id}`);
-      else if (data.challenge_id) router.push(`/challenge/${data.challenge_id}`);
-      else if (data.chapter_id) router.push(`/club/${data.chapter_id}`);
+        // Straight into the conversation the push came from.
+        href = data.scope === "chapter" ? `/thread/club/${data.id}` : `/thread/dm/${data.id}`;
+      } else if (data.run_id) href = `/run/${data.run_id}`;
+      else if (data.challenge_id) href = `/challenge/${data.challenge_id}`;
+      else if (data.chapter_id) href = `/club/${data.chapter_id}`;
+      if (!href) return;
+
+      if (navReadyRef.current) {
+        try {
+          router.push(href as Href);
+        } catch {
+          pendingHref.current = href as Href; // navigator raced us — queue it
+        }
+      } else {
+        pendingHref.current = href as Href; // cold start — queue until mounted
+      }
     });
     return () => sub.remove();
   }, [router]);

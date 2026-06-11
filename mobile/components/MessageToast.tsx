@@ -102,8 +102,12 @@ export function MessageToast() {
     const t = toastRef.current;
     dismiss(false);
     if (!t) return;
-    if (t.scope === "chapter") router.push(`/thread/club/${t.id}`);
-    else router.push(`/thread/dm/${t.id}`);
+    try {
+      if (t.scope === "chapter") router.push(`/thread/club/${t.id}`);
+      else router.push(`/thread/dm/${t.id}`);
+    } catch {
+      /* never crash over a banner tap */
+    }
   }
 
   return (
