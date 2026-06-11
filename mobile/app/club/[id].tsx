@@ -34,15 +34,97 @@ import {
   type Challenge,
 } from "../../lib/challenges";
 import { leaderboard, type BoardEntry, type Period } from "../../lib/runlog";
+import { chapterFeed, type FeedItem } from "../../lib/activities";
+import { formatDistance, formatPace } from "../../lib/format";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
 import { Avatar } from "../../components/Avatar";
 import { RunScheduleView } from "../../components/RunScheduleView";
 
-type Tab = "members" | "schedule" | "challenges" | "leaderboard";
+type Tab = "feed" | "members" | "schedule" | "challenges" | "leaderboard";
 
 const MEDAL = ["#FACC15", "#CBD5E1", "#D8965B"]; // gold / silver / bronze
+
+// timeAgo renders a feed timestamp the way people read it ("2h ago").
+function timeAgo(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "";
+  const mins = Math.floor((Date.now() - t) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+// FeedTab — the club's activity feed: recent GPS runs by members, the social
+// proof that the club is alive.
+function FeedTab({ chapterId, meId, getToken }: { chapterId: string; meId: string; getToken: () => Promise<string | null> }) {
+  const [items, setItems] = useState<FeedItem[] | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        try {
+          const token = await getToken();
+          if (token && active) setItems(await chapterFeed(token, chapterId));
+        } catch {
+          if (active) setItems([]);
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }, [chapterId, getToken])
+  );
+
+  if (items === null) return <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />;
+
+  if (items.length === 0) {
+    return (
+      <View style={[styles.card, { alignItems: "center", paddingVertical: 32 }]}>
+        <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="footsteps" size={28} color={colors.primary} />
+        </View>
+        <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, marginTop: 12 }}>No runs yet</Text>
+        <Text style={{ color: colors.muted, marginTop: 4, textAlign: "center" }}>
+          Member runs show up here the moment they're recorded. Be the first!
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ gap: 10 }}>
+      {items.map((f) => {
+        const me = f.user_id === meId;
+        return (
+          <View key={f.activity_id} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12 }]}>
+            <Avatar name={f.name} uri={f.profile_photo} size={44} bg={colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontSize: 14 }} numberOfLines={1}>
+                <Text style={{ fontWeight: "800" }}>{me ? "You" : f.name}</Text>
+                <Text> ran </Text>
+                <Text style={{ fontWeight: "800", color: colors.primary }}>{formatDistance(f.distance_m)}</Text>
+              </Text>
+              <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2 }}>
+                {formatPace(f.avg_pace_s_per_km)} · {timeAgo(f.started_at)}
+              </Text>
+            </View>
+            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="walk" size={18} color={colors.primary} />
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
 
 // LeaderboardTab — the club's rolling board with a period switcher.
 function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId: string; getToken: () => Promise<string | null> }) {
@@ -147,7 +229,7 @@ export default function ClubDetail() {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [role, setRole] = useState<string | null>(null);
   const [myStatus, setMyStatus] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("members");
+  const [tab, setTab] = useState<Tab>("feed");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -418,10 +500,11 @@ export default function ClubDetail() {
               </Pressable>
             )}
 
-            {/* Tabs */}
-            <View style={{ flexDirection: "row", backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 3 }}>
+            {/* Tabs — horizontally scrollable chips so five never feel cramped */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {(
                 [
+                  ["feed", "Feed"],
                   ["members", "Members"],
                   ["schedule", "Schedule"],
                   ["challenges", "Challenges"],
@@ -431,12 +514,22 @@ export default function ClubDetail() {
                 <Pressable
                   key={key}
                   onPress={() => setTab(key)}
-                  style={{ flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: "center", backgroundColor: tab === key ? colors.primary : "transparent" }}
+                  style={{
+                    paddingVertical: 9,
+                    paddingHorizontal: 16,
+                    borderRadius: 999,
+                    backgroundColor: tab === key ? colors.primary : colors.bg,
+                    borderWidth: 1,
+                    borderColor: tab === key ? colors.primary : colors.border,
+                  }}
                 >
-                  <Text style={{ color: tab === key ? "#fff" : colors.muted, fontWeight: "700", fontSize: 11 }}>{label}</Text>
+                  <Text style={{ color: tab === key ? "#fff" : colors.muted, fontWeight: "700", fontSize: 13 }}>{label}</Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
+
+            {/* --- Feed tab --- */}
+            {tab === "feed" && <FeedTab chapterId={id} meId={user.id} getToken={getAccessToken} />}
 
             {/* --- Members tab --- */}
             {tab === "members" && (

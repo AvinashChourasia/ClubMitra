@@ -68,6 +68,23 @@ export function getActivity(token: string, id: string): Promise<Activity> {
   return request<Activity>(`/activities/${id}`, { token });
 }
 
+// One club-feed entry: a member's recorded run with display fields.
+export type FeedItem = {
+  activity_id: string;
+  user_id: string;
+  name: string;
+  profile_photo?: string | null;
+  started_at: string;
+  distance_m: number;
+  duration_s: number;
+  avg_pace_s_per_km: number | null;
+};
+
+// chapterFeed lists a club's recent member runs (members only).
+export async function chapterFeed(token: string, chapterId: string): Promise<FeedItem[]> {
+  return (await request<FeedItem[] | null>(`/activities/feed/${chapterId}`, { token })) ?? [];
+}
+
 // One row of the city leaderboard — a runner ranked by GPS-verified distance.
 export type CityBoardEntry = {
   rank: number;

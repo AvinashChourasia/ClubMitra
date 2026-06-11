@@ -181,6 +181,59 @@ func (r *Repository) RouteWithMeta(ctx context.Context, userID string, id uuid.U
 	return geojson, offsets, nil
 }
 
+// FeedItem is one club-feed entry: a member's recorded run with their display
+// fields — enough for "Asha ran 5.2 km · 6:01/km · 2h ago".
+type FeedItem struct {
+	ActivityID   uuid.UUID `json:"activity_id"`
+	UserID       string    `json:"user_id"`
+	Name         string    `json:"name"`
+	ProfilePhoto *string   `json:"profile_photo,omitempty"`
+	StartedAt    time.Time `json:"started_at"`
+	DistanceM    float64   `json:"distance_m"`
+	DurationS    int       `json:"duration_s"`
+	AvgPace      *float64  `json:"avg_pace_s_per_km"`
+}
+
+// IsChapterMember mirrors the membership check used by chat: a live membership
+// row in the chapter. (The feed is member-only — runs aren't public.)
+func (r *Repository) IsChapterMember(ctx context.Context, chapterID uuid.UUID, userID string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM chapter_members
+			WHERE chapter_id = $1 AND user_id = $2 AND deleted_at IS NULL)`,
+		chapterID, userID).Scan(&ok)
+	return ok, err
+}
+
+// ChapterFeed lists the club's recent member runs, newest first.
+func (r *Repository) ChapterFeed(ctx context.Context, chapterID uuid.UUID, limit int) ([]FeedItem, error) {
+	const q = `
+		SELECT a.id, a.user_id, u.name, u.profile_photo,
+		       a.started_at, a.distance_m, a.duration_s, a.avg_pace_s_per_km
+		FROM activities a
+		JOIN chapter_members cm ON cm.user_id = a.user_id
+		     AND cm.chapter_id = $1 AND cm.deleted_at IS NULL
+		JOIN users u ON u.id = a.user_id
+		ORDER BY a.started_at DESC
+		LIMIT $2`
+	rows, err := r.db.Query(ctx, q, chapterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]FeedItem, 0)
+	for rows.Next() {
+		var f FeedItem
+		if err := rows.Scan(&f.ActivityID, &f.UserID, &f.Name, &f.ProfilePhoto,
+			&f.StartedAt, &f.DistanceM, &f.DurationS, &f.AvgPace); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // CityBoardEntry is one row of the city leaderboard — a runner ranked by total
 // GPS-verified distance in the window.
 type CityBoardEntry struct {

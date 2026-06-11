@@ -2,6 +2,7 @@ package activities
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -136,6 +137,21 @@ func (s *Service) Stats(ctx context.Context, userID string) (*Stats, error) {
 // seconds-from-start offsets (nil for older runs).
 func (s *Service) RouteWithMeta(ctx context.Context, userID string, id uuid.UUID) (string, []float64, error) {
 	return s.repo.RouteWithMeta(ctx, userID, id)
+}
+
+// ErrForbidden marks a feed request from a non-member.
+var ErrForbidden = errors.New("forbidden")
+
+// ChapterFeed returns a club's recent member runs — members only.
+func (s *Service) ChapterFeed(ctx context.Context, userID string, chapterID uuid.UUID) ([]FeedItem, error) {
+	ok, err := s.repo.IsChapterMember(ctx, chapterID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrForbidden
+	}
+	return s.repo.ChapterFeed(ctx, chapterID, 30)
 }
 
 // CityLeaderboard ranks GPS-verified runners in a city over a rolling window

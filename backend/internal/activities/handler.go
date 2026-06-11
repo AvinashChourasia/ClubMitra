@@ -34,6 +34,7 @@ func (h *Handler) Routes() http.Handler {
 	// Static routes before the {id} param so they aren't parsed as an id.
 	r.Get("/stats", h.stats)
 	r.Get("/city-leaderboard", h.cityLeaderboard)
+	r.Get("/feed/{chapterID}", h.chapterFeed) // club activity feed (members only)
 	// chi captures the {id} path segment; read it with chi.URLParam.
 	r.Get("/{id}", h.get)
 	r.Get("/{id}/geojson", h.geojson)
@@ -163,6 +164,30 @@ func (h *Handler) cityLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, view)
+}
+
+// chapterFeed lists a club's recent member runs for the club page Feed tab.
+func (h *Handler) chapterFeed(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	chapterID, err := uuid.Parse(chi.URLParam(r, "chapterID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid chapter id")
+		return
+	}
+	feed, err := h.svc.ChapterFeed(r.Context(), userID, chapterID)
+	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			httpx.Error(w, http.StatusForbidden, "you're not a member of this club")
+			return
+		}
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, feed)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
