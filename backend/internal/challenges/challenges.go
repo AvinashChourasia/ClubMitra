@@ -1,6 +1,7 @@
 // Package challenges owns club challenges: typed goals (distance / days /
 // streak) scoped by visibility (public / chapter / city / org), joined by
-// individuals or clubs, with Phase 1 progress driven by admin-verified proof.
+// individuals or clubs. Progress is GPS-native: every recorded run credits all
+// of the runner's active challenges automatically — no manual proof, no review.
 // The repository holds all SQL; the service layer adds the Redis leaderboard.
 package challenges
 
@@ -14,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNotFound is returned when a challenge or proof doesn't exist.
+// ErrNotFound is returned when a challenge doesn't exist.
 var ErrNotFound = errors.New("challenge not found")
 
 // Goal types and visibility scopes (kept as constants so the service validates
@@ -80,25 +81,20 @@ type NewChallenge struct {
 	LockDate    *time.Time
 }
 
-// Proof is a Phase 1 manual submission (Strava link / screenshot) awaiting or
-// having received admin verification.
-type Proof struct {
-	ID               uuid.UUID `json:"id"`
-	ChallengeID      uuid.UUID `json:"challenge_id"`
-	UserID           string    `json:"user_id"`
-	SubmissionMethod string    `json:"submission_method"` // manual|screenshot|strava|gpx
-	StravaLink       *string   `json:"strava_link,omitempty"`
-	ScreenshotURL    *string   `json:"screenshot_url,omitempty"`
-	GpxURL           *string   `json:"gpx_url,omitempty"`
-	KMClaimed        *float64  `json:"km_claimed,omitempty"`
-	ProofDate        *string   `json:"proof_date,omitempty"` // "YYYY-MM-DD"
-	TrustWeight      *float64  `json:"trust_weight,omitempty"`
-	Verified         bool      `json:"verified"`
-	VerifiedBy       *string   `json:"verified_by,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
+// ChallengeUpdate carries the organiser-editable fields, applied before the
+// challenge starts. The service merges these onto the existing row, so every
+// field arrives populated here.
+type ChallengeUpdate struct {
+	Title       string
+	Description string
+	TargetKM    *float64
+	TargetDays  *int
+	StartDate   time.Time
+	EndDate     time.Time
+	LockDate    *time.Time
 }
 
-// Repository is the data-access layer for challenges, participants, and proof.
+// Repository is the data-access layer for challenges and participants.
 type Repository struct {
 	db *pgxpool.Pool
 }
@@ -318,68 +314,45 @@ func (r *Repository) JoinAsChapter(ctx context.Context, challengeID, chapterID u
 	return tag.RowsAffected() > 0, nil
 }
 
-// proofColumns is the shared column list, kept in sync with scanProof. ::text on
-// proof_date so it comes back as "YYYY-MM-DD" (date only, no time/zone).
-const proofColumns = `id, challenge_id, user_id, submission_method, strava_link, screenshot_url,
-	gpx_url, km_claimed, proof_date::text, trust_weight, verified, verified_by, created_at`
-
-// SubmitProof records a Phase 1 proof submission. proofDate ("YYYY-MM-DD") is
-// optional — relevant for day/streak challenges. trustWeight is the base weight
-// for the submission method (set by the service from the trust package).
-func (r *Repository) SubmitProof(ctx context.Context, challengeID uuid.UUID, userID, method string, stravaLink, screenshotURL, gpxURL *string, kmClaimed *float64, proofDate *string, trustWeight float64) (*Proof, error) {
+// Update writes the organiser-editable fields. The service validates (creator,
+// pre-start, sane dates/targets) before calling.
+func (r *Repository) Update(ctx context.Context, id uuid.UUID, u ChallengeUpdate) error {
 	const q = `
-		INSERT INTO challenge_proof (challenge_id, user_id, submission_method, strava_link, screenshot_url, gpx_url, km_claimed, proof_date, trust_weight)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING ` + proofColumns
-	return scanProof(r.db.QueryRow(ctx, q, challengeID, userID, method, stravaLink, screenshotURL, gpxURL, kmClaimed, proofDate, trustWeight))
+		UPDATE challenges
+		SET title = $2, description = $3, target_km = $4, target_days = $5,
+		    start_date = $6, end_date = $7, lock_date = $8
+		WHERE id = $1 AND deleted_at IS NULL`
+	tag, err := r.db.Exec(ctx, q, id, u.Title, u.Description, u.TargetKM, u.TargetDays,
+		u.StartDate, u.EndDate, u.LockDate)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
-// ListProof returns a challenge's proof submissions, newest first.
-func (r *Repository) ListProof(ctx context.Context, challengeID uuid.UUID) ([]Proof, error) {
+// ParticipantUserIDs returns the individual participants of a challenge (no
+// chapter teams), e.g. to notify them the organiser changed the details.
+func (r *Repository) ParticipantUserIDs(ctx context.Context, challengeID uuid.UUID) ([]string, error) {
 	const q = `
-		SELECT ` + proofColumns + `
-		FROM challenge_proof
-		WHERE challenge_id = $1 AND deleted_at IS NULL
-		ORDER BY created_at DESC`
+		SELECT user_id FROM challenge_participants
+		WHERE challenge_id = $1 AND user_id IS NOT NULL AND deleted_at IS NULL`
 	rows, err := r.db.Query(ctx, q, challengeID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]Proof, 0)
+	var out []string
 	for rows.Next() {
-		p, err := scanProof(rows)
-		if err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		out = append(out, *p)
+		out = append(out, id)
 	}
 	return out, rows.Err()
-}
-
-// MarkProofVerified flips a proof to verified (idempotent on re-verify of an
-// already-verified row, which it reports via the second return value so the
-// caller can avoid double-crediting progress).
-// verifierID is nil for trust auto-approval (verified_by = NULL = system).
-func (r *Repository) MarkProofVerified(ctx context.Context, proofID uuid.UUID, verifierID *string) (proof *Proof, firstTime bool, err error) {
-	const q = `
-		UPDATE challenge_proof
-		SET verified = true, verified_by = $2
-		WHERE id = $1 AND deleted_at IS NULL AND verified = false
-		RETURNING ` + proofColumns
-	p, err := scanProof(r.db.QueryRow(ctx, q, proofID, verifierID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Either the proof doesn't exist, or it was already verified. Disambiguate.
-		var exists bool
-		if e := r.db.QueryRow(ctx, `SELECT true FROM challenge_proof WHERE id = $1 AND deleted_at IS NULL`, proofID).Scan(&exists); e != nil {
-			return nil, false, ErrNotFound
-		}
-		return nil, false, nil // already verified
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	return p, true, nil
 }
 
 // AddProgressKM atomically increases an individual's km progress and returns the
@@ -398,46 +371,92 @@ func (r *Repository) AddProgressKM(ctx context.Context, challengeID uuid.UUID, u
 	return total, err == nil, err
 }
 
-// AddProgressDay records one day of progress for an individual and returns the
-// new day count. (Streak handling stays simple for Phase 1: days increment.)
-func (r *Repository) AddProgressDay(ctx context.Context, challengeID uuid.UUID, userID string) (int, bool, error) {
-	const q = `
+// SyncDayProgress recomputes a participant's day-based progress straight from
+// their GPS activities inside the challenge window (days bucketed in IST, the
+// app's home timezone). It stores:
+//   - days challenges:  progress_days = distinct run days
+//   - streak challenges: progress_days = BEST consecutive-day streak in the
+//     window (what counts toward the target), current_streak = the live streak
+//     (0 if the last run day is older than yesterday).
+//
+// Returns the leaderboard score (the stored progress_days). ok=false if the
+// user isn't a participant.
+func (r *Repository) SyncDayProgress(ctx context.Context, challengeID uuid.UUID, userID, ctype string, start, end time.Time) (int, bool, error) {
+	// Gaps-and-islands over the runner's distinct run days: consecutive days
+	// share (day - row_number), so grouping by it yields each streak.
+	const calc = `
+		WITH run_days AS (
+			SELECT DISTINCT (a.started_at AT TIME ZONE 'Asia/Kolkata')::date AS d
+			FROM activities a
+			WHERE a.user_id = $1 AND a.started_at >= $2 AND a.started_at <= $3
+		),
+		islands AS (
+			SELECT COUNT(*)::int AS len, MAX(d) AS last_d
+			FROM (SELECT d, d - (ROW_NUMBER() OVER (ORDER BY d))::int AS grp FROM run_days) t
+			GROUP BY grp
+		)
+		SELECT
+			COALESCE((SELECT COUNT(*) FROM run_days), 0)::int AS day_count,
+			COALESCE((SELECT MAX(len) FROM islands), 0)::int AS best_streak,
+			COALESCE((SELECT CASE WHEN last_d >= (now() AT TIME ZONE 'Asia/Kolkata')::date - 1
+			                      THEN len ELSE 0 END
+			          FROM islands ORDER BY last_d DESC LIMIT 1), 0)::int AS live_streak`
+	var dayCount, bestStreak, liveStreak int
+	if err := r.db.QueryRow(ctx, calc, userID, start, end).Scan(&dayCount, &bestStreak, &liveStreak); err != nil {
+		return 0, false, err
+	}
+
+	progress := dayCount
+	if ctype == TypeStreak {
+		progress = bestStreak
+	}
+	const upd = `
 		UPDATE challenge_participants
-		SET progress_days = progress_days + 1, current_streak = current_streak + 1
+		SET progress_days = $3, current_streak = $4
 		WHERE challenge_id = $1 AND user_id = $2 AND deleted_at IS NULL
 		RETURNING progress_days`
-	var days int
-	err := r.db.QueryRow(ctx, q, challengeID, userID).Scan(&days)
+	var stored int
+	err := r.db.QueryRow(ctx, upd, challengeID, userID, progress, liveStreak).Scan(&stored)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
-	return days, err == nil, err
+	return stored, err == nil, err
 }
 
-// ActiveDistanceMemberships returns the distance challenges a user is in that
-// are active at instant t — the GPS hook (Phase 3) credits these by km.
-func (r *Repository) ActiveDistanceMemberships(ctx context.Context, userID string, t time.Time) ([]uuid.UUID, error) {
+// Membership is an active challenge a user participates in, with what the GPS
+// hook needs to credit it (type drives km vs day crediting; the window bounds
+// the day recompute).
+type Membership struct {
+	ID        uuid.UUID
+	Type      string
+	StartDate time.Time
+	EndDate   time.Time
+}
+
+// ActiveMemberships returns every challenge (any type) the user is in that is
+// active at instant t — the GPS hook credits all of them on each saved run.
+func (r *Repository) ActiveMemberships(ctx context.Context, userID string, t time.Time) ([]Membership, error) {
 	const q = `
-		SELECT c.id
+		SELECT c.id, c.type, c.start_date, c.end_date
 		FROM challenge_participants p
 		JOIN challenges c ON c.id = p.challenge_id
 		WHERE p.user_id = $1 AND p.deleted_at IS NULL
-		  AND c.type = 'distance' AND c.deleted_at IS NULL
+		  AND c.deleted_at IS NULL
 		  AND c.start_date <= $2 AND c.end_date > $2`
 	rows, err := r.db.Query(ctx, q, userID, t)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var ids []uuid.UUID
+	var out []Membership
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var m Membership
+		if err := rows.Scan(&m.ID, &m.Type, &m.StartDate, &m.EndDate); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		out = append(out, m)
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
 }
 
 // Scores returns each individual participant's leaderboard score for a
@@ -467,14 +486,3 @@ func (r *Repository) Scores(ctx context.Context, challengeID uuid.UUID) (map[str
 	return out, rows.Err()
 }
 
-func scanProof(s interface{ Scan(...any) error }) (*Proof, error) {
-	var p Proof
-	err := s.Scan(
-		&p.ID, &p.ChallengeID, &p.UserID, &p.SubmissionMethod, &p.StravaLink, &p.ScreenshotURL,
-		&p.GpxURL, &p.KMClaimed, &p.ProofDate, &p.TrustWeight, &p.Verified, &p.VerifiedBy, &p.CreatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &p, nil
-}

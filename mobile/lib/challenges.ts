@@ -1,6 +1,6 @@
 // Typed client for the challenges API (visibility-aware club model). A challenge
-// has a type (distance/days/streak) and a visibility scope; progress is credited
-// from admin-verified proof in Phase 1.
+// has a type (distance/days/streak) and a visibility scope; progress is GPS-
+// native — every recorded run credits all active challenges automatically.
 
 import { request } from "./api";
 
@@ -40,19 +40,6 @@ export type LeaderboardEntry = {
   rank: number;
 };
 
-export type Proof = {
-  id: string;
-  challenge_id: string;
-  user_id: string;
-  strava_link?: string | null;
-  screenshot_url?: string | null;
-  km_claimed?: number | null;
-  proof_date?: string | null; // "YYYY-MM-DD"
-  verified: boolean;
-  verified_by?: string | null;
-  created_at: string;
-};
-
 export const CHALLENGE_TYPES: { key: ChallengeType; label: string }[] = [
   { key: "distance", label: "Distance" },
   { key: "days", label: "Days" },
@@ -79,6 +66,28 @@ export function challengeProgress(c: Challenge): number {
 export function challengeFraction(c: Challenge): number {
   const t = challengeTarget(c);
   return t > 0 ? Math.min(1, challengeProgress(c) / t) : 0;
+}
+
+// --- phase helpers (a challenge's life: upcoming → live → ended) ---
+export type ChallengePhase = "upcoming" | "live" | "ended";
+
+export function challengePhase(c: Challenge, now = Date.now()): ChallengePhase {
+  if (now > new Date(c.end_date).getTime()) return "ended";
+  if (now >= new Date(c.start_date).getTime()) return "live";
+  return "upcoming";
+}
+
+// Whole days until an instant (>=0); used for "3d left" / "starts in 2d".
+export function daysUntil(iso: string, now = Date.now()): number {
+  return Math.max(0, Math.ceil((new Date(iso).getTime() - now) / 86400000));
+}
+
+// How far through its window a live challenge is, 0..1 (for time bars).
+export function windowElapsedFraction(c: Challenge, now = Date.now()): number {
+  const s = new Date(c.start_date).getTime();
+  const e = new Date(c.end_date).getTime();
+  if (e <= s) return 1;
+  return Math.max(0, Math.min(1, (now - s) / (e - s)));
 }
 
 // listChallenges: visible challenges (browse), or only the user's when joinedOnly.
@@ -131,17 +140,18 @@ export async function getLeaderboard(token: string, id: string): Promise<Leaderb
   return (await request<LeaderboardEntry[] | null>(`/challenges/${id}/leaderboard`, { token })) ?? [];
 }
 
-export type ProofInput = { strava_link?: string; screenshot_url?: string; km_claimed?: number; proof_date?: string };
+// updateChallenge: organiser edit, open until the start date (backend enforces
+// creator + pre-start). Send only the fields being changed.
+export type ChallengeEdit = {
+  title?: string;
+  description?: string;
+  target_km?: number;
+  target_days?: number;
+  start_date?: string; // ISO
+  end_date?: string; // ISO
+  lock_date?: string; // ISO
+};
 
-export function submitProof(token: string, id: string, body: ProofInput): Promise<Proof> {
-  return request<Proof>(`/challenges/${id}/proof`, { method: "POST", token, body });
-}
-
-// listProof + verifyProof are creator-only (the backend enforces this).
-export async function listProof(token: string, id: string): Promise<Proof[]> {
-  return (await request<Proof[] | null>(`/challenges/${id}/proof`, { token })) ?? [];
-}
-
-export function verifyProof(token: string, id: string, proofId: string): Promise<Proof> {
-  return request<Proof>(`/challenges/${id}/proof/${proofId}/verify`, { method: "POST", token });
+export function updateChallenge(token: string, id: string, body: ChallengeEdit): Promise<Challenge> {
+  return request<Challenge>(`/challenges/${id}`, { method: "PUT", token, body });
 }

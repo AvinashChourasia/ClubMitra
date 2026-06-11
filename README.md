@@ -100,7 +100,7 @@ clubmitra/
 │   │   ├── permissions/       # Role-based access control middleware
 │   │   ├── members/           # Member lifecycle, status, invites      [Phase 2]
 │   │   ├── attendance/        # Run scheduling, post-run check-in
-│   │   ├── challenges/        # Challenge engine, visibility rules, proof
+│   │   ├── challenges/        # Challenge engine: GPS-credited progress, visibility rules
 │   │   ├── leaderboard/       # Redis sorted sets — challenge + rolling
 │   │   ├── activities/        # GPS runs: record, stats, routes        [Phase 4]
 │   │   ├── inventory/         # Items, stock, issue/return            [Phase 2]
@@ -201,8 +201,8 @@ clubmitra/
 - [x] Challenge visibility: public / chapter-only / city-only / org-wide
 - [x] Challenge join: individual runner or club joins
 - [x] Leaderboard per challenge (Redis sorted sets)
-- [x] Phase 1 proof: runner pastes Strava link or screenshot → admin verifies
-- [x] Push notifications: run scheduled, join request, approval, challenge created, proof verified *(infra — real delivery needs an EAS build)*
+- [x] ~~Phase 1 proof: runner pastes Strava link or screenshot → admin verifies~~ *(retired June 2026 — challenges are GPS-native, migration 00031)*
+- [x] Push notifications: run scheduled, join request, approval, challenge created *(infra — real delivery needs an EAS build)*
 
 #### Mobile (Phase 1)
 - [x] Expo Router (file-based), React Context state, typed fetch client, secure-store tokens
@@ -231,8 +231,8 @@ clubmitra/
 > Built in Phase 2, retired once GPS verification shipped: recorded runs are
 > self-verifying, so a separate credibility score added complexity without
 > value. Backend package, profile endpoint, and user columns dropped
-> (migration 00027). Proof-method evidence weighting (manual .70 → gpx 1.10)
-> survives inside challenges — that's proof math, not trust scoring.
+> (migration 00027). The proof flow itself (and its evidence weighting) was
+> retired in June 2026 too — challenges are GPS-native now (migration 00031).
 
 #### Analytics — Drop-off Dashboard
 - [x] Members with no activity in 7 / 14 / 30 / 60 days — visible to chapter admin
@@ -348,6 +348,11 @@ clubmitra/
 - [x] Run history + all-time stats (runs, distance, time, streak)
 - [x] GPX file import from any GPS device (Garmin, Polar, Suunto)
 - [x] Runs auto-credit to active challenges (replaces manual Strava proof)
+- [x] ALL challenge types GPS-credited: distance adds km; run-days and streaks recomputed from activities on every save (IST day buckets, gaps-and-islands)
+- [x] Challenge proof + admin review fully removed — table dropped (migration 00031)
+- [x] Organiser can edit a challenge (title, story, target, window) until it starts; participants get a heads-up push
+- [x] Challenge tab redesign: live hero card with animated progress ring, Live / Starting soon / Ended sections, All·Joined filter only
+- [x] Challenge detail redesign: gradient ring with count-up + per-day coaching, 3D podium leaderboard, confetti on goal completion, "Record a run now" CTA
 - [x] Runs auto-credit to rolling leaderboards
 - [x] Personal stats: total km, streak, personal records
 - [x] Activity feed per chapter (club page Feed tab)
@@ -441,16 +446,14 @@ POST   /api/v1/runs/:id/checkout
 GET    /api/v1/runs/:id/attendance
 GET    /api/v1/members/:uid/attendance
 
-# Challenges
+# Challenges (progress is GPS-credited — no proof endpoints)
 GET    /api/v1/challenges
 POST   /api/v1/challenges
 GET    /api/v1/challenges/:id
+PUT    /api/v1/challenges/:id          # organiser edit, until start date
 POST   /api/v1/challenges/:id/join
 POST   /api/v1/challenges/:id/leave
 GET    /api/v1/challenges/:id/leaderboard
-POST   /api/v1/challenges/:id/proof
-GET    /api/v1/challenges/:id/proof
-POST   /api/v1/challenges/:id/proof/:pid/verify
 
 # Push Notifications
 POST   /api/v1/push/token

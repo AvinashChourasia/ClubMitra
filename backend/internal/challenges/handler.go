@@ -36,12 +36,10 @@ func (h *Handler) Routes() http.Handler {
 	r.Post("/", h.create)
 	r.Route("/{id}", func(r chi.Router) {
 		r.Get("/", h.get)
+		r.Put("/", h.update) // organiser edit, open until the start date
 		r.Post("/join", h.join)
 		r.Post("/leave", h.leave)
 		r.Get("/leaderboard", h.leaderboard)
-		r.Post("/proof", h.submitProof)
-		r.Get("/proof", h.listProof)            // creator only
-		r.Post("/proof/{proofID}/verify", h.verifyProof) // creator only
 	})
 	return r
 }
@@ -70,13 +68,16 @@ type joinRequest struct {
 	Paid      bool    `json:"paid"`       // mock-payment confirmation for a fee challenge
 }
 
-type submitProofRequest struct {
-	SubmissionMethod string   `json:"submission_method"` // optional; inferred from evidence if omitted
-	StravaLink       *string  `json:"strava_link"`
-	ScreenshotURL    *string  `json:"screenshot_url"`
-	GpxURL           *string  `json:"gpx_url"`
-	KMClaimed        *float64 `json:"km_claimed"`
-	ProofDate        *string  `json:"proof_date"` // "YYYY-MM-DD", optional
+// updateRequest is the organiser's partial edit; absent fields keep their
+// current values. Type/visibility/scope are immutable by design.
+type updateRequest struct {
+	Title       *string    `json:"title"`
+	Description *string    `json:"description"`
+	TargetKM    *float64   `json:"target_km"`
+	TargetDays  *int       `json:"target_days"`
+	StartDate   *time.Time `json:"start_date"`
+	EndDate     *time.Time `json:"end_date"`
+	LockDate    *time.Time `json:"lock_date"`
 }
 
 // --- handlers ---
@@ -251,7 +252,9 @@ func (h *Handler) leave(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, ch)
 }
 
-func (h *Handler) submitProof(w http.ResponseWriter, r *http.Request) {
+// update applies the organiser's edit (creator-only, pre-start — both enforced
+// by the service) and returns the fresh challenge.
+func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	userID, ok := httpx.UserIDFromContext(r.Context())
 	if !ok {
 		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
@@ -261,48 +264,25 @@ func (h *Handler) submitProof(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req submitProofRequest
+	var req updateRequest
 	if err := httpx.Decode(w, r, &req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	proof, err := h.svc.SubmitProof(r.Context(), userID, id, req.SubmissionMethod, req.StravaLink, req.ScreenshotURL, req.GpxURL, req.KMClaimed, req.ProofDate)
+	ch, err := h.svc.Update(r.Context(), userID, id, UpdateInput{
+		Title:       req.Title,
+		Description: req.Description,
+		TargetKM:    req.TargetKM,
+		TargetDays:  req.TargetDays,
+		StartDate:   req.StartDate,
+		EndDate:     req.EndDate,
+		LockDate:    req.LockDate,
+	})
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusCreated, proof)
-}
-
-func (h *Handler) listProof(w http.ResponseWriter, r *http.Request) {
-	id, ok := h.requireCreator(w, r)
-	if !ok {
-		return
-	}
-	proofs, err := h.svc.ListProof(r.Context(), id)
-	if err != nil {
-		httpx.InternalError(w, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, proofs)
-}
-
-func (h *Handler) verifyProof(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireCreator(w, r); !ok {
-		return
-	}
-	verifierID, _ := httpx.UserIDFromContext(r.Context())
-	proofID, err := uuid.Parse(chi.URLParam(r, "proofID"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "invalid proof id")
-		return
-	}
-	proof, err := h.svc.VerifyProof(r.Context(), verifierID, proofID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, proof)
+	httpx.JSON(w, http.StatusOK, ch)
 }
 
 // --- helpers ---
@@ -311,30 +291,6 @@ func parseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid challenge id")
-		return uuid.Nil, false
-	}
-	return id, true
-}
-
-// requireCreator parses the challenge id and confirms the caller created it —
-// the gate for reviewing and verifying proof. Returns the id on success.
-func (h *Handler) requireCreator(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	userID, ok := httpx.UserIDFromContext(r.Context())
-	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
-		return uuid.Nil, false
-	}
-	id, ok := parseID(w, r)
-	if !ok {
-		return uuid.Nil, false
-	}
-	ch, err := h.svc.Get(r.Context(), userID, id)
-	if err != nil {
-		writeErr(w, err)
-		return uuid.Nil, false
-	}
-	if ch.CreatorID != userID {
-		httpx.Error(w, http.StatusForbidden, "only the challenge creator can review proof")
 		return uuid.Nil, false
 	}
 	return id, true
@@ -360,6 +316,8 @@ func writeErr(w http.ResponseWriter, err error) {
 		httpx.Error(w, http.StatusBadRequest, ve.Msg)
 	case errors.Is(err, ErrNotFound):
 		httpx.Error(w, http.StatusNotFound, "challenge not found")
+	case errors.Is(err, ErrForbidden):
+		httpx.Error(w, http.StatusForbidden, ErrForbidden.Error())
 	case errors.Is(err, ErrPaymentRequired):
 		httpx.Error(w, http.StatusPaymentRequired, ErrPaymentRequired.Error())
 	default:

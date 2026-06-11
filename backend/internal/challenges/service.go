@@ -194,167 +194,142 @@ func (s *Service) JoinAsChapter(ctx context.Context, challengeID, chapterID uuid
 	return err
 }
 
-// validProofMethods are the accepted submission methods; methodWeight is how
-// hard each is to fake — credited km are multiplied by it.
-var validProofMethods = map[string]bool{"manual": true, "screenshot": true, "strava": true, "gpx": true}
-
-var methodWeight = map[string]float64{"manual": 0.70, "screenshot": 0.85, "strava": 1.00, "gpx": 1.10}
-
-// inferMethod picks a submission method from whichever evidence was supplied,
-// used when the client doesn't send one explicitly (back-compat).
-func inferMethod(stravaLink, screenshotURL, gpxURL *string) string {
-	switch {
-	case nonEmpty(stravaLink):
-		return "strava"
-	case nonEmpty(gpxURL):
-		return "gpx"
-	case nonEmpty(screenshotURL):
-		return "screenshot"
-	default:
-		return "manual"
-	}
+// UpdateInput carries the organiser's edit. Nil pointers mean "keep current";
+// the service merges onto the stored row and re-validates the result.
+type UpdateInput struct {
+	Title       *string
+	Description *string
+	TargetKM    *float64
+	TargetDays  *int
+	StartDate   *time.Time
+	EndDate     *time.Time
+	LockDate    *time.Time
 }
 
-func nonEmpty(s *string) bool { return s != nil && strings.TrimSpace(*s) != "" }
+// ErrForbidden means the caller isn't allowed to manage this challenge.
+var ErrForbidden = errors.New("only the challenge organiser can do that")
 
-// SubmitProof records a Phase 1 proof. The challenge must exist (and be visible
-// enough to fetch); progress isn't credited until an admin verifies it. The
-// submission method sets the proof's evidence weight; if omitted it's inferred
-// from the evidence supplied.
-func (s *Service) SubmitProof(ctx context.Context, userID string, challengeID uuid.UUID, method string, stravaLink, screenshotURL, gpxURL *string, kmClaimed *float64, proofDate *string) (*Proof, error) {
-	method = strings.TrimSpace(method)
-	if method == "" {
-		method = inferMethod(stravaLink, screenshotURL, gpxURL)
-	}
-	if !validProofMethods[method] {
-		return nil, ValidationError{Msg: "submission_method must be manual, screenshot, strava or gpx"}
-	}
-	// Every method except manual entry needs a piece of evidence.
-	if method != "manual" && !nonEmpty(stravaLink) && !nonEmpty(screenshotURL) && !nonEmpty(gpxURL) {
-		return nil, ValidationError{Msg: "a strava_link, screenshot_url or gpx_url is required"}
-	}
-	// Without a Strava link to read the date from, the proof's date is required.
-	if !nonEmpty(stravaLink) && (proofDate == nil || strings.TrimSpace(*proofDate) == "") {
-		return nil, ValidationError{Msg: "a date is required when there's no Strava link"}
-	}
-	if _, err := s.repo.Get(ctx, userID, challengeID); err != nil {
-		return nil, err // ErrNotFound bubbles up
-	}
-	return s.repo.SubmitProof(ctx, challengeID, userID, method, stravaLink, screenshotURL, gpxURL, kmClaimed, proofDate, methodWeight[method])
-}
-
-// ListProof returns a challenge's proof submissions (admin review queue).
-func (s *Service) ListProof(ctx context.Context, challengeID uuid.UUID) ([]Proof, error) {
-	return s.repo.ListProof(ctx, challengeID)
-}
-
-// VerifyProof is the admin path: mark a proof verified and, the first time,
-// credit the submitter. Re-verifying an already-verified proof is a no-op.
-func (s *Service) VerifyProof(ctx context.Context, verifierID string, proofID uuid.UUID) (*Proof, error) {
-	proof, firstTime, err := s.repo.MarkProofVerified(ctx, proofID, &verifierID)
+// Update lets the organiser edit a challenge's details — but only before it
+// starts. Once runners are on the course the goal posts are locked. Type and
+// visibility never change (they'd reshape who can see it / what progress means).
+func (s *Service) Update(ctx context.Context, userID string, id uuid.UUID, in UpdateInput) (*Challenge, error) {
+	ch, err := s.repo.Get(ctx, userID, id)
 	if err != nil {
 		return nil, err
 	}
-	if !firstTime {
-		return proof, nil // already verified earlier; nothing to credit
+	if ch.CreatorID != userID {
+		return nil, ErrForbidden
 	}
-	if err := s.creditVerifiedProof(ctx, proof); err != nil {
-		return nil, err
-	}
-	return proof, nil
-}
-
-// proofWeight is the evidence weight to apply to a proof's credit — the stored
-// per-proof weight, falling back to the method's base weight for older rows.
-func proofWeight(p *Proof) float64 {
-	if p.TrustWeight != nil {
-		return *p.TrustWeight
-	}
-	if w, ok := methodWeight[p.SubmissionMethod]; ok {
-		return w
-	}
-	return 1.0
-}
-
-// creditVerifiedProof credits a just-verified proof: km × evidence weight for
-// distance challenges, +1 day otherwise; updates the leaderboard and notifies
-// the submitter. Shared by the admin verify path.
-func (s *Service) creditVerifiedProof(ctx context.Context, proof *Proof) error {
-	ch, err := s.repo.Get(ctx, proof.UserID, proof.ChallengeID)
-	if err != nil {
-		return err
+	if !time.Now().Before(ch.StartDate) {
+		return nil, ValidationError{Msg: "editing is closed — the challenge has already started"}
 	}
 
-	var newScore float64
+	// Merge the edit onto the current values.
+	upd := ChallengeUpdate{
+		Title:       ch.Title,
+		Description: ch.Description,
+		TargetKM:    ch.TargetKM,
+		TargetDays:  ch.TargetDays,
+		StartDate:   ch.StartDate,
+		EndDate:     ch.EndDate,
+		LockDate:    ch.LockDate,
+	}
+	if in.Title != nil {
+		upd.Title = strings.TrimSpace(*in.Title)
+	}
+	if in.Description != nil {
+		upd.Description = strings.TrimSpace(*in.Description)
+	}
+	if in.TargetKM != nil {
+		upd.TargetKM = in.TargetKM
+	}
+	if in.TargetDays != nil {
+		upd.TargetDays = in.TargetDays
+	}
+	if in.StartDate != nil {
+		upd.StartDate = *in.StartDate
+	}
+	if in.EndDate != nil {
+		upd.EndDate = *in.EndDate
+	}
+	if in.LockDate != nil {
+		upd.LockDate = in.LockDate
+	}
+
+	// Same rules as create.
+	if upd.Title == "" {
+		return nil, ValidationError{Msg: "title is required"}
+	}
+	if !upd.EndDate.After(upd.StartDate) {
+		return nil, ValidationError{Msg: "end date must be after start date"}
+	}
 	switch ch.Type {
 	case TypeDistance:
-		km := 0.0
-		if proof.KMClaimed != nil {
-			km = *proof.KMClaimed * proofWeight(proof) // weight harder-to-fake evidence higher
+		if upd.TargetKM == nil || *upd.TargetKM <= 0 {
+			return nil, ValidationError{Msg: "a positive target_km is required for a distance challenge"}
 		}
-		total, ok, err := s.repo.AddProgressKM(ctx, proof.ChallengeID, proof.UserID, km)
-		if err != nil {
-			return err
+	case TypeDays, TypeStreak:
+		if upd.TargetDays == nil || *upd.TargetDays <= 0 {
+			return nil, ValidationError{Msg: "a positive target_days is required for a days/streak challenge"}
 		}
-		if !ok { // submitter hadn't joined — verifying a proof implies participation
-			if _, err := s.repo.JoinAsUser(ctx, proof.ChallengeID, proof.UserID, true); err != nil {
-				return err
-			}
-			total, _, err = s.repo.AddProgressKM(ctx, proof.ChallengeID, proof.UserID, km)
-			if err != nil {
-				return err
-			}
-		}
-		newScore = total
-	default: // days / streak
-		days, ok, err := s.repo.AddProgressDay(ctx, proof.ChallengeID, proof.UserID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			if _, err := s.repo.JoinAsUser(ctx, proof.ChallengeID, proof.UserID, true); err != nil {
-				return err
-			}
-			days, _, err = s.repo.AddProgressDay(ctx, proof.ChallengeID, proof.UserID)
-			if err != nil {
-				return err
-			}
-		}
-		newScore = float64(days)
 	}
 
-	if err := s.board.SetScore(ctx, proof.ChallengeID, proof.UserID, newScore); err != nil {
-		log.Printf("challenges: leaderboard SetScore on verify failed: %v", err)
+	if err := s.repo.Update(ctx, id, upd); err != nil {
+		return nil, err
 	}
+
+	// Heads-up to everyone already in (except the organiser editing).
 	if s.notify != nil {
-		s.notify.NotifyUsers(ctx, []string{proof.UserID}, "Proof verified ✅",
-			"Your submission for “"+ch.Title+"” was verified.", map[string]string{"type": "proof_verified", "challenge_id": proof.ChallengeID.String()})
+		if ids, err := s.repo.ParticipantUserIDs(ctx, id); err == nil {
+			others := ids[:0]
+			for _, pid := range ids {
+				if pid != userID {
+					others = append(others, pid)
+				}
+			}
+			if len(others) > 0 {
+				s.notify.NotifyUsers(ctx, others, "Challenge updated",
+					"“"+upd.Title+"” was updated by the organiser — check the new details.",
+					map[string]string{"type": "challenge", "challenge_id": id.String()})
+			}
+		}
 	}
-	return nil
+
+	return s.repo.Get(ctx, userID, id)
 }
 
-// RecordRunProgress is the GPS hook (Phase 3): a saved run credits its distance
-// (converted to km) to the user's active DISTANCE challenges. Best-effort —
-// errors are logged so a leaderboard hiccup never fails a run upload.
+// RecordRunProgress is the GPS hook: every saved run (recorded live or GPX
+// import) credits ALL of the runner's active challenges — km for distance ones,
+// a recompute of run-days / streaks for the others. Best-effort — errors are
+// logged so a leaderboard hiccup never fails a run upload.
 func (s *Service) RecordRunProgress(ctx context.Context, userID string, runStart time.Time, distanceM float64, _ uuid.UUID) {
 	if distanceM <= 0 {
 		return
 	}
 	km := distanceM / 1000.0
-	ids, err := s.repo.ActiveDistanceMemberships(ctx, userID, runStart)
+	memberships, err := s.repo.ActiveMemberships(ctx, userID, runStart)
 	if err != nil {
 		log.Printf("challenges: load active memberships failed: %v", err)
 		return
 	}
-	for _, challengeID := range ids {
-		total, ok, err := s.repo.AddProgressKM(ctx, challengeID, userID, km)
+	for _, m := range memberships {
+		var score float64
+		var ok bool
+		switch m.Type {
+		case TypeDistance:
+			score, ok, err = s.repo.AddProgressKM(ctx, m.ID, userID, km)
+		default: // days / streak: recompute from the activities table
+			var days int
+			days, ok, err = s.repo.SyncDayProgress(ctx, m.ID, userID, m.Type, m.StartDate, m.EndDate)
+			score = float64(days)
+		}
 		if err != nil || !ok {
 			if err != nil {
-				log.Printf("challenges: AddProgressKM failed: %v", err)
+				log.Printf("challenges: credit %s challenge failed: %v", m.Type, err)
 			}
 			continue
 		}
-		if err := s.board.SetScore(ctx, challengeID, userID, total); err != nil {
+		if err := s.board.SetScore(ctx, m.ID, userID, score); err != nil {
 			log.Printf("challenges: leaderboard SetScore failed: %v", err)
 		}
 	}

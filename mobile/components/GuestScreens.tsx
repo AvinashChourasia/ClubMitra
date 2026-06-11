@@ -247,19 +247,11 @@ export function GuestClubs() {
 
 // --- Challenges ---
 
-const TYPE_CHIPS = [
-  { key: "", label: "All" },
-  { key: "distance", label: "Distance" },
-  { key: "days", label: "Days" },
-  { key: "streak", label: "Streak" },
-] as const;
-
 export function GuestChallenges() {
   useThemeMode();
   const [city, setCity] = useGuestCity();
   const [search, setSearch] = useState("");
-  const [type, setType] = useState<string>("");
-  const { challenges, refreshing, refresh } = useGuestData(city, search, type);
+  const { challenges, refreshing, refresh } = useGuestData(city, search, "");
   const { joinPublicChallenge, joiningId } = useJoinGate();
 
   return (
@@ -271,22 +263,10 @@ export function GuestChallenges() {
       >
         <GuestHeader title="Challenges" city={city} onCity={setCity} />
         <SearchBar value={search} onChange={setSearch} placeholder="Search challenges" />
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          {TYPE_CHIPS.map((t) => (
-            <Tap
-              key={t.key}
-              haptic={false}
-              onPress={() => setType(t.key)}
-              style={{ backgroundColor: type === t.key ? colors.primary : colors.bg, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 }}
-            >
-              <Text style={{ color: type === t.key ? "#fff" : colors.muted, fontWeight: "700", fontSize: 13 }}>{t.label}</Text>
-            </Tap>
-          ))}
-        </View>
         {challenges === null ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
         ) : challenges.length === 0 ? (
-          <EmptyState icon="flag" title="No challenges found" body="Try a different search, type, or city." />
+          <EmptyState icon="flag" title="No challenges found" body="Try a different search or city." />
         ) : (
           challenges.map((ch) => <PublicChallengeCard key={ch.id} challenge={ch} joiningId={joiningId} onJoin={joinPublicChallenge} />)
         )}
