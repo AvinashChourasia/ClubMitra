@@ -264,7 +264,7 @@ clubmitra/
 - [x] Forward to any conversation; WhatsApp-style long-press overlay menu
 - [x] Per-message info: "Read by X of Y" with reader times (sender-only)
 - [x] Read receipts: sent ✓ → read ✓✓ (sky blue); WhatsApp bubble palette + wallpaper
-- [ ] Push notifications for new chat messages (announcements already push)
+- [x] Push notifications for new chat messages (mute-respect, burst-throttled, deep-links to the thread)
 - [ ] Message search inside a conversation; voice-note waveforms
 - [ ] _(Desktop admin web panel → Phase 3)_
 
