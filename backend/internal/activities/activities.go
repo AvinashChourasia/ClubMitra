@@ -100,6 +100,21 @@ func (r *Repository) Create(ctx context.Context, a NewActivity) (*Activity, erro
 	return &act, nil
 }
 
+// HasRunNear reports whether the user already has a run starting within tol of
+// t — the duplicate gate for GPX imports (re-importing the same file, or
+// importing a Strava export of a run also tracked live, lands on the same
+// start instant give or take clock drift).
+func (r *Repository) HasRunNear(ctx context.Context, userID string, t time.Time, tol time.Duration) (bool, error) {
+	const q = `
+		SELECT EXISTS (
+			SELECT 1 FROM activities
+			WHERE user_id = $1 AND started_at BETWEEN $2 AND $3
+		)`
+	var exists bool
+	err := r.db.QueryRow(ctx, q, userID, t.Add(-tol), t.Add(tol)).Scan(&exists)
+	return exists, err
+}
+
 // ListByUser returns a user's activities, newest first. Pagination (limit far
 // from huge) keeps responses small; the history screen will pass these.
 func (r *Repository) ListByUser(ctx context.Context, userID string, limit, offset int) ([]Activity, error) {

@@ -239,6 +239,15 @@ func (h *Handler) importGPX(w http.ResponseWriter, r *http.Request) {
 	// Some exporters interleave segments oddly; sort defensively by time.
 	sort.Slice(points, func(i, j int) bool { return points[i].Timestamp.Before(points[j].Timestamp) })
 
+	// Duplicate gate: re-importing the same file, or importing a Strava export
+	// of a run that was also tracked live, starts at the same instant. Block it
+	// so nothing double-counts toward challenges/leaderboards/badges.
+	if dup, err := h.svc.IsDuplicateRun(r.Context(), userID, points[0].Timestamp); err == nil && dup {
+		httpx.Error(w, http.StatusConflict,
+			"already imported — a run starting at the same time is in your log")
+		return
+	}
+
 	act, err := h.svc.Record(r.Context(), userID, points, true, 0)
 	if err != nil {
 		var ve ValidationError

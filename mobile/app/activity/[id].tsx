@@ -102,27 +102,33 @@ export default function ActivityDetail() {
     }
   }
 
-  // Capture the preview card → PNG → OS share sheet. The capture/share
-  // modules are native; on a build that predates them we fall back to text
-  // (next APK build lights this up automatically — same pattern as calendar).
+  // Capture the card → PNG → OS share sheet. The snapshot target is the
+  // HIDDEN off-screen copy in the main view hierarchy (capturing inside a
+  // Modal hangs/fails on Android). A timeout turns any silent native failure
+  // into the text fallback instead of an endless spinner; builds that predate
+  // the capture modules fall back the same way (next APK lights it up).
   async function shareCard() {
     setSharing(true);
     try {
       const { captureRef } = require("react-native-view-shot") as typeof import("react-native-view-shot");
       const Sharing = require("expo-sharing") as typeof import("expo-sharing");
-      const uri = await captureRef(cardRef, { format: "png", quality: 1 });
+      const uri = await Promise.race([
+        captureRef(cardRef, { format: "png", quality: 1, result: "tmpfile" }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("capture timeout")), 6000)),
+      ]);
+      if (!(await Sharing.isAvailableAsync())) throw new Error("sharing unavailable");
       setShowShare(false);
+      setSharing(false);
       await Sharing.shareAsync(uri.startsWith("file://") ? uri : `file://${uri}`, {
         mimeType: "image/png",
         dialogTitle: "Share run",
       });
     } catch {
       setShowShare(false);
-      Alert.alert("Image share needs the new app build", "Sharing as text for now.", [
+      setSharing(false);
+      Alert.alert("Couldn't make the image here", "Sharing as text instead — the image card works on the new app build.", [
         { text: "OK", onPress: () => void shareText() },
       ]);
-    } finally {
-      setSharing(false);
     }
   }
 
@@ -261,6 +267,23 @@ export default function ActivityDetail() {
         </ScrollView>
       )}
 
+      {/* Hidden snapshot target — lives in the MAIN window (not the Modal),
+          parked off-screen. Android can only capture views in this hierarchy. */}
+      {activity && showShare && (
+        <View ref={cardRef} collapsable={false} style={{ position: "absolute", left: -2000, top: 0 }}>
+          <RunShareCard
+            runnerName={user?.name ?? "ClubMitra runner"}
+            startedAt={activity.started_at}
+            distanceM={activity.distance_m}
+            durationS={activity.duration_s}
+            avgPaceSPerKm={activity.avg_pace_s_per_km}
+            bestSplitSPerKm={bestSplit}
+            coords={route}
+            times={times}
+          />
+        </View>
+      )}
+
       {/* Share sheet: live preview of the picture card + the two ways out */}
       {activity && showShare && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowShare(false)}>
@@ -269,19 +292,16 @@ export default function ActivityDetail() {
             style={{ flex: 1, backgroundColor: "rgba(2,6,23,0.78)", alignItems: "center", justifyContent: "center", padding: 20 }}
           >
             <Pressable onPress={() => {}}>
-              {/* collapsable=false so Android can snapshot this exact view */}
-              <View ref={cardRef} collapsable={false}>
-                <RunShareCard
-                  runnerName={user?.name ?? "ClubMitra runner"}
-                  startedAt={activity.started_at}
-                  distanceM={activity.distance_m}
-                  durationS={activity.duration_s}
-                  avgPaceSPerKm={activity.avg_pace_s_per_km}
-                  bestSplitSPerKm={bestSplit}
-                  coords={route}
-                  times={times}
-                />
-              </View>
+              <RunShareCard
+                runnerName={user?.name ?? "ClubMitra runner"}
+                startedAt={activity.started_at}
+                distanceM={activity.distance_m}
+                durationS={activity.duration_s}
+                avgPaceSPerKm={activity.avg_pace_s_per_km}
+                bestSplitSPerKm={bestSplit}
+                coords={route}
+                times={times}
+              />
               <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
                 <Pressable
                   onPress={() => void shareCard()}

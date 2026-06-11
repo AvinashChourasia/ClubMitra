@@ -34,7 +34,8 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 export function RunShareCard({ runnerName, startedAt, distanceM, durationS, avgPaceSPerKm, bestSplitSPerKm, coords, times }: Props) {
-  const when = new Date(startedAt).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+  const d = new Date(startedAt);
+  const when = `${d.toLocaleDateString([], { day: "numeric", month: "short" })} · ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
   const fullKm = distanceM >= 1000;
 
   return (

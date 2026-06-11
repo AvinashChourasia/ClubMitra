@@ -112,6 +112,14 @@ func (s *Service) Record(ctx context.Context, userID string, points []geo.Point,
 	return act, nil
 }
 
+// IsDuplicateRun reports whether the user already has a run starting within
+// ±2 minutes of start — the GPX-import duplicate gate. Two minutes absorbs
+// device clock drift, while no runner legitimately starts two runs that close
+// together.
+func (s *Service) IsDuplicateRun(ctx context.Context, userID string, start time.Time) (bool, error) {
+	return s.repo.HasRunNear(ctx, userID, start, 2*time.Minute)
+}
+
 // List returns a user's activities with simple bounds on pagination.
 func (s *Service) List(ctx context.Context, userID string, limit, offset int) ([]Activity, error) {
 	if limit <= 0 || limit > 100 {
