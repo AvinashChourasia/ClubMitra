@@ -43,6 +43,7 @@
   },
   "scripts": {
     "start": "expo start",
+    "start:render": "EXPO_PUBLIC_API_URL=https://clubmitra-api.onrender.com expo start --clear",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
