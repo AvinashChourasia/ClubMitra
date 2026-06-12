@@ -47,7 +47,7 @@ const RunMap: React.ComponentType<{ coords: LatLng[]; times?: number[]; height?:
 export default function RecordRun() {
   const { getAccessToken } = useAuth();
   const router = useRouter();
-  const { status, elapsedS, distanceM, livePaceSPerKm, route, times, paused, start, stop } = useRunRecorder();
+  const { status, elapsedS, distanceM, livePaceSPerKm, route, times, paused, start, stop, resume } = useRunRecorder();
   const [uploading, setUploading] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const countScale = useRef(new Animated.Value(1)).current;
@@ -111,23 +111,33 @@ export default function RecordRun() {
       //    the upload fails or the app is killed.
       await enqueue(points, countToward, pausedS);
 
-      // 2. Try to upload now (plus any previously queued runs).
-      const { uploaded, remaining } = await flush(getAccessToken);
-      const justSaved = uploaded[uploaded.length - 1];
+      // 2. Try to upload now — but NEVER hold the runner hostage to a cold or
+      //    slow backend: after 15s we declare "saved on phone" and move on
+      //    (the queue uploads it in the background / on next app focus).
+      const result = await Promise.race([
+        flush(getAccessToken),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000)),
+      ]);
+      const justSaved = result?.uploaded[result.uploaded.length - 1];
 
-      if (remaining === 0 && justSaved) {
+      if (result && result.remaining === 0 && justSaved) {
         // The save already ran the badge pass server-side — anything earned in
-        // the last few minutes is THIS run's unlock. Celebrate it instead of
-        // the plain alert; the modal hands off to the run detail.
+        // the last few minutes is THIS run's unlock. Strictly a bonus: 4s
+        // budget, then the plain save alert wins.
         let fresh: BadgeStatus[] = [];
         try {
           const token = await getAccessToken();
           if (token) {
-            const gp = await getGamification(token);
-            const cutoff = Date.now() - 10 * 60 * 1000;
-            fresh = gp.badges.filter(
-              (b) => b.earned && b.earned_at && new Date(b.earned_at).getTime() >= cutoff && !celebratedIds.has(b.id)
-            );
+            const gp = await Promise.race([
+              getGamification(token),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+            ]);
+            if (gp) {
+              const cutoff = Date.now() - 10 * 60 * 1000;
+              fresh = gp.badges.filter(
+                (b) => b.earned && b.earned_at && new Date(b.earned_at).getTime() >= cutoff && !celebratedIds.has(b.id)
+              );
+            }
           }
         } catch {
           /* badge check is a bonus, never blocks the save */
@@ -149,12 +159,20 @@ export default function RecordRun() {
         );
       } else {
         Alert.alert(
-          "Run saved offline 📶",
-          `You're offline, so your run is saved on your phone (${remaining} waiting). ` +
-            `It'll upload automatically once you're back online.`,
+          "Run saved on your phone 📲",
+          "The upload is taking a while (slow network or the server waking up). " +
+            "Your run is safe and will sync automatically.",
           [{ text: "OK", onPress: () => router.replace("/home") }]
         );
       }
+    } catch {
+      // Whatever went wrong, the run is already enqueued — say so and get the
+      // runner home. A silent dead-end here is the one unforgivable outcome.
+      Alert.alert(
+        "Run saved on your phone 📲",
+        "Couldn't upload right now — it'll sync automatically once you're online.",
+        [{ text: "OK", onPress: () => router.replace("/home") }]
+      );
     } finally {
       setUploading(false);
     }
@@ -172,7 +190,11 @@ export default function RecordRun() {
           ) : (
             <View style={{ width: 36 }} />
           )}
-          <View
+          {/* When auto-paused, the pill is the manual override: detection can
+              get stuck through a bad-GPS stretch, so the runner taps to resume. */}
+          <Pressable
+            onPress={paused ? () => void resume() : undefined}
+            hitSlop={8}
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -185,9 +207,9 @@ export default function RecordRun() {
           >
             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: paused ? "#F59E0B" : recording ? ACCENT : MUTED }} />
             <Text style={{ color: paused ? "#FCD34D" : recording ? "#FDA4AF" : MUTED, fontWeight: "700", fontSize: 13 }}>
-              {paused ? "Auto-paused" : recording ? "Recording" : "Ready to run"}
+              {paused ? "Auto-paused · tap to resume" : recording ? "Recording" : "Ready to run"}
             </Text>
-          </View>
+          </Pressable>
           <View style={{ width: 36 }} />
         </View>
 

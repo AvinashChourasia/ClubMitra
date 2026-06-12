@@ -48,3 +48,16 @@ export function updatePause(s: PauseState, speedMps: number, nowMs: number): Pau
 export function pausedMsAt(s: PauseState, nowMs: number): number {
   return s.pausedAccumMs + (s.paused && s.pauseStartMs != null ? nowMs - s.pauseStartMs : 0);
 }
+
+// forceResume is the runner's manual override: when detection gets stuck
+// (Android can report speed=0 through a bad-GPS stretch even while moving),
+// the runner taps "resume" and we close the pause spell unconditionally.
+export function forceResume(s: PauseState, nowMs: number): PauseState {
+  if (!s.paused) return { ...s, slowSinceMs: null };
+  return {
+    paused: false,
+    pausedAccumMs: s.pausedAccumMs + (s.pauseStartMs != null ? nowMs - s.pauseStartMs : 0),
+    pauseStartMs: null,
+    slowSinceMs: null,
+  };
+}

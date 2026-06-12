@@ -98,3 +98,21 @@ export function evaluateSample(prev: GpsSample | null, next: GpsSample): Decisio
 
   return { accept: true, distanceM: d };
 }
+
+// --- windowed speed (the auto-pause signal) ---
+// The OS speed field can stick at 0 through a bad-GPS stretch even while the
+// runner is moving. Net displacement over a ~4s window is a steadier signal:
+// standing-still jitter oscillates around a point (tiny net drift), while real
+// running covers real ground. Auto-pause uses max(reported, windowed).
+export type RawFix = { lat: number; lng: number; timestamp: number };
+
+// pushAndWindowSpeed folds a raw fix into the rolling window (mutating it) and
+// returns the average speed across the window's span, m/s.
+export function pushAndWindowSpeed(win: RawFix[], fix: RawFix, spanMs = 4000): number {
+  win.push(fix);
+  while (win.length > 1 && fix.timestamp - win[0].timestamp > spanMs) win.shift();
+  const first = win[0];
+  const dtS = (fix.timestamp - first.timestamp) / 1000;
+  if (dtS < 1.5) return 0; // not enough span to judge yet
+  return haversineMeters(first, fix) / dtS;
+}

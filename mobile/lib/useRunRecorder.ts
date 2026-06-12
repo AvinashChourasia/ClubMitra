@@ -15,9 +15,9 @@ import * as Location from "expo-location";
 import Constants from "expo-constants";
 
 import type { LatLng, RunPoint } from "./activities";
-import { evaluateSample, haversineMeters, type GpsSample } from "./gpsFilter";
-import { initPause, updatePause, pausedMsAt, type PauseState } from "./autopause";
-import { startRun, stopRun, activeStats } from "./locationTask";
+import { evaluateSample, pushAndWindowSpeed, type GpsSample, type RawFix } from "./gpsFilter";
+import { forceResume, initPause, updatePause, pausedMsAt, type PauseState } from "./autopause";
+import { startRun, stopRun, activeStats, resumeActive } from "./locationTask";
 
 export type RunStatus = "idle" | "requesting" | "recording" | "denied";
 
@@ -34,7 +34,7 @@ export function useRunRecorder() {
 
   const points = useRef<RunPoint[]>([]); // foreground engine only
   const lastAccepted = useRef<GpsSample | null>(null);
-  const lastRaw = useRef<GpsSample | null>(null); // every fix, for a speed fallback
+  const rawWin = useRef<RawFix[]>([]); // rolling ~4s of raw fixes → windowed speed
   const pause = useRef<PauseState>(initPause()); // foreground engine only
   const subscription = useRef<Location.LocationSubscription | null>(null);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -60,7 +60,7 @@ export function useRunRecorder() {
 
     points.current = [];
     lastAccepted.current = null;
-    lastRaw.current = null;
+    rawWin.current = [];
     pause.current = initPause();
     setElapsedS(0);
     setDistanceM(0);
@@ -87,15 +87,13 @@ export function useRunRecorder() {
             accuracy: loc.coords.accuracy ?? 9999,
             timestamp: loc.timestamp,
           };
-          // Auto-pause: speed from the OS when given, else distance/dt vs the last
-          // raw fix. Runs on every fix (even ones the noise filter later drops).
+          // Auto-pause signal: OS speed OR real displacement over a ~4s window,
+          // whichever is larger — Android can report speed=0 through bad GPS
+          // while the runner is genuinely moving; the window self-heals that.
+          // Runs on every fix (even ones the noise filter later drops).
+          const winSpeed = pushAndWindowSpeed(rawWin.current, { lat: sample.lat, lng: sample.lng, timestamp: sample.timestamp });
           const reported = loc.coords.speed;
-          const speed = reported != null && reported >= 0
-            ? reported
-            : lastRaw.current
-              ? haversineMeters(lastRaw.current, sample) / Math.max(0.001, (sample.timestamp - lastRaw.current.timestamp) / 1000)
-              : 0;
-          lastRaw.current = sample;
+          const speed = Math.max(reported != null && reported >= 0 ? reported : 0, winSpeed);
           pause.current = updatePause(pause.current, speed, sample.timestamp);
           setPaused(pause.current.paused);
 
@@ -140,7 +138,19 @@ export function useRunRecorder() {
     return { points: points.current, pausedS: pausedMsAt(pause.current, Date.now()) / 1000 };
   }, [cleanup]);
 
+  // resume() is the runner's manual auto-pause override — for when detection
+  // gets stuck through a bad-GPS stretch. Closes the open pause spell in
+  // whichever engine is recording.
+  const resume = useCallback(async () => {
+    if (background.current) {
+      await resumeActive().catch(() => {});
+    } else {
+      pause.current = forceResume(pause.current, Date.now());
+    }
+    setPaused(false);
+  }, []);
+
   const livePaceSPerKm = distanceM > 0 ? elapsedS / (distanceM / 1000) : null;
 
-  return { status, elapsedS, distanceM, livePaceSPerKm, route, times, paused, start, stop };
+  return { status, elapsedS, distanceM, livePaceSPerKm, route, times, paused, start, stop, resume };
 }

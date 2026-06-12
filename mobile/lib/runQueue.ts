@@ -78,9 +78,24 @@ export type FlushResult = {
 // removed; failures stay queued and stop the pass (likely all will fail while
 // offline, so there's no point hammering the network).
 //
+// SINGLE-FLIGHT: only one flush runs at a time; concurrent callers join it.
+// Without this, a slow upload + a screen-focus flush could both read the same
+// queue and upload the same run TWICE (the server doesn't dedupe live runs).
+//
 // It needs a token getter rather than a raw token because a flush may run later
 // than when it was scheduled, and we want a fresh token at upload time.
-export async function flush(getToken: () => Promise<string | null>): Promise<FlushResult> {
+let flushInFlight: Promise<FlushResult> | null = null;
+
+export function flush(getToken: () => Promise<string | null>): Promise<FlushResult> {
+  if (!flushInFlight) {
+    flushInFlight = doFlush(getToken).finally(() => {
+      flushInFlight = null;
+    });
+  }
+  return flushInFlight;
+}
+
+async function doFlush(getToken: () => Promise<string | null>): Promise<FlushResult> {
   const queue = await readQueue();
   if (queue.length === 0) return { uploaded: [], remaining: 0 };
 
