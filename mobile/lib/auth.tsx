@@ -12,13 +12,91 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import * as SecureStore from "expo-secure-store";
 
-import { request } from "./api";
+import { ApiError, request } from "./api";
 import { flush } from "./runQueue";
 import { registerForPush, unregisterPush } from "./push";
 
 // Keys under which we persist the tokens in the secure store.
 const ACCESS_KEY = "access_token";
 const REFRESH_KEY = "refresh_token";
+// The signed-in user's profile, cached so a relaunch shows their identity
+// instantly even while the (free-tier, sleepy) backend is still waking up.
+const USER_KEY = "cached_user";
+
+// --- access-token lifecycle -------------------------------------------------
+// Access tokens live 15 minutes; the refresh token (30 days, rotating) renews
+// them. freshAccessToken() is what every API call goes through: it returns the
+// stored token while it's still valid and transparently rotates it otherwise.
+
+// decode base64url (JWT segments) without atob — tiny and dependency-free.
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+function b64decode(s: string): string {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  let out = "";
+  let buf = 0;
+  let bits = 0;
+  for (const c of s) {
+    const v = B64.indexOf(c);
+    if (v < 0) continue;
+    buf = (buf << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out += String.fromCharCode((buf >> bits) & 0xff);
+    }
+  }
+  return out;
+}
+
+// jwtExpMs reads a JWT's expiry (ms epoch); 0 when unreadable (treat as expired).
+function jwtExpMs(token: string): number {
+  try {
+    const payload = JSON.parse(b64decode(token.split(".")[1] ?? ""));
+    return (payload.exp ?? 0) * 1000;
+  } catch {
+    return 0;
+  }
+}
+
+// Single-flight: refresh tokens ROTATE server-side, so two parallel refreshes
+// would burn the same token twice — the second one fails and can trip theft
+// detection, killing the session. All concurrent callers share one rotation.
+let refreshInFlight: Promise<string | null> | null = null;
+
+// freshAccessToken returns a valid access token, rotating via /auth/refresh
+// when the stored one is expired (or about to). Failure semantics matter:
+//   • refresh rejected with 401/403 → the session is truly dead → clear tokens
+//   • network error / sleeping backend → KEEP the session; return the stale
+//     token and let the one request fail — never sign the user out for that.
+async function freshAccessToken(): Promise<string | null> {
+  const access = await SecureStore.getItemAsync(ACCESS_KEY);
+  if (access && jwtExpMs(access) - Date.now() > 60_000) return access;
+
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const refresh = await SecureStore.getItemAsync(REFRESH_KEY);
+        if (!refresh) return access;
+        const pair = await request<{ access_token: string; refresh_token: string }>("/auth/refresh", {
+          method: "POST",
+          body: { refresh_token: refresh },
+        });
+        await SecureStore.setItemAsync(ACCESS_KEY, pair.access_token);
+        await SecureStore.setItemAsync(REFRESH_KEY, pair.refresh_token);
+        return pair.access_token;
+      } catch (e) {
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+          await clearTokens();
+          return null; // revoked/expired refresh — a real sign-out
+        }
+        return access; // transient failure: fail soft, session survives
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+}
 
 export type User = {
   id: string;
@@ -91,33 +169,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [initializing, setInitializing] = useState(true);
 
-  // On launch, try to restore a session: if we have a saved access token and it
-  // still works, fetch the user. If anything fails, we simply stay logged out.
+  // On launch: restore the session WITHOUT a network round trip. If tokens
+  // exist, show the cached identity instantly and verify in the background —
+  // a sleeping free-tier backend must never look like a sign-out.
   useEffect(() => {
     (async () => {
       try {
-        const token = await SecureStore.getItemAsync(ACCESS_KEY);
-        if (token) {
-          const me = await request<User>("/users/me", { token });
-          setUser(me);
-          // Logged back in — drain any runs recorded while offline last time,
-          // and (re)register this device for push.
-          void flush(() => SecureStore.getItemAsync(ACCESS_KEY));
-          void registerForPush(token);
+        const access = await SecureStore.getItemAsync(ACCESS_KEY);
+        const refresh = await SecureStore.getItemAsync(REFRESH_KEY);
+        if (!access && !refresh) return; // genuinely logged out
+        const cached = await SecureStore.getItemAsync(USER_KEY);
+        if (cached) {
+          try {
+            setUser(JSON.parse(cached) as User);
+          } catch {
+            /* unreadable cache — verify will repopulate it */
+          }
         }
-      } catch {
-        // Token missing/expired/invalid — clear it and start logged out.
-        // (Refresh-token rotation will be wired up in a later step.)
-        await clearTokens();
+        void verifySession();
       } finally {
         setInitializing(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // verifySession confirms the stored session against the server, retrying
+  // patiently while a cold backend wakes (Render free tier sleeps). It only
+  // signs the user out on a DEFINITIVE 401 — never on a network failure.
+  async function verifySession(attempt = 0) {
+    try {
+      const token = await freshAccessToken();
+      if (!token) {
+        // refresh was rejected — session revoked/expired for real
+        setUser(null);
+        return;
+      }
+      const me = await request<User>("/users/me", { token });
+      setUser(me);
+      await SecureStore.setItemAsync(USER_KEY, JSON.stringify(me));
+      // Session confirmed — drain offline-recorded runs + (re)register push.
+      void flush(() => freshAccessToken());
+      void registerForPush(token);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        await clearTokens();
+        setUser(null);
+        return;
+      }
+      if (attempt < 8) setTimeout(() => void verifySession(attempt + 1), 8000);
+    }
+  }
 
   async function persistAuth(res: AuthResponse) {
     await SecureStore.setItemAsync(ACCESS_KEY, res.access_token);
     await SecureStore.setItemAsync(REFRESH_KEY, res.refresh_token);
+    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(res.user));
     setUser(res.user);
     // Register this device for push under the freshly logged-in user.
     void registerForPush(res.access_token);
@@ -140,9 +247,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function updateProfile(input: ProfileInput) {
-    const token = await SecureStore.getItemAsync(ACCESS_KEY);
+    const token = await freshAccessToken();
     const updated = await request<User>("/users/me", { method: "PUT", body: input, token });
     setUser(updated);
+    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(updated));
   }
 
   async function logout() {
@@ -161,8 +269,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
-  function getAccessToken() {
-    return SecureStore.getItemAsync(ACCESS_KEY);
+  // getAccessToken hands screens a VALID token — silently rotating an expired
+  // one first. Returns null (and drops the user) only when the refresh token
+  // itself was rejected, i.e. the session is truly over.
+  async function getAccessToken() {
+    const token = await freshAccessToken();
+    if (!token && user) setUser(null);
+    return token;
   }
 
   return (
@@ -177,6 +290,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 async function clearTokens() {
   await SecureStore.deleteItemAsync(ACCESS_KEY);
   await SecureStore.deleteItemAsync(REFRESH_KEY);
+  await SecureStore.deleteItemAsync(USER_KEY);
 }
 
 // useAuth is the hook screens call to read auth state and trigger actions.
