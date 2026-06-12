@@ -41,29 +41,24 @@ export default function Clubs() {
   const router = useRouter();
   useThemeMode(); // subscribe for instant theme updates
   const [clubs, setClubs] = useState<MyChapter[] | null>(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Spinner only while we have NOTHING; revisits show last data instantly and
+  // refresh silently in the background (stale-while-revalidate).
+  const loading = clubs === null;
 
   const load = useCallback(async () => {
     try {
       const token = await getAccessToken();
       if (token) setClubs(await myChapters(token));
     } catch {
-      setClubs([]);
+      // Keep the last-good list; only land on "empty" if we never had data.
+      setClubs((prev) => prev ?? []);
     }
   }, [getAccessToken]);
 
   useFocusEffect(
     useCallback(() => {
-      let active = true;
-      (async () => {
-        setLoading(true);
-        await load();
-        if (active) setLoading(false);
-      })();
-      return () => {
-        active = false;
-      };
+      void load();
     }, [load])
   );
 

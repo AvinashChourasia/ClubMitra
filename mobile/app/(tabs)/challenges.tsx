@@ -34,32 +34,27 @@ export default function Challenges() {
   const { user, getAccessToken } = useAuth();
   const router = useRouter();
   useThemeMode(); // subscribe for instant theme updates
-  const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [challenges, setChallenges] = useState<Challenge[] | null>(null);
   const [joinedOnly, setJoinedOnly] = useState(false);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Spinner only while we have NOTHING; revisits show last data instantly and
+  // refresh silently in the background (stale-while-revalidate).
+  const loading = challenges === null;
 
   const load = useCallback(async () => {
     try {
       const token = await getAccessToken();
       if (token) setChallenges(await listChallenges(token, joinedOnly));
     } catch {
-      setChallenges([]);
+      // Keep the last-good list; only land on "empty" if we never had data.
+      setChallenges((prev) => prev ?? []);
     }
   }, [getAccessToken, joinedOnly]);
 
   useFocusEffect(
     useCallback(() => {
-      let active = true;
-      (async () => {
-        setLoading(true);
-        await load();
-        if (active) setLoading(false);
-      })();
-      return () => {
-        active = false;
-      };
+      void load();
     }, [load])
   );
 
@@ -72,7 +67,7 @@ export default function Challenges() {
   if (!user) return <GuestChallenges />;
 
   const q = search.trim().toLowerCase();
-  const visible = challenges.filter((c) => !q || c.title.toLowerCase().includes(q));
+  const visible = (challenges ?? []).filter((c) => !q || c.title.toLowerCase().includes(q));
 
   // Group by phase: what's on now, what's coming, what's done.
   const live = visible.filter((c) => challengePhase(c) === "live").sort(byEndAsc);

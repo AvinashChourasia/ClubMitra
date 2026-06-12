@@ -63,14 +63,24 @@ function jwtExpMs(token: string): number {
 // detection, killing the session. All concurrent callers share one rotation.
 let refreshInFlight: Promise<string | null> | null = null;
 
+// In-memory copy of the access token so the hot path costs zero SecureStore
+// reads (those are a native round trip per call). SecureStore stays the
+// durable source; this is just the L1.
+let memAccess: string | null = null;
+
 // freshAccessToken returns a valid access token, rotating via /auth/refresh
 // when the stored one is expired (or about to). Failure semantics matter:
 //   • refresh rejected with 401/403 → the session is truly dead → clear tokens
 //   • network error / sleeping backend → KEEP the session; return the stale
 //     token and let the one request fail — never sign the user out for that.
 async function freshAccessToken(): Promise<string | null> {
-  const access = await SecureStore.getItemAsync(ACCESS_KEY);
-  if (access && jwtExpMs(access) - Date.now() > 60_000) return access;
+  if (memAccess && jwtExpMs(memAccess) - Date.now() > 60_000) return memAccess;
+
+  const access = memAccess ?? (await SecureStore.getItemAsync(ACCESS_KEY));
+  if (access && jwtExpMs(access) - Date.now() > 60_000) {
+    memAccess = access;
+    return access;
+  }
 
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
@@ -83,6 +93,7 @@ async function freshAccessToken(): Promise<string | null> {
         });
         await SecureStore.setItemAsync(ACCESS_KEY, pair.access_token);
         await SecureStore.setItemAsync(REFRESH_KEY, pair.refresh_token);
+        memAccess = pair.access_token;
         return pair.access_token;
       } catch (e) {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
@@ -225,6 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await SecureStore.setItemAsync(ACCESS_KEY, res.access_token);
     await SecureStore.setItemAsync(REFRESH_KEY, res.refresh_token);
     await SecureStore.setItemAsync(USER_KEY, JSON.stringify(res.user));
+    memAccess = res.access_token;
     setUser(res.user);
     // Register this device for push under the freshly logged-in user.
     void registerForPush(res.access_token);
@@ -288,6 +300,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 async function clearTokens() {
+  memAccess = null;
   await SecureStore.deleteItemAsync(ACCESS_KEY);
   await SecureStore.deleteItemAsync(REFRESH_KEY);
   await SecureStore.deleteItemAsync(USER_KEY);
