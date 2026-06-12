@@ -11,9 +11,11 @@ export type Race = {
   title: string;
   city: string;
   race_date: string; // YYYY-MM-DD
-  distances: string;
+  distances: string; // "5K · 10K · Half Marathon"
   location?: string | null;
   url?: string | null;
+  image_url?: string | null; // event banner from MarathonMitra
+  organizer?: string | null;
   created_by?: string | null;
   going_count: number;
   going: boolean;

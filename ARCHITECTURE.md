@@ -312,13 +312,15 @@ CREATE TABLE race_interests (   -- "I'm going" toggle, live count
 );
 ```
 
-> Races flow in from MarathonMitra's events pages: each page embeds schema.org
-> JSON-LD (SportsEvent ItemList — an SEO contract, stabler than markup), which
-> a background sync walks (`/events?status=upcoming&page=N` until empty, 10-min
-> throttle, best-effort) and upserts by URL slug (`external_id`). Tapping a race
-> card opens its MarathonMitra event page; organisers are handed there to
-> submit (approval there = appearance here). Client adds races to the phone
-> calendar (expo-calendar native, Google-Calendar URL fallback).
+> Races flow in from MarathonMitra's **official public events API**
+> (`api.marathonmitra.com/api/events?status=upcoming`, documented, no auth):
+> a throttled background sync paginates limit/skip to the reported total and
+> upserts by slug (`external_id`) — including banner `image_url`, `organizer`,
+> venue and formatted distances ("5K · 10K · Half Marathon"). Cards lead with
+> the banner and filter by city + distance; tapping opens the MarathonMitra
+> event page (`/events/{slug}`); organisers are handed there to submit
+> (approval there = appearance here). Client adds races to the phone calendar
+> (expo-calendar native, Google-Calendar URL fallback).
 
 ### Gamification — built (Phase 5 core)
 

@@ -1,19 +1,17 @@
-// Package races is the race calendar, fed by MarathonMitra: their events pages
-// embed schema.org JSON-LD (SportsEvent ItemList — an SEO contract, far more
-// stable than scraping markup), which we walk page by page and upsert locally.
-// Everyone browses upcoming races by city, marks themselves going, and taps
-// through to the MarathonMitra event page for full details.
+// Package races is the race calendar, fed by MarathonMitra's official public
+// events API (api.marathonmitra.com — documented, no auth, JSON). A throttled
+// background sync pulls all upcoming events and upserts them locally. Everyone
+// browses upcoming races by city, marks themselves going, and taps through to
+// the MarathonMitra event page for full details.
 package races
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"net/url"
-	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +38,8 @@ type Race struct {
 	Distances  string    `json:"distances"`
 	Location   *string   `json:"location,omitempty"`
 	URL        *string   `json:"url,omitempty"`
+	ImageURL   *string   `json:"image_url,omitempty"`
+	Organizer  *string   `json:"organizer,omitempty"`
 	CreatedBy  *string   `json:"created_by,omitempty"`
 	GoingCount int       `json:"going_count"`
 	Going      bool      `json:"going"` // is the requester going?
@@ -59,87 +59,99 @@ type Handler struct {
 	syncing   bool
 }
 
-// NewHandler wires the race calendar to the database pool and MarathonMitra.
-// The env var (MARATHONMITRA_API_URL) overrides the base for testing; empty
-// means the real site.
+// NewHandler wires the race calendar to the database pool and MarathonMitra's
+// public events API. The env var (MARATHONMITRA_API_URL) overrides the base
+// for testing; empty means production. A website host is normalised to the
+// API host so a stale env value can't break the sync.
 func NewHandler(db *pgxpool.Pool, marathonMitraURL string) *Handler {
-	src := strings.TrimSpace(marathonMitraURL)
-	if src == "" {
-		src = "https://marathonmitra.com"
+	src := strings.TrimRight(strings.TrimSpace(marathonMitraURL), "/")
+	src = strings.TrimSuffix(src, "/api")
+	if src == "" || src == "https://marathonmitra.com" || src == "https://www.marathonmitra.com" {
+		src = "https://api.marathonmitra.com"
 	}
 	return &Handler{
 		db:        db,
-		sourceURL: strings.TrimRight(src, "/"),
+		sourceURL: src,
 		client:    &http.Client{Timeout: 12 * time.Second},
 	}
 }
 
-// ldJSONRe pulls the schema.org <script type="application/ld+json"> blocks out
-// of a MarathonMitra events page.
-var ldJSONRe = regexp.MustCompile(`(?s)<script type="application/ld\+json">(.*?)</script>`)
-
-// ldEvent is one schema.org SportsEvent from the events page's ItemList.
-type ldEvent struct {
-	Name      string `json:"name"`
-	URL       string `json:"url"`
-	StartDate string `json:"startDate"`
-	Location  struct {
-		Address struct {
-			AddressLocality string `json:"addressLocality"` // "Manali, Kullu"
-		} `json:"address"`
-	} `json:"location"`
+// mmEvent is one event from GET /api/events (the documented public schema).
+type mmEvent struct {
+	Title        string    `json:"title"`
+	Slug         string    `json:"slug"`
+	CityName     string    `json:"cityName"`
+	Date         string    `json:"date"` // ISO 8601
+	Distances    []float64 `json:"distances"`
+	DistanceUnit string    `json:"distanceUnit"` // "km" | "miles"
+	Organizer    *string   `json:"organizer"`
+	Venue        *string   `json:"venue"`
+	ImageURL     *string   `json:"imageUrl"`
 }
 
-// ldPage matches the CollectionPage/ItemList JSON-LD. The page also carries
-// FAQPage/Organization blocks — those fail to unmarshal into this shape or
-// yield zero items, and are skipped either way.
-type ldPage struct {
-	MainEntity struct {
-		ItemListElement []struct {
-			Item ldEvent `json:"item"`
-		} `json:"itemListElement"`
-	} `json:"mainEntity"`
+type mmEventsResponse struct {
+	Success    bool      `json:"success"`
+	Data       []mmEvent `json:"data"`
+	Pagination struct {
+		Limit int `json:"limit"`
+		Skip  int `json:"skip"`
+		Total int `json:"total"`
+	} `json:"pagination"`
 }
 
-// fetchEventsPage downloads one paginated events page and returns its events.
-func (h *Handler) fetchEventsPage(ctx context.Context, page int) ([]ldEvent, error) {
-	u := h.sourceURL + "/events?status=upcoming&page=" + strconv.Itoa(page)
+// fetchEvents pulls one page of upcoming events (limit/skip pagination).
+func (h *Handler) fetchEvents(ctx context.Context, skip int) (*mmEventsResponse, error) {
+	u := h.sourceURL + "/api/events?status=upcoming&limit=100&skip=" + strconv.Itoa(skip)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "ClubMitra/1.0 (race calendar sync)")
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil || resp.StatusCode != http.StatusOK {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
 		return nil, err
 	}
-
-	var events []ldEvent
-	for _, m := range ldJSONRe.FindAllSubmatch(raw, -1) {
-		var pg ldPage
-		if err := json.Unmarshal(m[1], &pg); err != nil {
-			continue // FAQ/Organization blocks — not the ItemList
-		}
-		for _, el := range pg.MainEntity.ItemListElement {
-			if el.Item.Name != "" {
-				events = append(events, el.Item)
-			}
-		}
-		if len(events) > 0 {
-			break // the page has one ItemList; done
-		}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("events api status %d", resp.StatusCode)
 	}
-	return events, nil
+	var out mmEventsResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	if !out.Success {
+		return nil, fmt.Errorf("events api success=false")
+	}
+	return &out, nil
 }
 
-// syncFromMarathonMitra refreshes the calendar from MarathonMitra — throttled
-// to once per 10 minutes, and run in the BACKGROUND so a list request never
-// waits on multi-page fetches. Best-effort by contract: a dead site must never
+// distancesLabel renders the API's numeric distances as runner-speak:
+// [5 10 21.0975 42.195] km → "5K · 10K · Half Marathon · Marathon".
+func distancesLabel(ds []float64, unit string) string {
+	parts := make([]string, 0, len(ds))
+	for _, d := range ds {
+		switch {
+		case unit == "miles":
+			parts = append(parts, strconv.FormatFloat(d, 'f', -1, 64)+" mi")
+		case d >= 21.0 && d <= 21.2:
+			parts = append(parts, "Half Marathon")
+		case d >= 42.1 && d <= 42.3:
+			parts = append(parts, "Marathon")
+		default:
+			parts = append(parts, strconv.FormatFloat(d, 'f', -1, 64)+"K")
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// syncFromMarathonMitra refreshes the calendar from the public events API —
+// throttled to once per 10 minutes, and run in the BACKGROUND so a list
+// request never waits on it. Best-effort by contract: a dead API must never
 // take the calendar down; stale rows keep serving.
 func (h *Handler) syncFromMarathonMitra() {
 	if h.sourceURL == "" {
@@ -164,70 +176,72 @@ func (h *Handler) syncFromMarathonMitra() {
 		defer cancel()
 
 		total := 0
-		for page := 1; page <= 10; page++ { // 10-page ceiling = 200 events, plenty
-			events, err := h.fetchEventsPage(ctx, page)
+		for skip := 0; skip < 500; { // 500-event ceiling, far above today's ~110
+			page, err := h.fetchEvents(ctx, skip)
 			if err != nil {
-				log.Printf("races: marathonmitra page %d fetch failed: %v", page, err)
+				log.Printf("races: marathonmitra fetch (skip=%d) failed: %v", skip, err)
 				break
 			}
-			if len(events) == 0 {
-				break // walked past the last page
+			if len(page.Data) == 0 {
+				break
 			}
-			for _, e := range events {
+			for _, e := range page.Data {
 				h.upsertEvent(ctx, e)
 			}
-			total += len(events)
+			total += len(page.Data)
+			skip += len(page.Data)
+			if skip >= page.Pagination.Total {
+				break
+			}
 		}
 		log.Printf("races: marathonmitra sync done, %d events", total)
 	}()
 }
 
-// upsertEvent maps one JSON-LD SportsEvent onto the races table. The event's
-// URL slug is the stable external id, so repeat syncs update in place and
-// "I'm going" interest rows survive.
-func (h *Handler) upsertEvent(ctx context.Context, e ldEvent) {
-	title := strings.TrimSpace(e.Name)
-	link := strings.TrimSpace(e.URL)
-	if title == "" || link == "" {
+// upsertEvent maps one API event onto the races table. The slug is the stable
+// external id, so repeat syncs update in place and "I'm going" interest rows
+// survive; it also builds the public event-page URL we hand the user to.
+func (h *Handler) upsertEvent(ctx context.Context, e mmEvent) {
+	title := strings.TrimSpace(e.Title)
+	slug := strings.TrimSpace(e.Slug)
+	if title == "" || slug == "" {
 		return
 	}
-	parsed, err := url.Parse(link)
-	if err != nil {
-		return
-	}
-	extID := path.Base(strings.TrimRight(parsed.Path, "/"))
-	if extID == "" || extID == "." || extID == "/" {
-		return
-	}
-
-	// startDate is RFC3339 ("2026-06-13T00:00:00.000Z"); fall back to a bare date.
 	var day time.Time
-	if t, err := time.Parse(time.RFC3339, e.StartDate); err == nil {
+	if t, err := time.Parse(time.RFC3339, e.Date); err == nil {
 		day = t
-	} else if t, err := time.Parse("2006-01-02", e.StartDate); err == nil {
+	} else if t, err := time.Parse("2006-01-02", e.Date); err == nil {
 		day = t
 	} else {
 		return
 	}
-
-	// "Manali, Kullu" → city "Manali"; the full locality stays as the location.
-	locality := strings.TrimSpace(e.Location.Address.AddressLocality)
-	city := locality
-	if i := strings.Index(locality, ","); i > 0 {
-		city = strings.TrimSpace(locality[:i])
-	}
+	city := strings.TrimSpace(e.CityName)
 	if city == "" {
 		city = "India"
 	}
+	venue := ""
+	if e.Venue != nil {
+		venue = strings.TrimSpace(*e.Venue)
+	}
+	organizer := ""
+	if e.Organizer != nil {
+		organizer = strings.TrimSpace(*e.Organizer)
+	}
+	imageURL := ""
+	if e.ImageURL != nil {
+		imageURL = strings.TrimSpace(*e.ImageURL)
+	}
 
 	if _, err := h.db.Exec(ctx, `
-		INSERT INTO races (external_id, title, city, race_date, distances, location, url)
-		VALUES ($1, $2, $3, $4, '', NULLIF($5, ''), $6)
+		INSERT INTO races (external_id, title, city, race_date, distances, location, url, image_url, organizer)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, NULLIF($8, ''), NULLIF($9, ''))
 		ON CONFLICT (external_id) DO UPDATE SET
 			title = EXCLUDED.title, city = EXCLUDED.city, race_date = EXCLUDED.race_date,
-			location = EXCLUDED.location, url = EXCLUDED.url,
+			distances = EXCLUDED.distances, location = EXCLUDED.location, url = EXCLUDED.url,
+			image_url = EXCLUDED.image_url, organizer = EXCLUDED.organizer,
 			deleted_at = NULL`,
-		extID, title, city, day.Format("2006-01-02"), locality, link); err != nil {
+		slug, title, city, day.Format("2006-01-02"), distancesLabel(e.Distances, e.DistanceUnit),
+		venue, "https://marathonmitra.com/events/"+slug, imageURL, organizer); err != nil {
 		log.Printf("races: upsert %q failed: %v", title, err)
 	}
 }
@@ -255,7 +269,8 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	// City matching is prefix-tolerant both ways: a stored "Bengaluru Urban"
 	// matches a profile city "Bengaluru", and vice versa.
 	const q = `
-		SELECT rc.id, rc.title, rc.city, rc.race_date::text, rc.distances, rc.location, rc.url, rc.created_by,
+		SELECT rc.id, rc.title, rc.city, rc.race_date::text, rc.distances, rc.location, rc.url,
+		       rc.image_url, rc.organizer, rc.created_by,
 		       (SELECT count(*) FROM race_interests ri WHERE ri.race_id = rc.id)::int,
 		       EXISTS (SELECT 1 FROM race_interests ri WHERE ri.race_id = rc.id AND ri.user_id = $1)
 		FROM races rc
@@ -263,7 +278,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		  AND rc.race_date >= CURRENT_DATE
 		  AND ($2 = '' OR lower(rc.city) LIKE lower($2) || '%' OR lower($2) LIKE lower(rc.city) || '%')
 		ORDER BY rc.race_date ASC
-		LIMIT 100`
+		LIMIT 200`
 	rows, err := h.db.Query(r.Context(), q, userID, city)
 	if err != nil {
 		httpx.InternalError(w, err)
@@ -274,7 +289,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var rc Race
 		if err := rows.Scan(&rc.ID, &rc.Title, &rc.City, &rc.RaceDate, &rc.Distances, &rc.Location, &rc.URL,
-			&rc.CreatedBy, &rc.GoingCount, &rc.Going); err != nil {
+			&rc.ImageURL, &rc.Organizer, &rc.CreatedBy, &rc.GoingCount, &rc.Going); err != nil {
 			httpx.InternalError(w, err)
 			return
 		}

@@ -364,7 +364,7 @@ clubmitra/
 - [x] Streak freeze: 2 per month, auto-applied to bridge missed days
 - [x] Background GPS (requires EAS dev build)
 - [x] City leaderboard: all verified runners in a city ranked collectively
-- [x] Race calendar: LIVE-fed from MarathonMitra's events pages (schema.org JSON-LD parsed page-by-page in a background sync, upsert by URL slug); cards tap through to the MarathonMitra event page; "I'm going", add to phone/Google calendar
+- [x] Race calendar: LIVE-fed from MarathonMitra's official public events API (api.marathonmitra.com — paginated background sync, upsert by slug); banner-image cards with distance chips + organizer, city & distance filters; cards tap through to the MarathonMitra event page; "I'm going", add to phone/Google calendar
 - [ ] Race calendar map view (interactive, search by location)
 - [ ] Similar races list / race recommendations
 - [ ] Calendar embed widget for club websites
