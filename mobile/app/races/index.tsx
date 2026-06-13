@@ -4,16 +4,18 @@
 // yourself going, add to the phone calendar, and tap through to the
 // MarathonMitra event page for full details + registration.
 
-import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, Image, Linking, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Animated, Image, Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 
 import { useAuth } from "../../lib/auth";
 import { listRaces, toggleGoing, deleteRace, addRaceToCalendar, MARATHONMITRA_SUBMIT_URL, type Race } from "../../lib/races";
 import { Tap } from "../../components/Tap";
-import { colors, styles, useThemeMode } from "../../lib/theme";
+import { colors, styles, gradients, glow, radius, shadow, useThemeMode } from "../../lib/theme";
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
@@ -27,6 +29,24 @@ function dateBlock(ymd: string): { day: string; month: string; weekday: string }
   };
 }
 
+// countdownLabel — the runner's "how soon is this?" at a glance. Past races
+// return null (the calendar only lists upcoming, but we guard anyway). Anything
+// within 3 days reads as "urgent" so the card can light it up.
+function countdownLabel(ymd: string): { label: string; urgent: boolean } | null {
+  const race = new Date(`${ymd}T12:00:00`);
+  if (isNaN(race.getTime())) return null;
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const days = Math.round((race.getTime() - now.getTime()) / 86400000);
+  if (days < 0) return null;
+  if (days === 0) return { label: "Today", urgent: true };
+  if (days === 1) return { label: "Tomorrow", urgent: true };
+  if (days <= 6) return { label: `In ${days} days`, urgent: days <= 3 };
+  if (days <= 13) return { label: "Next week", urgent: false };
+  if (days <= 60) return { label: `In ${Math.round(days / 7)} weeks`, urgent: false };
+  return { label: `In ${Math.round(days / 30)} months`, urgent: false };
+}
+
 // Distance filter chips → which token must appear in the race's distances.
 const DIST_FILTERS: { key: string; label: string; token: string }[] = [
   { key: "5k", label: "5K", token: "5K" },
@@ -34,6 +54,11 @@ const DIST_FILTERS: { key: string; label: string; token: string }[] = [
   { key: "half", label: "Half", token: "Half Marathon" },
   { key: "full", label: "Marathon", token: "Marathon" },
 ];
+
+// Banner scrim (transparent → ink) so overlaid title text stays legible over any
+// photo; gradient stops for the "I'm going" CTA in its two states.
+const SCRIM = ["rgba(2,6,23,0)", "rgba(2,6,23,0.55)", "rgba(2,6,23,0.9)"] as const;
+const SUCCESS_GRAD = ["#34D399", "#12B76A"] as const;
 
 export default function Races() {
   const { user, getAccessToken } = useAuth();
@@ -187,10 +212,11 @@ export default function Races() {
             </Text>
           </View>
         ) : (
-          visible.map((r) => (
+          visible.map((r, i) => (
             <RaceCard
               key={r.id}
               race={r}
+              index={i}
               busy={busyId === r.id}
               mine={r.created_by === user.id}
               onGoing={() => void onGoing(r)}
@@ -229,12 +255,16 @@ function Chip({ label, active, onPress, small }: { label: string; active: boolea
   );
 }
 
-// RaceCard — the event banner leads (every MarathonMitra event has one), the
-// date rides on it, distances are scannable chips, and the whole card taps
-// through to the event page. User-listed races without a banner fall back to
-// the classic date-block layout.
+// RaceCard — a 2026 hero card. The event banner leads full-bleed with an ink
+// scrim; the title + place ride on the photo, a glassy date badge sits top-left,
+// and a smart countdown ("In 3 days" / "Tomorrow") lights up top-right when the
+// start line is near. Distance chips answer "can I run my race?", and the CTA is
+// a glossy gradient. Motion sells the depth: each card springs up + scales in on
+// mount (staggered down the list), and the whole surface tilts back in 3D on
+// press. User-listed races without a banner fall back to the classic date block.
 function RaceCard({
   race: r,
+  index,
   busy,
   mine,
   onGoing,
@@ -242,6 +272,7 @@ function RaceCard({
   onDelete,
 }: {
   race: Race;
+  index: number;
   busy: boolean;
   mine: boolean;
   onGoing: () => void;
@@ -251,103 +282,197 @@ function RaceCard({
   const d = dateBlock(r.race_date);
   const openDetails = r.url ? () => Linking.openURL(r.url!).catch(() => {}) : undefined;
   const distances = r.distances ? r.distances.split("·").map((t) => t.trim()).filter(Boolean) : [];
+  const cd = countdownLabel(r.race_date);
+
+  // 3D motion (native-driver Animated, no extra deps):
+  // `mount` 0→1 springs the card up + scales it in, staggered by list position.
+  // `press` 0→1 tilts the card back on a perspective axis while you hold it.
+  const mount = useRef(new Animated.Value(0)).current;
+  const press = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(mount, {
+      toValue: 1,
+      useNativeDriver: true,
+      delay: Math.min(index, 8) * 65,
+      speed: 11,
+      bounciness: 7,
+    }).start();
+  }, [mount, index]);
+  const pressTo = (v: number) =>
+    Animated.spring(press, { toValue: v, useNativeDriver: true, speed: 40, bounciness: 0 }).start();
+
+  const animatedStyle = {
+    opacity: mount,
+    transform: [
+      { perspective: 1000 },
+      { translateY: mount.interpolate({ inputRange: [0, 1], outputRange: [28, 0] }) },
+      { rotateX: press.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "7deg"] }) },
+      {
+        scale: Animated.multiply(
+          mount.interpolate({ inputRange: [0, 1], outputRange: [0.93, 1] }),
+          press.interpolate({ inputRange: [0, 1], outputRange: [1, 0.975] })
+        ),
+      },
+    ],
+  };
 
   return (
-    <Tap onPress={openDetails ?? (() => {})} haptic={!!openDetails} style={[styles.card, { padding: 0, overflow: "hidden", gap: 0 }]}>
-      {r.image_url ? (
-        <View>
-          <Image source={{ uri: r.image_url }} style={{ width: "100%", height: 150 }} resizeMode="cover" />
-          {/* Date chip riding the banner */}
-          <View style={{ position: "absolute", top: 10, left: 10, backgroundColor: "rgba(255,255,255,0.95)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, alignItems: "center" }}>
-            <Text style={{ color: "#0F172A", fontSize: 17, fontWeight: "900", letterSpacing: -0.5, lineHeight: 19 }}>{d.day}</Text>
-            <Text style={{ color: "#E11D2E", fontSize: 10, fontWeight: "800", letterSpacing: 1 }}>{d.month}</Text>
-          </View>
-          {openDetails && (
-            <View style={{ position: "absolute", top: 10, right: 10, backgroundColor: "rgba(2,6,23,0.55)", borderRadius: 999, padding: 7 }}>
-              <Ionicons name="open-outline" size={14} color="#fff" />
-            </View>
-          )}
-        </View>
-      ) : null}
+    <Animated.View style={[styles.card, { padding: 0 }, animatedStyle]}>
+      <Pressable
+        onPressIn={() => pressTo(1)}
+        onPressOut={() => pressTo(0)}
+        onPress={() => {
+          if (!openDetails) return;
+          Haptics.selectionAsync().catch(() => {});
+          openDetails();
+        }}
+        style={{ borderRadius: radius.xl, overflow: "hidden" }}
+      >
+        {r.image_url ? (
+          <View>
+            <Image source={{ uri: r.image_url }} style={{ width: "100%", height: 184 }} resizeMode="cover" />
+            <LinearGradient
+              colors={SCRIM}
+              locations={[0, 0.5, 1]}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
 
-      <View style={{ padding: 14, gap: 9 }}>
-        <View style={{ flexDirection: "row", gap: 12 }}>
+            {/* Glassy date badge, top-left */}
+            <View style={{ position: "absolute", top: 12, left: 12, backgroundColor: "rgba(255,255,255,0.96)", borderRadius: 14, paddingHorizontal: 11, paddingVertical: 7, alignItems: "center", ...shadow.sm }}>
+              <Text style={{ color: "#0F172A", fontSize: 18, fontWeight: "900", letterSpacing: -0.5, lineHeight: 20 }}>{d.day}</Text>
+              <Text style={{ color: "#E11D2E", fontSize: 10, fontWeight: "800", letterSpacing: 1 }}>{d.month}</Text>
+            </View>
+
+            {/* Top-right cluster: delete (if mine) + countdown pill */}
+            <View style={{ position: "absolute", top: 12, right: 12, flexDirection: "row", alignItems: "center", gap: 8 }}>
+              {mine && (
+                <Pressable onPress={onDelete} hitSlop={8} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(2,6,23,0.5)", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="trash-outline" size={15} color="#fff" />
+                </Pressable>
+              )}
+              {cd ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: cd.urgent ? "rgba(225,29,46,0.95)" : "rgba(2,6,23,0.55)" }}>
+                  <Ionicons name={cd.urgent ? "flame" : "time-outline"} size={12} color="#fff" />
+                  <Text style={{ color: "#fff", fontSize: 11.5, fontWeight: "800" }}>{cd.label}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {/* Title + place, overlaid on the scrim */}
+            <View style={{ position: "absolute", left: 14, right: 14, bottom: 12, flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: "#fff", fontWeight: "900", fontSize: 19, letterSpacing: -0.3, textShadowColor: "rgba(0,0,0,0.35)", textShadowRadius: 8, textShadowOffset: { width: 0, height: 1 } }} numberOfLines={2}>
+                  {r.title}
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
+                  <Ionicons name="location-outline" size={12} color="rgba(255,255,255,0.9)" />
+                  <Text style={{ color: "rgba(255,255,255,0.92)", fontSize: 12.5, fontWeight: "600", flex: 1 }} numberOfLines={1}>
+                    {d.weekday} · {r.location ?? r.city}
+                  </Text>
+                </View>
+              </View>
+              {openDetails && (
+                <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="open-outline" size={15} color="#fff" />
+                </View>
+              )}
+            </View>
+          </View>
+        ) : null}
+
+        <View style={{ padding: 14, gap: 11 }}>
           {/* No banner → classic date block keeps the layout scannable */}
           {!r.image_url && (
-            <View style={{ width: 54, borderRadius: 14, backgroundColor: colors.primarySoft, alignItems: "center", paddingVertical: 9, alignSelf: "flex-start" }}>
-              <Text style={{ color: colors.primary, fontSize: 21, fontWeight: "800", letterSpacing: -0.5 }}>{d.day}</Text>
-              <Text style={{ color: colors.primary, fontSize: 10.5, fontWeight: "800", letterSpacing: 1 }}>{d.month}</Text>
-            </View>
-          )}
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, letterSpacing: -0.2 }} numberOfLines={2}>
-              {r.title}
-            </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
-              <Ionicons name="location-outline" size={12} color={colors.muted} />
-              <Text style={{ color: colors.muted, fontSize: 12.5, flex: 1 }} numberOfLines={1}>
-                {d.weekday} · {r.location ?? r.city}
-              </Text>
-            </View>
-            {r.organizer ? (
-              <Text style={{ color: colors.subtle, fontSize: 11.5, marginTop: 2 }} numberOfLines={1}>
-                by {r.organizer}
-              </Text>
-            ) : null}
-          </View>
-          {mine && (
-            <Pressable onPress={onDelete} hitSlop={8}>
-              <Ionicons name="trash-outline" size={18} color={colors.subtle} />
-            </Pressable>
-          )}
-        </View>
-
-        {/* Distance chips — what can I run here? */}
-        {distances.length > 0 && (
-          <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
-            {distances.map((t) => (
-              <View key={t} style={{ backgroundColor: colors.primarySoft, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4 }}>
-                <Text style={{ color: colors.primary, fontSize: 11.5, fontWeight: "800" }}>{t}</Text>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <View style={{ width: 56, borderRadius: 16, backgroundColor: colors.primarySoft, alignItems: "center", paddingVertical: 10, alignSelf: "flex-start" }}>
+                <Text style={{ color: colors.primary, fontSize: 22, fontWeight: "900", letterSpacing: -0.5 }}>{d.day}</Text>
+                <Text style={{ color: colors.primary, fontSize: 10.5, fontWeight: "800", letterSpacing: 1 }}>{d.month}</Text>
               </View>
-            ))}
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, letterSpacing: -0.2 }} numberOfLines={2}>
+                  {r.title}
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
+                  <Ionicons name="location-outline" size={12} color={colors.muted} />
+                  <Text style={{ color: colors.muted, fontSize: 12.5, flex: 1 }} numberOfLines={1}>
+                    {d.weekday} · {r.location ?? r.city}
+                  </Text>
+                </View>
+                {r.organizer ? (
+                  <Text style={{ color: colors.subtle, fontSize: 11.5, marginTop: 2 }} numberOfLines={1}>
+                    by {r.organizer}
+                  </Text>
+                ) : null}
+              </View>
+              {mine && (
+                <Pressable onPress={onDelete} hitSlop={8}>
+                  <Ionicons name="trash-outline" size={18} color={colors.subtle} />
+                </Pressable>
+              )}
+            </View>
+          )}
+
+          {/* Organizer credit for banner cards (place already rides the photo) */}
+          {r.image_url && r.organizer ? (
+            <Text style={{ color: colors.subtle, fontSize: 11.5, marginTop: -2 }} numberOfLines={1}>
+              by {r.organizer}
+            </Text>
+          ) : null}
+
+          {/* Distance chips — what can I run here? Banner cards already show the
+              countdown on the photo; classic cards fold it in here. */}
+          {(distances.length > 0 || (!r.image_url && cd)) && (
+            <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              {!r.image_url && cd ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: cd.urgent ? colors.primary : colors.bgSecondary, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4 }}>
+                  <Ionicons name={cd.urgent ? "flame" : "time-outline"} size={11} color={cd.urgent ? "#fff" : colors.muted} />
+                  <Text style={{ color: cd.urgent ? "#fff" : colors.muted, fontSize: 11.5, fontWeight: "800" }}>{cd.label}</Text>
+                </View>
+              ) : null}
+              {distances.map((t) => (
+                <View key={t} style={{ backgroundColor: colors.primarySoft, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4 }}>
+                  <Text style={{ color: colors.primary, fontSize: 11.5, fontWeight: "800" }}>{t}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Actions — glossy gradient CTA + the outline calendar button */}
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <View style={{ flex: 1, borderRadius: 999, ...glow(r.going ? colors.success : colors.primary, 0.35) }}>
+              <Tap onPress={onGoing} disabled={busy} scaleTo={0.95} style={{ borderRadius: 999, overflow: "hidden", opacity: busy ? 0.6 : 1 }}>
+                <LinearGradient
+                  colors={r.going ? SUCCESS_GRAD : gradients.red}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, paddingVertical: 11 }}
+                >
+                  {/* Top gloss highlight — the lit, 3D button look */}
+                  <LinearGradient
+                    colors={gradients.gloss}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                    style={{ position: "absolute", top: 0, left: 0, right: 0, height: "60%" }}
+                    pointerEvents="none"
+                  />
+                  <Ionicons name={r.going ? "checkmark-circle" : "walk"} size={16} color="#fff" />
+                  <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>{r.going ? "You're going" : "I'm going"}</Text>
+                </LinearGradient>
+              </Tap>
+            </View>
+            <Tap
+              onPress={onCalendar}
+              style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 999, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border }}
+            >
+              <Ionicons name="calendar" size={15} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 13 }}>Calendar</Text>
+            </Tap>
           </View>
-        )}
-
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-          <Ionicons name="people" size={13} color={colors.muted} />
-          <Text style={{ color: colors.muted, fontSize: 12 }}>
-            {r.going_count} going{r.going ? " · including you" : ""}
-          </Text>
         </View>
-
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <Tap
-            onPress={onGoing}
-            disabled={busy}
-            style={{
-              flex: 1,
-              flexDirection: "row",
-              justifyContent: "center",
-              alignItems: "center",
-              gap: 6,
-              paddingVertical: 10,
-              borderRadius: 999,
-              backgroundColor: r.going ? colors.success : colors.primary,
-              opacity: busy ? 0.6 : 1,
-            }}
-          >
-            <Ionicons name={r.going ? "checkmark-circle" : "walk"} size={16} color="#fff" />
-            <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>{r.going ? "You're going" : "I'm going"}</Text>
-          </Tap>
-          <Tap
-            onPress={onCalendar}
-            style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border }}
-          >
-            <Ionicons name="calendar" size={15} color={colors.primary} />
-            <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 13 }}>Calendar</Text>
-          </Tap>
-        </View>
-      </View>
-    </Tap>
+      </Pressable>
+    </Animated.View>
   );
 }
