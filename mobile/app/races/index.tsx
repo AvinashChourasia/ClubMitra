@@ -13,39 +13,9 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
 import { useAuth } from "../../lib/auth";
-import { listRaces, toggleGoing, deleteRace, addRaceToCalendar, MARATHONMITRA_SUBMIT_URL, type Race } from "../../lib/races";
+import { listRaces, toggleGoing, deleteRace, addRaceToCalendar, dateBlock, countdownLabel, shortDist, cityMatch, MARATHONMITRA_SUBMIT_URL, type Race } from "../../lib/races";
 import { Tap } from "../../components/Tap";
 import { colors, styles, gradients, glow, radius, shadow, useThemeMode } from "../../lib/theme";
-
-const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-
-function dateBlock(ymd: string): { day: string; month: string; weekday: string } {
-  const d = new Date(`${ymd}T12:00:00`);
-  if (isNaN(d.getTime())) return { day: "?", month: "", weekday: "" };
-  return {
-    day: String(d.getDate()),
-    month: MONTHS[d.getMonth()],
-    weekday: d.toLocaleDateString([], { weekday: "short" }),
-  };
-}
-
-// countdownLabel — the runner's "how soon is this?" at a glance. Past races
-// return null (the calendar only lists upcoming, but we guard anyway). Anything
-// within 3 days reads as "urgent" so the card can light it up.
-function countdownLabel(ymd: string): { label: string; urgent: boolean } | null {
-  const race = new Date(`${ymd}T12:00:00`);
-  if (isNaN(race.getTime())) return null;
-  const now = new Date();
-  now.setHours(12, 0, 0, 0);
-  const days = Math.round((race.getTime() - now.getTime()) / 86400000);
-  if (days < 0) return null;
-  if (days === 0) return { label: "Today", urgent: true };
-  if (days === 1) return { label: "Tomorrow", urgent: true };
-  if (days <= 6) return { label: `In ${days} days`, urgent: days <= 3 };
-  if (days <= 13) return { label: "Next week", urgent: false };
-  if (days <= 60) return { label: `In ${Math.round(days / 7)} weeks`, urgent: false };
-  return { label: `In ${Math.round(days / 30)} months`, urgent: false };
-}
 
 // Distance filter chips → which token must appear in the race's distances.
 // Runners speak in shorthand: HM = half marathon, FM = full marathon.
@@ -55,25 +25,6 @@ const DIST_FILTERS: { key: string; label: string; token: string }[] = [
   { key: "half", label: "HM", token: "Half Marathon" },
   { key: "full", label: "FM", token: "Marathon" },
 ];
-
-// shortDist renders a distance token the way runners say it: "Half Marathon" →
-// HM, "Marathon"/"Full Marathon" → FM; everything else (5K, 10K…) is left as-is.
-function shortDist(t: string): string {
-  const s = t.trim();
-  if (/^half marathon$/i.test(s)) return "HM";
-  if (/^(full\s+)?marathon$/i.test(s)) return "FM";
-  return s;
-}
-
-// cityMatch mirrors the backend's prefix-tolerant comparison so client-side
-// filtering agrees with what the server would return: a stored "Bengaluru
-// Urban" matches the profile city "Bengaluru", and vice-versa.
-function cityMatch(raceCity: string, selected: string): boolean {
-  const a = raceCity.trim().toLowerCase();
-  const b = selected.trim().toLowerCase();
-  if (!a || !b) return false;
-  return a.startsWith(b) || b.startsWith(a);
-}
 
 // Banner scrim (transparent → ink) so overlaid title text stays legible over any
 // photo; gradient stops for the "I'm going" CTA in its two states.

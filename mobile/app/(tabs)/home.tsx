@@ -1,9 +1,9 @@
 // Home: the daily front door. Leads with the run you can start right now (the
 // GPS track card), then your personal slice — next run, challenges in flight,
-// your clubs — and fresh clubs in your city to discover.
+// upcoming marathons to chase — and fresh clubs in your city to discover.
 
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Linking, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,7 +14,9 @@ import { listChallenges, challengeFraction, challengeProgress, challengeTarget, 
 import { myChapters, type MyChapter } from "../../lib/clubs";
 import { publicClubs, type DiscoverClub } from "../../lib/discover";
 import { listActivities, getRoute, geoJSONToLatLng, offsetsToTimes, type Activity, type LatLng } from "../../lib/activities";
+import { listRaces, cityMatch, type Race } from "../../lib/races";
 import { useJoinGate, ClubCarousel, TrackRunCard } from "../../components/discovery";
+import { RaceCarousel } from "../../components/RaceCarousel";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RouteTrace } from "../../components/RouteTrace";
 import { Tap } from "../../components/Tap";
@@ -44,6 +46,7 @@ export default function Home() {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [clubs, setClubs] = useState<MyChapter[]>([]);
   const [cityClubs, setCityClubs] = useState<DiscoverClub[]>([]);
+  const [races, setRaces] = useState<Race[]>([]);
   const [lastRun, setLastRun] = useState<Activity | null>(null);
   const [lastRoute, setLastRoute] = useState<LatLng[]>([]);
   const [lastTimes, setLastTimes] = useState<number[] | undefined>(undefined);
@@ -55,18 +58,21 @@ export default function Home() {
     try {
       const token = await getAccessToken();
       if (token) {
-        const [r, c, ch, pc, acts] = await Promise.all([
+        const [r, c, ch, pc, acts, rc] = await Promise.all([
           myRuns(token),
           listChallenges(token, true),
           myChapters(token),
           // Discovery strip: public clubs in the member's own city.
           user?.city ? publicClubs(user.city).catch(() => []) : Promise.resolve([]),
           listActivities(token).catch(() => [] as Activity[]),
+          // Upcoming marathons teaser — fetch all, prioritise the member's city.
+          listRaces(token).catch(() => [] as Race[]),
         ]);
         setRuns(r);
         setChallenges(c);
         setClubs(ch);
         setCityClubs(pc);
+        setRaces(rc);
         // Latest GPS run + its route for the thumbnail (best-effort).
         const latest = acts[0] ?? null;
         setLastRun(latest);
@@ -110,6 +116,17 @@ export default function Home() {
     const mine = new Set(clubs.map((c) => c.id));
     return cityClubs.filter((c) => !mine.has(c.id)).slice(0, 8);
   }, [cityClubs, clubs]);
+
+  // Upcoming marathons for the Home teaser: the member's own city first (most
+  // relevant), then the rest of the soonest races to fill the strip. (Hook —
+  // must run before the guest early-return.)
+  const upcomingRaces = useMemo(() => {
+    const city = user?.city;
+    const mine = city ? races.filter((r) => cityMatch(r.city, city)) : [];
+    const mineIds = new Set(mine.map((r) => r.id));
+    const rest = races.filter((r) => !mineIds.has(r.id));
+    return [...mine, ...rest].slice(0, 8);
+  }, [races, user?.city]);
 
   if (!user) return <GuestHome />;
 
@@ -217,31 +234,30 @@ export default function Home() {
               )}
             </View>
 
-            {/* Clubs shortcut */}
-            <Tap onPress={() => router.push("/clubs")} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
-              <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name="people" size={22} color={colors.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>{clubs.length > 0 ? "Your clubs" : "Find a club"}</Text>
-                <Text style={{ color: colors.muted, fontSize: 13 }}>
-                  {clubs.length > 0 ? `${clubs.length} ${clubs.length === 1 ? "club" : "clubs"} · tap to manage` : "Join or create a running club"}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
-            </Tap>
-
-            {/* Race calendar */}
-            <Tap onPress={() => router.push("/races" as Href)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
-              <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: "#FEF3C7", alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name="flag" size={22} color="#F59E0B" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Race calendar</Text>
-                <Text style={{ color: colors.muted, fontSize: 13 }}>Upcoming races — mark yourself going</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
-            </Tap>
+            {/* Upcoming marathons — a swipeable teaser into the full calendar */}
+            <View style={{ gap: 10 }}>
+              <SectionHeader
+                title="Upcoming marathons"
+                action={upcomingRaces.length > 0 ? { label: "See all", onPress: () => router.push("/races" as Href) } : undefined}
+              />
+              {upcomingRaces.length > 0 ? (
+                <RaceCarousel
+                  races={upcomingRaces}
+                  onPressRace={(r) => (r.url ? Linking.openURL(r.url).catch(() => {}) : router.push("/races" as Href))}
+                />
+              ) : (
+                <Tap onPress={() => router.push("/races" as Href)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
+                  <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: "#FEF3C7", alignItems: "center", justifyContent: "center" }}>
+                    <Ionicons name="flag" size={22} color="#F59E0B" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Race calendar</Text>
+                    <Text style={{ color: colors.muted, fontSize: 13 }}>Find your next start line</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
+                </Tap>
+              )}
+            </View>
 
             {/* Popular clubs in your city you haven't joined yet */}
             {user.city && discoverClubs.length > 0 && (
