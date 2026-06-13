@@ -24,7 +24,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   Text,
   TextInput,
   View,
@@ -33,7 +32,11 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useRouter } from "expo-router";
-import { Swipeable } from "react-native-gesture-handler";
+// ScrollView comes from gesture-handler (not react-native) so the message list
+// shares one gesture system with the per-bubble Swipeable. With RN's core
+// ScrollView, Swipeable's pan handler swallows the vertical drag on Android and
+// the list can't be scrolled. See react-native-gesture-handler docs.
+import { ScrollView, Swipeable } from "react-native-gesture-handler";
 import * as Haptics from "expo-haptics";
 import {
   AudioModule,
