@@ -584,7 +584,7 @@ export function ChatThread({
         ) : (
           <ScrollView
             ref={scrollRef}
-            style={{ backgroundColor: colors.chatBg }}
+            style={{ flex: 1, backgroundColor: colors.chatBg }}
             contentContainerStyle={{ padding: 12, gap: 2 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             keyboardShouldPersistTaps="handled"
