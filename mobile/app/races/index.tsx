@@ -197,18 +197,20 @@ export default function Races() {
           </Tap>
         </View>
 
-        {/* Scope: tap the city pill to search/switch cities, browse all, or open
-            your saved wishlist. */}
-        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-          <ScopeChip
-            icon="location"
-            label={city || "Pick city"}
-            active={scope === "city"}
-            trailing="chevron-down"
-            onPress={() => setPickerOpen(true)}
-          />
-          <ScopeChip icon="earth" label="All cities" active={scope === "all"} onPress={() => setScope("all")} />
-          <ScopeChip icon="heart" label="Saved" badge={savedCount} active={scope === "saved"} onPress={() => setScope("saved")} />
+        {/* Scope: tap the city pill to search/switch cities or browse all; the
+            heart pinned right is your saved wishlist. */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <View style={{ flexDirection: "row", gap: 8, flexShrink: 1 }}>
+            <ScopeChip
+              icon="location"
+              label={city || "Pick city"}
+              active={scope === "city"}
+              trailing="chevron-down"
+              onPress={() => setPickerOpen(true)}
+            />
+            <ScopeChip icon="earth" label="All cities" active={scope === "all"} onPress={() => setScope("all")} />
+          </View>
+          <SavedToggle active={scope === "saved"} count={savedCount} onPress={() => setScope(scope === "saved" ? "all" : "saved")} />
         </View>
 
         {/* Distance filter — the runner's first question */}
@@ -282,23 +284,20 @@ function Chip({ label, active, onPress, small }: { label: string; active: boolea
   );
 }
 
-// ScopeChip — the top-row filter pills (city / all cities / saved). Carries an
-// icon, an optional trailing chevron (the city pill, signalling it opens the
-// picker), and an optional count badge (Saved shows how many you've marked).
+// ScopeChip — the top-row filter pills (city / all cities). Carries an icon and
+// an optional trailing chevron (the city pill, signalling it opens the picker).
 function ScopeChip({
   icon,
   label,
   active,
   onPress,
   trailing,
-  badge,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   active: boolean;
   onPress: () => void;
   trailing?: keyof typeof Ionicons.glyphMap;
-  badge?: number;
 }) {
   return (
     <Tap
@@ -320,12 +319,37 @@ function ScopeChip({
       <Text style={{ color: active ? "#fff" : colors.muted, fontWeight: "700", fontSize: 13 }} numberOfLines={1}>
         {label}
       </Text>
-      {badge !== undefined && badge > 0 ? (
-        <View style={{ minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, backgroundColor: active ? "rgba(255,255,255,0.25)" : colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ color: active ? "#fff" : colors.primary, fontSize: 11, fontWeight: "800" }}>{badge}</Text>
+      {trailing ? <Ionicons name={trailing} size={13} color={active ? "rgba(255,255,255,0.85)" : colors.subtle} /> : null}
+    </Tap>
+  );
+}
+
+// SavedToggle — an icon-only wishlist toggle pinned to the right of the filter
+// row (the heart pattern from Airbnb / YouTube). Fills solid when active; shows
+// a small count badge of how many races you've saved when it isn't.
+function SavedToggle({ active, count, onPress }: { active: boolean; count: number; onPress: () => void }) {
+  return (
+    <Tap
+      haptic={false}
+      onPress={onPress}
+      hitSlop={6}
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: active ? colors.primary : colors.bg,
+        borderWidth: 1,
+        borderColor: active ? colors.primary : colors.border,
+      }}
+    >
+      <Ionicons name={active ? "heart" : "heart-outline"} size={19} color={active ? "#fff" : colors.primary} />
+      {count > 0 && !active ? (
+        <View style={{ position: "absolute", top: -4, right: -4, minWidth: 17, height: 17, borderRadius: 8.5, paddingHorizontal: 4, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: colors.bgSecondary }}>
+          <Text style={{ color: "#fff", fontSize: 9.5, fontWeight: "800" }}>{count}</Text>
         </View>
       ) : null}
-      {trailing ? <Ionicons name={trailing} size={13} color={active ? "rgba(255,255,255,0.85)" : colors.subtle} /> : null}
     </Tap>
   );
 }
