@@ -100,6 +100,10 @@ func main() {
 	notifier := notifications.NewNotifier(pool)
 	notificationsHandler := notifications.NewHandler(notifier)
 
+	// Background engagement pushes (best-effort, throttled): re-engagement
+	// nudges for lapsed runners + a weekly club recap of each runner's standing.
+	notifications.NewEngagement(notifier).Start()
+
 	// Signed Cloudinary upload params (profile photos). Disabled if no creds.
 	uploadsHandler := uploads.NewHandler(cfg.CloudinaryCloud, cfg.CloudinaryKey, cfg.CloudinarySecret)
 

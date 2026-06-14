@@ -358,6 +358,28 @@ func (r *Repository) DiscoverChapters(ctx context.Context, city, search string) 
 	return out, rows.Err()
 }
 
+// DiscoverOne returns one public club's teaser (for the public profile page a
+// non-member can open). Returns (nil, nil) if no public, non-deleted club has
+// that id — keeps private/invite-hidden clubs invisible to guests.
+func (r *Repository) DiscoverOne(ctx context.Context, id uuid.UUID) (*DiscoverEntry, error) {
+	const q = `
+		SELECT c.id, c.name, c.city, c.description, c.logo, c.banner, c.join_policy,
+		       COUNT(cm.user_id) FILTER (WHERE cm.deleted_at IS NULL AND cm.status = 'active')::int AS member_count
+		FROM chapters c
+		LEFT JOIN chapter_members cm ON cm.chapter_id = c.id
+		WHERE c.id = $1 AND c.deleted_at IS NULL AND c.is_public
+		GROUP BY c.id`
+	var e DiscoverEntry
+	err := r.db.QueryRow(ctx, q, id).Scan(&e.ID, &e.Name, &e.City, &e.Description, &e.Logo, &e.Banner, &e.JoinPolicy, &e.MemberCount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
 // CityCount is one row of the city picker: a city and how many public clubs run
 // there. Grouped case-insensitively so "Pune" and "pune" don't split.
 type CityCount struct {

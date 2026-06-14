@@ -435,9 +435,29 @@ func (h *Handler) myChapters(w http.ResponseWriter, r *http.Request) {
 // identities — so guests can browse clubs before creating a profile.
 func (h *Handler) PublicRoutes() http.Handler {
 	r := chi.NewRouter()
-	r.Get("/chapters", h.discover) // ?city=&q=
+	r.Get("/chapters", h.discover)         // ?city=&q=
+	r.Get("/chapters/{id}", h.discoverOne) // public club profile
 	r.Get("/cities", h.cities)
 	return r
+}
+
+// discoverOne returns one public club's teaser for the non-member profile page.
+func (h *Handler) discoverOne(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid club id")
+		return
+	}
+	entry, err := h.svc.DiscoverOne(r.Context(), id)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	if entry == nil {
+		httpx.Error(w, http.StatusNotFound, "club not found")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, entry)
 }
 
 // discover lists public clubs for guests, filtered by ?city= and/or ?q= (name).

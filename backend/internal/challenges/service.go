@@ -382,6 +382,13 @@ func (s *Service) Leaderboard(ctx context.Context, challengeID uuid.UUID, limit 
 	return out, nil
 }
 
+// ChapterLeaderboard ranks the chapters competing in a challenge by their
+// members' combined progress (the org-wide "which club is winning" board).
+// Computed straight from Postgres — cheap, and not worth a Redis cache.
+func (s *Service) ChapterLeaderboard(ctx context.Context, challengeID uuid.UUID) ([]ChapterEntry, error) {
+	return s.repo.ChapterScores(ctx, challengeID)
+}
+
 // scoreOf returns the leaderboard score for a challenge given a user's
 // participation: km for a distance challenge, days otherwise.
 func scoreOf(ch *Challenge) float64 {

@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 
 import { useAuth } from "../../../lib/auth";
 import { getChapter, myChapters, isChapterAdmin } from "../../../lib/clubs";
-import { chapterMessages, postChapter, announce as announceApi, deleteMessage as deleteMessageApi, setReaction, editMessage, type OutMsg } from "../../../lib/messaging";
+import { chapterMessages, postChapter, announce as announceApi, deleteMessage as deleteMessageApi, setReaction, editMessage, createPoll, votePoll, type OutMsg } from "../../../lib/messaging";
 import { uploadChatImage, uploadChatFile } from "../../../lib/upload";
 import { ChatThread } from "../../../components/ChatThread";
 
@@ -79,6 +79,16 @@ export default function ClubGroupChat() {
     if (token) await editMessage(token, mid, body);
   }, [getAccessToken]);
 
+  const makePoll = useCallback(async (input: { question: string; options: string[]; multi: boolean }) => {
+    const token = await getAccessToken();
+    if (token) await createPoll(token, id, input);
+  }, [getAccessToken, id]);
+
+  const vote = useCallback(async (mid: string, optionId: string) => {
+    const token = await getAccessToken();
+    if (token) await votePoll(token, mid, optionId);
+  }, [getAccessToken]);
+
   return (
     <ChatThread
       title={title}
@@ -98,6 +108,8 @@ export default function ClubGroupChat() {
       getToken={getAccessToken}
       canAnnounce={isAdmin}
       announce={announce}
+      createPoll={isAdmin ? makePoll : undefined}
+      voteOnPoll={vote}
       onSenderPress={(senderId) => {
         if (senderId !== user?.id) router.push(`/u/${senderId}` as Href);
       }}

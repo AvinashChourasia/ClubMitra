@@ -27,6 +27,8 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/chapter/{chapterID}", h.chapterList)
 	r.Post("/chapter/{chapterID}", h.chapterPost)
 	r.Post("/chapter/{chapterID}/announce", h.announce)
+	r.Post("/chapter/{chapterID}/poll", h.chapterPoll) // admin: post a poll
+	r.Put("/messages/{messageID}/vote", h.votePoll)    // {"option_id":"..."}
 	r.Get("/run/{runID}", h.runList)
 	r.Post("/run/{runID}", h.runPost)
 	r.Get("/dm/{userID}", h.dmList)  // open/start a 1:1 chat
@@ -176,6 +178,68 @@ func (p postRequest) replyID() *uuid.UUID {
 
 type announceRequest struct {
 	Body string `json:"body"`
+}
+
+type pollRequest struct {
+	Question string   `json:"question"`
+	Options  []string `json:"options"`
+	Multi    bool     `json:"multi"`
+}
+
+type voteRequest struct {
+	OptionID string `json:"option_id"`
+}
+
+func (h *Handler) chapterPoll(w http.ResponseWriter, r *http.Request) {
+	uid, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	chapterID, err := uuid.Parse(chi.URLParam(r, "chapterID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid chapter id")
+		return
+	}
+	var req pollRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	msg, err := h.svc.PostChapterPoll(r.Context(), uid, chapterID, req.Question, req.Options, req.Multi)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, msg)
+}
+
+func (h *Handler) votePoll(w http.ResponseWriter, r *http.Request) {
+	uid, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	messageID, err := uuid.Parse(chi.URLParam(r, "messageID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid message id")
+		return
+	}
+	var req voteRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	optionID, err := uuid.Parse(req.OptionID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid option id")
+		return
+	}
+	if err := h.svc.VotePoll(r.Context(), uid, messageID, optionID); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
 }
 
 func (h *Handler) chapterList(w http.ResponseWriter, r *http.Request) {

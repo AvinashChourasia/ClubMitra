@@ -140,6 +140,21 @@ export async function getLeaderboard(token: string, id: string): Promise<Leaderb
   return (await request<LeaderboardEntry[] | null>(`/challenges/${id}/leaderboard`, { token })) ?? [];
 }
 
+// Chapter-vs-chapter leaderboard: clubs ranked by their members' combined
+// progress (the org-wide board). Score is km or days, matching the challenge.
+export type ChapterEntry = {
+  chapter_id: string;
+  name: string;
+  city: string;
+  score: number;
+  runners: number;
+  rank: number;
+};
+
+export async function getChapterLeaderboard(token: string, id: string): Promise<ChapterEntry[]> {
+  return (await request<ChapterEntry[] | null>(`/challenges/${id}/leaderboard/chapters`, { token })) ?? [];
+}
+
 // updateChallenge: organiser edit, open until the start date (backend enforces
 // creator + pre-start). Send only the fields being changed.
 export type ChallengeEdit = {

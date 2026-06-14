@@ -370,7 +370,7 @@ clubmitra/
 
 ---
 
-### Phase 5 — Social + Badges + Growth `(Month 5)`
+### Phase 5 — Social + Badges + Growth `(Month 5)` ✅ COMPLETE
 
 #### Gamification core — SHIPPED (June 2026)
 - [x] Badge engine: 26-badge catalog in code, awards evaluated from GPS-verified
@@ -401,13 +401,13 @@ clubmitra/
 
 #### Remaining Phase 5
 - [x] Public explore: discover clubs and challenges by city and sport — `app/explore.tsx` + `lib/discover.ts` + backend `/public` routes (guest-browsable, auth gate fires only on join)
-- [ ] Club public profile page (discoverability for non-members)
-- [ ] Global club directory (searchable)
+- [x] Club public profile page (discoverability for non-members) — public `GET /public/chapters/{id}` + `app/club/public/[id]` (banner, members, About, Join), no auth gate
+- [x] Global club directory (searchable) — Explore browses all cities + name search; every club card taps into its public profile
 - [x] Follow individual runners — public runner profile (identity, gamification level, run + social stats), Follow/Following with optimistic toggle + follow push, followers/following lists; reached from chat sender taps (`internal/social`, `app/u/[id]`) *(needs migration 00034 applied)*
 - [x] Club XP + club levels + Member of the Week — chapter-level XP/level from all-time logged distance (6-tier ladder) + this week's top runner, on the club Leaderboard tab; ranked rows + MoW tap through to runner profiles (`runlog.ClubStanding`)
-- [ ] Org-wide challenge leaderboard (all chapters compete)
-- [ ] Push notifications full suite — rank changes, milestone alerts, re-engagement
-- [ ] Polls: admin creates quick polls for club members
+- [x] Org-wide challenge leaderboard (all chapters compete) — a Runners/Clubs toggle on the challenge board; clubs ranked by their members' combined progress, restricted to the org for org-scoped challenges (`challenges.ChapterScores`)
+- [x] Push notifications full suite — rank changes + re-engagement: background jobs push a weekly club recap (your weekly rank) and a re-engagement nudge to lapsed runners (throttled, race-safe, IST-scheduled); distance milestones already push via badges (`notifications.Engagement`, migration 00035)
+- [x] Polls: admin creates quick polls for club members — kind='poll' chat messages with options, single/multi vote, live tallies + % bars, realtime updates (migration 00036, `polls`/`poll_options`/`poll_votes`)
 
 ---
 
@@ -677,7 +677,7 @@ PLATFORM_CUT_PCT=10
 | 2 | Rolling leaderboards, analytics, inventory, messaging | Month 2 ✅ |
 | 3 | Payments (Razorpay + Stripe), GPX, desktop admin, paid inventory | Month 3 |
 | 4 | GPS tracking, interactive maps, race calendar, city leaderboard | Month 4 ✅ |
-| 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 |
+| 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 ✅ |
 | 6+ | Europe launch, leagues, coaches, physical events, white-label | Month 7+ |
 
 **Target:** India soft launch end of Month 2. Europe expansion Month 7+.

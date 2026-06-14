@@ -40,8 +40,29 @@ func (h *Handler) Routes() http.Handler {
 		r.Post("/join", h.join)
 		r.Post("/leave", h.leave)
 		r.Get("/leaderboard", h.leaderboard)
+		r.Get("/leaderboard/chapters", h.chapterLeaderboard)
 	})
 	return r
+}
+
+// chapterLeaderboard ranks the clubs competing in a challenge by combined
+// member progress (org-wide chapter-vs-chapter board).
+func (h *Handler) chapterLeaderboard(w http.ResponseWriter, r *http.Request) {
+	if _, ok := httpx.UserIDFromContext(r.Context()); !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid challenge id")
+		return
+	}
+	entries, err := h.svc.ChapterLeaderboard(r.Context(), id)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, entries)
 }
 
 // --- request shapes ---

@@ -459,6 +459,53 @@ func (r *Repository) ActiveMemberships(ctx context.Context, userID string, t tim
 	return out, rows.Err()
 }
 
+// ChapterEntry is one row of the chapter-vs-chapter leaderboard: a club's
+// combined progress from all its active members taking part in the challenge.
+type ChapterEntry struct {
+	ChapterID string  `json:"chapter_id"`
+	Name      string  `json:"name"`
+	City      string  `json:"city"`
+	Score     float64 `json:"score"`
+	Runners   int     `json:"runners"`
+	Rank      int     `json:"rank"`
+}
+
+// ChapterScores ranks the chapters whose members are taking part in a challenge
+// by their combined progress (km for distance challenges, days otherwise). A
+// runner in two clubs lifts both. For an org-scoped challenge only that org's
+// chapters compete; otherwise every participating chapter does.
+func (r *Repository) ChapterScores(ctx context.Context, challengeID uuid.UUID) ([]ChapterEntry, error) {
+	const q = `
+		SELECT ch.id::text, ch.name, ch.city,
+		       SUM(CASE WHEN c.type = 'distance' THEN p.progress_km ELSE p.progress_days END)::float8 AS score,
+		       COUNT(DISTINCT p.user_id)::int AS runners
+		FROM challenge_participants p
+		JOIN challenges c ON c.id = p.challenge_id
+		JOIN chapter_members cm ON cm.user_id = p.user_id AND cm.deleted_at IS NULL AND cm.status = 'active'
+		JOIN chapters ch ON ch.id = cm.chapter_id AND ch.deleted_at IS NULL
+		WHERE p.challenge_id = $1 AND p.user_id IS NOT NULL AND p.deleted_at IS NULL
+		  AND (c.org_id IS NULL OR ch.org_id = c.org_id)
+		GROUP BY ch.id, ch.name, ch.city
+		ORDER BY score DESC, runners DESC
+		LIMIT 50`
+	rows, err := r.db.Query(ctx, q, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ChapterEntry, 0)
+	rank := 0
+	for rows.Next() {
+		rank++
+		e := ChapterEntry{Rank: rank}
+		if err := rows.Scan(&e.ChapterID, &e.Name, &e.City, &e.Score, &e.Runners); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // Scores returns each individual participant's leaderboard score for a
 // challenge — km for a distance challenge, days otherwise — for rebuilding Redis
 // from the durable source of truth.

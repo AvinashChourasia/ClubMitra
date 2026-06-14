@@ -29,6 +29,11 @@ export function publicClubs(city?: string, q?: string): Promise<DiscoverClub[]> 
   return request<DiscoverClub[]>(`/public/chapters?${qs.toString()}`);
 }
 
+// publicClub fetches one club's public teaser for the non-member profile page.
+export function publicClub(id: string): Promise<DiscoverClub> {
+  return request<DiscoverClub>(`/public/chapters/${id}`);
+}
+
 export type CityCount = { city: string; clubs: number };
 
 export function publicCities(): Promise<CityCount[]> {

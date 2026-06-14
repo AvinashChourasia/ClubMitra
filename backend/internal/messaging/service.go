@@ -328,6 +328,87 @@ func (s *Service) Announce(ctx context.Context, userID string, chapterID uuid.UU
 	return msg, nil
 }
 
+// PostChapterPoll drops a poll into a chapter chat. Admin-only, like
+// announcements — a poll is a club-organiser tool, not a free-for-all.
+func (s *Service) PostChapterPoll(ctx context.Context, userID string, chapterID uuid.UUID, question string, options []string, multi bool) (*Message, error) {
+	ok, err := s.check.HasChapterRole(ctx, userID, chapterID,
+		permissions.RoleOrgAdmin, permissions.RoleChapterAdmin, permissions.RoleCoAdmin)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrForbidden
+	}
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return nil, ValidationError{Msg: "a poll needs a question"}
+	}
+	clean := make([]string, 0, len(options))
+	for _, o := range options {
+		if o = strings.TrimSpace(o); o != "" {
+			clean = append(clean, o)
+		}
+	}
+	if len(clean) < 2 {
+		return nil, ValidationError{Msg: "a poll needs at least two options"}
+	}
+	if len(clean) > 6 {
+		clean = clean[:6]
+	}
+	convID, err := s.repo.ensureChapterConversation(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+	// The message body carries the question so previews + non-poll-aware views
+	// still read sensibly.
+	msg, err := s.repo.postMessage(ctx, convID, userID, &question, nil, nil, false, nil, "poll")
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.createPoll(ctx, msg.ID, question, clean, multi); err != nil {
+		return nil, err
+	}
+	// Attach the freshly-built poll to the returned message (reuse loadPolls).
+	one := []Message{*msg}
+	if err := s.repo.loadPolls(ctx, one, userID); err == nil {
+		msg = &one[0]
+	}
+	s.fanout(ctx, "chapter", &chapterID, convID, "message", msg)
+	s.pushMessage(ctx, "chapter", &chapterID, convID, msg)
+	return msg, nil
+}
+
+// VotePoll records the caller's vote on a poll message and nudges the chat so
+// every open client refreshes the tallies.
+func (s *Service) VotePoll(ctx context.Context, userID string, messageID, optionID uuid.UUID) error {
+	convID, convType, chapterID, err := s.repo.messageConversation(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	switch convType {
+	case "chapter", "event":
+		if chapterID == nil {
+			return ErrNotFound
+		}
+		if err := s.requireMember(ctx, *chapterID, userID); err != nil {
+			return err
+		}
+	case "direct":
+		ok, err := s.repo.isDirectMember(ctx, convID, userID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrForbidden
+		}
+	}
+	if err := s.repo.votePoll(ctx, messageID, optionID, userID); err != nil {
+		return err
+	}
+	s.fanout(ctx, convType, chapterID, convID, "update", nil)
+	return nil
+}
+
 // RunMessages lists a run's event chat (member-gated via the run's chapter).
 func (s *Service) RunMessages(ctx context.Context, userID string, runID uuid.UUID) ([]Message, error) {
 	chapterID, err := s.repo.RunChapter(ctx, runID)

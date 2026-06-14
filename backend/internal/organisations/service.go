@@ -301,6 +301,11 @@ func (s *Service) Discover(ctx context.Context, city, search string) ([]Discover
 	return s.repo.DiscoverChapters(ctx, strings.TrimSpace(city), strings.TrimSpace(search))
 }
 
+// DiscoverOne returns a single public club's teaser for the public profile page.
+func (s *Service) DiscoverOne(ctx context.Context, id uuid.UUID) (*DiscoverEntry, error) {
+	return s.repo.DiscoverOne(ctx, id)
+}
+
 // Cities lists the cities with public clubs, for the guest city picker.
 func (s *Service) Cities(ctx context.Context) ([]CityCount, error) {
 	return s.repo.Cities(ctx)

@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -238,7 +238,12 @@ export default function Explore() {
             />
           ) : (
             clubs!.map((c) => (
-              <View key={c.id} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12 }]}>
+              <Tap
+                key={c.id}
+                haptic={false}
+                onPress={() => router.push(`/club/public/${c.id}` as Href)}
+                style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12 }]}
+              >
                 <Avatar name={c.name} uri={c.logo} size={48} bg={colors.accent} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }} numberOfLines={1}>{c.name}</Text>
@@ -259,7 +264,7 @@ export default function Explore() {
                     <Text style={{ color: colors.muted, fontWeight: "700", fontSize: 12 }}>Invite only</Text>
                   </View>
                 )}
-              </View>
+              </Tap>
             ))
           )
         ) : challenges!.length === 0 ? (

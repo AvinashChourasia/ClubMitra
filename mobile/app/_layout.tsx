@@ -93,6 +93,8 @@ export default function RootLayout() {
       if (data.type === "chat_message" && data.scope && data.id) {
         // Straight into the conversation the push came from.
         href = data.scope === "chapter" ? `/thread/club/${data.id}` : `/thread/dm/${data.id}`;
+      } else if (data.type === "follow" && data.user_id) {
+        href = `/u/${data.user_id}`; // open the new follower's profile
       } else if (data.run_id) href = `/run/${data.run_id}`;
       else if (data.challenge_id) href = `/challenge/${data.challenge_id}`;
       else if (data.chapter_id) href = `/club/${data.chapter_id}`;

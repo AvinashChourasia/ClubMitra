@@ -98,6 +98,10 @@ type Props = {
   canAnnounce?: boolean;
   announce?: (body: string) => Promise<void>;
   onSenderPress?: (senderId: string, senderName: string) => void;
+  /** Create a poll (admins, club chats). Presence enables the Poll composer. */
+  createPoll?: (input: { question: string; options: string[]; multi: boolean }) => Promise<void>;
+  /** Cast/toggle a poll vote. Presence enables voting on poll bubbles. */
+  voteOnPoll?: (messageId: string, optionId: string) => Promise<void>;
   /** Realtime scope for this conversation (instant delivery + typing). */
   realtime?: { scope: "chapter" | "dm"; id: string };
   getToken?: () => Promise<string | null>;
@@ -106,6 +110,7 @@ type Props = {
 export function ChatThread({
   title, subtitle, avatarName, avatarUri, meId, isGroup, isDirect, otherLastReadAt,
   load, send, uploadImage, uploadFile, deleteMessage, react, edit, canAnnounce, announce, onSenderPress,
+  createPoll, voteOnPoll,
   realtime, getToken,
 }: Props) {
   const router = useRouter();
@@ -140,6 +145,13 @@ export function ChatThread({
   const [showJump, setShowJump] = useState(false);
   const [newBelow, setNewBelow] = useState(0);
   const [typingName, setTypingName] = useState<string | null>(null);
+  // Poll composer + voting state.
+  const [pollOpen, setPollOpen] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState<string[]>(["", ""]);
+  const [pollMulti, setPollMulti] = useState(false);
+  const [pollBusy, setPollBusy] = useState(false);
+  const [votingId, setVotingId] = useState<string | null>(null);
 
   const scrollEnd = (animated: boolean) => setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 50);
 
@@ -308,6 +320,48 @@ export function ChatThread({
   function onTextChange(v: string) {
     setText(v);
     if (realtime && v.length > 0) sendTyping(realtime.scope, realtime.id);
+  }
+
+  // --- polls ---
+  function openPoll() {
+    setAttachMenu(false);
+    setPollQuestion("");
+    setPollOptions(["", ""]);
+    setPollMulti(false);
+    setPollOpen(true);
+  }
+
+  async function submitPoll() {
+    if (!createPoll || pollBusy) return;
+    const question = pollQuestion.trim();
+    const options = pollOptions.map((o) => o.trim()).filter(Boolean);
+    if (!question) return Alert.alert("Add a question", "Polls need a question.");
+    if (options.length < 2) return Alert.alert("Add options", "Give people at least two choices.");
+    setPollBusy(true);
+    try {
+      await createPoll({ question, options, multi: pollMulti });
+      setPollOpen(false);
+      await reload(true);
+    } catch (e) {
+      Alert.alert("Couldn't post poll", e instanceof ApiError ? e.message : "Something went wrong");
+    } finally {
+      setPollBusy(false);
+    }
+  }
+
+  // onVote casts/toggles a vote, then refreshes the tallies (realtime nudges the
+  // other clients to refresh too).
+  async function onVote(messageID: string, optionID: string) {
+    if (!voteOnPoll || votingId) return;
+    setVotingId(messageID);
+    try {
+      await voteOnPoll(messageID, optionID);
+      await reload(false);
+    } catch {
+      /* leave the poll as-is on failure */
+    } finally {
+      setVotingId(null);
+    }
   }
 
   // --- message actions ---
@@ -643,6 +697,46 @@ export function ChatThread({
                           }}
                         >
                           <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: "700", textAlign: "center" }}>{m.body ?? ""}</Text>
+                        </View>
+                      </View>
+                    ) : m.kind === "poll" && m.poll ? (
+                      <View style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "85%", marginTop: showName ? 8 : 4, marginBottom: 2 }}>
+                        {showName && (
+                          <Text style={{ color: colors.accent, fontSize: 12, marginLeft: 10, marginBottom: 2, fontWeight: "700" }}>{m.sender_name}</Text>
+                        )}
+                        <View style={{ backgroundColor: colors.bg, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: colors.border, gap: 9, minWidth: 248 }}>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                            <Ionicons name="stats-chart" size={13} color={colors.primary} />
+                            <Text style={{ color: colors.primary, fontSize: 10.5, fontWeight: "800", letterSpacing: 0.6 }}>POLL{m.poll.multi ? " · PICK MANY" : ""}</Text>
+                          </View>
+                          <Text style={{ color: colors.text, fontSize: 15, fontWeight: "800" }}>{m.poll.question}</Text>
+                          {m.poll.options.map((opt) => {
+                            const total = m.poll!.total_votes || 0;
+                            const pct = total > 0 ? Math.round((opt.votes / total) * 100) : 0;
+                            return (
+                              <Pressable
+                                key={opt.id}
+                                onPress={() => void onVote(m.id, opt.id)}
+                                disabled={!voteOnPoll || votingId === m.id}
+                                style={{ borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: opt.mine ? colors.primary : colors.border }}
+                              >
+                                <View style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, backgroundColor: opt.mine ? colors.primarySoft : colors.bgSecondary }} />
+                                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingHorizontal: 11, paddingVertical: 9 }}>
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+                                    {opt.mine && <Ionicons name="checkmark-circle" size={15} color={colors.primary} />}
+                                    <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: opt.mine ? "800" : "600", flex: 1 }} numberOfLines={2}>{opt.text}</Text>
+                                  </View>
+                                  <Text style={{ color: colors.muted, fontSize: 12, fontWeight: "700" }}>{pct}%</Text>
+                                </View>
+                              </Pressable>
+                            );
+                          })}
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                            <Text style={{ color: colors.subtle, fontSize: 11 }}>
+                              {m.poll.total_votes} {m.poll.total_votes === 1 ? "vote" : "votes"}
+                            </Text>
+                            <Text style={{ color: colors.subtle, fontSize: 11 }}>{timeOf(m.created_at)}</Text>
+                          </View>
                         </View>
                       </View>
                     ) : m.is_announcement ? (
@@ -1065,6 +1159,7 @@ export function ChatThread({
                 { icon: "image" as const, label: "Photos", tint: "#22C55E", onPress: pickLibrary, show: !!uploadImage },
                 { icon: "camera" as const, label: "Camera", tint: "#3B82F6", onPress: pickCamera, show: !!uploadImage },
                 { icon: "document" as const, label: "Document", tint: "#F59E0B", onPress: pickDocument, show: !!uploadFile },
+                { icon: "stats-chart" as const, label: "Poll", tint: "#A855F7", onPress: openPoll, show: !!createPoll },
               ].filter((o) => o.show).map((o) => (
                 <Pressable key={o.label} onPress={o.onPress} style={{ alignItems: "center", gap: 8 }}>
                   <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: o.tint + "22", alignItems: "center", justifyContent: "center" }}>
@@ -1074,6 +1169,58 @@ export function ChatThread({
                 </Pressable>
               ))}
             </View>
+          </View>
+        </View>
+      )}
+
+      {/* Poll composer (admins) */}
+      {pollOpen && (
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
+          <Pressable onPress={() => setPollOpen(false)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
+          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 30, gap: 12 }}>
+            <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 2 }} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={{ fontSize: 17, fontWeight: "800", color: colors.text }}>New poll</Text>
+              <Pressable onPress={() => setPollOpen(false)} hitSlop={8}>
+                <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 15 }}>Cancel</Text>
+              </Pressable>
+            </View>
+            <TextInput
+              style={styles.input}
+              placeholder="Ask a question…"
+              placeholderTextColor={colors.muted}
+              value={pollQuestion}
+              onChangeText={setPollQuestion}
+            />
+            {pollOptions.map((opt, i) => (
+              <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder={`Option ${i + 1}`}
+                  placeholderTextColor={colors.muted}
+                  value={opt}
+                  onChangeText={(v) => setPollOptions((arr) => arr.map((x, j) => (j === i ? v : x)))}
+                />
+                {pollOptions.length > 2 && (
+                  <Pressable onPress={() => setPollOptions((arr) => arr.filter((_, j) => j !== i))} hitSlop={8}>
+                    <Ionicons name="close-circle" size={22} color={colors.muted} />
+                  </Pressable>
+                )}
+              </View>
+            ))}
+            {pollOptions.length < 6 && (
+              <Pressable onPress={() => setPollOptions((arr) => [...arr, ""])} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" }}>
+                <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 14 }}>Add option</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={() => setPollMulti((m) => !m)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Ionicons name={pollMulti ? "checkbox" : "square-outline"} size={20} color={pollMulti ? colors.primary : colors.muted} />
+              <Text style={{ color: colors.muted, fontSize: 14 }}>Allow choosing multiple options</Text>
+            </Pressable>
+            <Pressable onPress={() => void submitPoll()} disabled={pollBusy} style={[styles.button, { borderRadius: 999, opacity: pollBusy ? 0.6 : 1 }]}>
+              <Text style={styles.buttonText}>{pollBusy ? "Posting…" : "Post poll"}</Text>
+            </Pressable>
           </View>
         </View>
       )}

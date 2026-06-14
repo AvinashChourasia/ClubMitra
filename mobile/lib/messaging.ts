@@ -7,13 +7,16 @@ import { request } from "./api";
 export type Reaction = { emoji: string; count: number; mine: boolean };
 export type ReplyRef = { id: string; sender_name: string; preview: string };
 
+export type PollOption = { id: string; text: string; votes: number; mine: boolean };
+export type Poll = { question: string; multi: boolean; total_votes: number; options: PollOption[] };
+
 export type Message = {
   id: string;
   sender_id: string;
   sender_name: string;
-  // "user" = normal message; "badge" = automatic achievement announcement,
-  // rendered as a centered system chip.
-  kind: "user" | "badge";
+  // "user" = normal message; "badge" = automatic achievement chip;
+  // "poll" = a poll the client renders with its options + live tallies.
+  kind: "user" | "badge" | "poll";
   body?: string | null;
   media_url?: string | null;
   media_type?: string | null;
@@ -21,6 +24,7 @@ export type Message = {
   is_pinned: boolean;
   reply_to?: ReplyRef | null;
   reactions?: Reaction[] | null;
+  poll?: Poll | null;
   edited_at?: string | null;
   created_at: string;
 };
@@ -59,6 +63,14 @@ export async function chapterMessages(token: string, chapterId: string) {
 }
 export function postChapter(token: string, chapterId: string, msg: OutMsg) {
   return request<Message>(`/messaging/chapter/${chapterId}`, { method: "POST", body: msg, token });
+}
+
+// --- polls (admin posts in a club chat; anyone in the club votes) ---
+export function createPoll(token: string, chapterId: string, input: { question: string; options: string[]; multi: boolean }) {
+  return request<Message>(`/messaging/chapter/${chapterId}/poll`, { method: "POST", body: input, token });
+}
+export function votePoll(token: string, messageId: string, optionId: string): Promise<void> {
+  return request(`/messaging/messages/${messageId}/vote`, { method: "PUT", body: { option_id: optionId }, token });
 }
 export function announce(token: string, chapterId: string, body: string) {
   return request<Message>(`/messaging/chapter/${chapterId}/announce`, { method: "POST", body: { body }, token });

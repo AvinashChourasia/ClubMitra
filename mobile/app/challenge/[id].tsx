@@ -17,7 +17,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../lib/auth";
@@ -25,6 +25,7 @@ import { ApiError } from "../../lib/api";
 import {
   getChallenge,
   getLeaderboard,
+  getChapterLeaderboard,
   joinChallenge,
   leaveChallenge,
   updateChallenge,
@@ -36,6 +37,7 @@ import {
   daysUntil,
   type Challenge,
   type LeaderboardEntry,
+  type ChapterEntry,
 } from "../../lib/challenges";
 import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
@@ -70,6 +72,8 @@ export default function ChallengeDetail() {
 
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [board, setBoard] = useState<LeaderboardEntry[]>([]);
+  const [chapterBoard, setChapterBoard] = useState<ChapterEntry[]>([]);
+  const [boardMode, setBoardMode] = useState<"runners" | "clubs">("runners");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,7 +83,9 @@ export default function ChallengeDetail() {
     const token = await getAccessToken();
     if (!token) return;
     setChallenge(await getChallenge(token, id));
-    setBoard(await getLeaderboard(token, id));
+    const [individual, chapters] = await Promise.all([getLeaderboard(token, id), getChapterLeaderboard(token, id)]);
+    setBoard(individual);
+    setChapterBoard(chapters);
   }, [getAccessToken, id]);
 
   useFocusEffect(
@@ -268,10 +274,60 @@ export default function ChallengeDetail() {
               </View>
             )}
 
-            {/* ── Leaderboard: 3D podium + the chase pack ──────────── */}
+            {/* ── Leaderboard: runners (3D podium + chase pack) or clubs ─ */}
             <View style={[styles.card, { gap: 4 }]}>
-              <Text style={styles.sectionTitle}>Leaderboard</Text>
-              {board.length === 0 ? (
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <Text style={styles.sectionTitle}>Leaderboard</Text>
+                {chapterBoard.length > 0 && (
+                  <View style={{ flexDirection: "row", backgroundColor: colors.bgSecondary, borderRadius: 999, padding: 3 }}>
+                    {(["runners", "clubs"] as const).map((m) => (
+                      <Pressable
+                        key={m}
+                        onPress={() => setBoardMode(m)}
+                        style={{ paddingHorizontal: 13, paddingVertical: 5, borderRadius: 999, backgroundColor: boardMode === m ? colors.primary : "transparent" }}
+                      >
+                        <Text style={{ color: boardMode === m ? "#fff" : colors.muted, fontWeight: "800", fontSize: 12 }}>{m === "runners" ? "Runners" : "Clubs"}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              {boardMode === "clubs" ? (
+                chapterBoard.length === 0 ? (
+                  <Text style={{ color: colors.muted, marginTop: 8 }}>No clubs competing yet.</Text>
+                ) : (
+                  chapterBoard.map((e, i) => {
+                    const medal = e.rank <= 3 ? ["#FFD700", "#C0C0C0", "#CD7F32"][e.rank - 1] : null;
+                    return (
+                      <Pressable
+                        key={e.chapter_id}
+                        onPress={() => router.push(`/club/${e.chapter_id}` as Href)}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 12,
+                          paddingVertical: 10,
+                          borderBottomWidth: i === chapterBoard.length - 1 ? 0 : 1,
+                          borderBottomColor: colors.border,
+                        }}
+                      >
+                        <View style={{ width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: medal ?? colors.bgSecondary }}>
+                          <Text style={{ color: medal ? "#0B1220" : colors.muted, fontWeight: "800", fontSize: 12 }}>{e.rank}</Text>
+                        </View>
+                        <Avatar name={e.name || "?"} size={34} bg={colors.accent} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: colors.text, fontWeight: "700" }} numberOfLines={1}>{e.name}</Text>
+                          <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={1}>
+                            {e.city} · {e.runners} runner{e.runners === 1 ? "" : "s"}
+                          </Text>
+                        </View>
+                        <Text style={{ color: colors.text, fontWeight: "800" }}>{fmtScore(e.score)}</Text>
+                      </Pressable>
+                    );
+                  })
+                )
+              ) : board.length === 0 ? (
                 <Text style={{ color: colors.muted, marginTop: 8 }}>
                   {phase === "upcoming" ? "The board opens with the first run." : "No progress yet — be the first."}
                 </Text>
@@ -288,8 +344,11 @@ export default function ChallengeDetail() {
                   {board.slice(3).map((e, i, rest) => {
                     const me = e.user_id === user.id;
                     return (
-                      <View
+                      <Pressable
                         key={e.user_id}
+                        onPress={() => {
+                          if (e.user_id !== user.id) router.push(`/u/${e.user_id}` as Href);
+                        }}
                         style={{
                           flexDirection: "row",
                           alignItems: "center",
@@ -309,7 +368,7 @@ export default function ChallengeDetail() {
                           {me ? "You" : e.display_name || "Unknown"}
                         </Text>
                         <Text style={{ color: colors.text, fontWeight: "800" }}>{fmtScore(e.score)}</Text>
-                      </View>
+                      </Pressable>
                     );
                   })}
                 </>

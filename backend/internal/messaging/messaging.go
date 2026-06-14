@@ -56,6 +56,24 @@ type Reaction struct {
 	Mine  bool   `json:"mine"`
 }
 
+// Poll hangs off a kind="poll" message: the question, its options with live
+// tallies, whether multiple choices are allowed, and the distinct voter count.
+type Poll struct {
+	Question   string       `json:"question"`
+	Multi      bool         `json:"multi"`
+	TotalVotes int          `json:"total_votes"` // distinct voters (for % bars)
+	Options    []PollOption `json:"options"`
+}
+
+// PollOption is one choice on a poll, with its vote count and whether the
+// viewer picked it.
+type PollOption struct {
+	ID    string `json:"id"`
+	Text  string `json:"text"`
+	Votes int    `json:"votes"`
+	Mine  bool   `json:"mine"`
+}
+
 // Message is one chat message, joined with the sender's name for display.
 // Kind: "user" = a normal message; "badge" = an automatic achievement
 // announcement the client renders as a centered system chip.
@@ -71,6 +89,7 @@ type Message struct {
 	IsPinned       bool       `json:"is_pinned"`
 	ReplyTo        *ReplyRef  `json:"reply_to,omitempty"`
 	Reactions      []Reaction `json:"reactions,omitempty"`
+	Poll           *Poll      `json:"poll,omitempty"` // set when Kind == "poll"
 	EditedAt       *time.Time `json:"edited_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 }
@@ -192,7 +211,153 @@ func (r *Repository) listMessages(ctx context.Context, conversationID uuid.UUID,
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.loadPolls(ctx, out, viewerID); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// createPoll writes a poll + its options for a freshly-posted poll message.
+func (r *Repository) createPoll(ctx context.Context, messageID uuid.UUID, question string, options []string, multi bool) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `INSERT INTO polls (message_id, question, multi) VALUES ($1, $2, $3)`, messageID, question, multi); err != nil {
+		return err
+	}
+	for i, opt := range options {
+		if _, err := tx.Exec(ctx, `INSERT INTO poll_options (message_id, idx, text) VALUES ($1, $2, $3)`, messageID, i, opt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// loadPolls attaches poll data (options, live tallies, the viewer's picks) to
+// every kind="poll" message in msgs, in place. One query for polls, one for
+// options — no N+1.
+func (r *Repository) loadPolls(ctx context.Context, msgs []Message, viewerID string) error {
+	ids := make([]uuid.UUID, 0)
+	at := make(map[uuid.UUID]int)
+	for i := range msgs {
+		if msgs[i].Kind == "poll" {
+			ids = append(ids, msgs[i].ID)
+			at[msgs[i].ID] = i
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// Poll headers + distinct voter counts.
+	prows, err := r.db.Query(ctx, `
+		SELECT p.message_id, p.question, p.multi,
+		       (SELECT count(DISTINCT v.user_id) FROM poll_votes v WHERE v.message_id = p.message_id)::int
+		FROM polls p WHERE p.message_id = ANY($1)`, ids)
+	if err != nil {
+		return err
+	}
+	polls := make(map[uuid.UUID]*Poll)
+	for prows.Next() {
+		var mid uuid.UUID
+		var p Poll
+		if err := prows.Scan(&mid, &p.Question, &p.Multi, &p.TotalVotes); err != nil {
+			prows.Close()
+			return err
+		}
+		p.Options = []PollOption{}
+		polls[mid] = &p
+	}
+	prows.Close()
+	if err := prows.Err(); err != nil {
+		return err
+	}
+
+	// Options with per-option counts + whether the viewer chose them.
+	orows, err := r.db.Query(ctx, `
+		SELECT po.message_id, po.id::text, po.text,
+		       (SELECT count(*) FROM poll_votes v WHERE v.option_id = po.id)::int,
+		       EXISTS (SELECT 1 FROM poll_votes v WHERE v.option_id = po.id AND v.user_id = $2)
+		FROM poll_options po
+		WHERE po.message_id = ANY($1)
+		ORDER BY po.message_id, po.idx`, ids, viewerID)
+	if err != nil {
+		return err
+	}
+	defer orows.Close()
+	for orows.Next() {
+		var mid uuid.UUID
+		var o PollOption
+		if err := orows.Scan(&mid, &o.ID, &o.Text, &o.Votes, &o.Mine); err != nil {
+			return err
+		}
+		if p := polls[mid]; p != nil {
+			p.Options = append(p.Options, o)
+		}
+	}
+	if err := orows.Err(); err != nil {
+		return err
+	}
+
+	for mid, p := range polls {
+		msgs[at[mid]].Poll = p
+	}
+	return nil
+}
+
+// votePoll records the caller's vote. Single-choice polls keep one option per
+// voter (re-tapping the same option clears it; a different option replaces it);
+// multi-choice polls toggle each option independently.
+func (r *Repository) votePoll(ctx context.Context, messageID, optionID uuid.UUID, userID string) error {
+	var multi bool
+	err := r.db.QueryRow(ctx, `
+		SELECT p.multi FROM polls p
+		JOIN poll_options po ON po.message_id = p.message_id
+		WHERE p.message_id = $1 AND po.id = $2`, messageID, optionID).Scan(&multi)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ValidationError{Msg: "poll option not found"}
+	}
+	if err != nil {
+		return err
+	}
+
+	if multi {
+		tag, err := r.db.Exec(ctx, `DELETE FROM poll_votes WHERE option_id = $1 AND user_id = $2`, optionID, userID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() > 0 {
+			return nil // toggled off
+		}
+		_, err = r.db.Exec(ctx, `INSERT INTO poll_votes (option_id, message_id, user_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, optionID, messageID, userID)
+		return err
+	}
+
+	// Single-choice: clear the voter's prior pick, then set the new one unless
+	// they tapped the option they already had (toggle off).
+	var had bool
+	if err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM poll_votes WHERE option_id = $1 AND user_id = $2)`, optionID, userID).Scan(&had); err != nil {
+		return err
+	}
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM poll_votes WHERE message_id = $1 AND user_id = $2`, messageID, userID); err != nil {
+		return err
+	}
+	if !had {
+		if _, err := tx.Exec(ctx, `INSERT INTO poll_votes (option_id, message_id, user_id) VALUES ($1, $2, $3)`, optionID, messageID, userID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func deref(s *string) string {
