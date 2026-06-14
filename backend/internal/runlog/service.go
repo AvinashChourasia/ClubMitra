@@ -73,6 +73,53 @@ func (s *Service) Leaderboard(ctx context.Context, chapterID uuid.UUID, period s
 	return s.repo.Board(ctx, chapterID, from, to)
 }
 
+// ClubStanding computes a chapter's club-level XP/level (from all-time logged
+// distance) and this week's Member of the Week (the top of the weekly board,
+// using the same Monday-start IST week as the rolling leaderboard).
+func (s *Service) ClubStanding(ctx context.Context, chapterID uuid.UUID) (*ClubStanding, error) {
+	km, runs, err := s.repo.ChapterTotals(ctx, chapterID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	xp := int(km)*10 + runs*5
+	st := &ClubStanding{XP: xp, TotalKM: km, TotalRuns: runs}
+	st.Level, st.LevelTitle, st.NextAt, st.NextTitle, st.Progress = clubLevel(xp)
+
+	from, to, _ := periodRange("weekly", time.Now())
+	board, err := s.repo.Board(ctx, chapterID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	if len(board) > 0 {
+		mow := board[0]
+		st.MemberOfWeek = &mow
+	}
+	st.WeekRunners = len(board)
+	if wkm, _, err := s.repo.ChapterTotals(ctx, chapterID, from, to); err == nil {
+		st.WeekKM = wkm
+	}
+	return st, nil
+}
+
+// clubLevel maps club XP to its level on the ClubLevels ladder + progress to next.
+func clubLevel(xp int) (idx int, title string, nextAt *int, nextTitle *string, progress float64) {
+	for i, l := range ClubLevels {
+		if xp >= l.At {
+			idx = i
+		}
+	}
+	title = ClubLevels[idx].Title
+	progress = 1
+	if idx < len(ClubLevels)-1 {
+		next := ClubLevels[idx+1]
+		nextAt, nextTitle = &next.At, &next.Title
+		if span := float64(next.At - ClubLevels[idx].At); span > 0 {
+			progress = float64(xp-ClubLevels[idx].At) / span
+		}
+	}
+	return
+}
+
 // CreditActivity credits a recorded GPS run to the runner's active clubs'
 // leaderboards. Distance comes in meters; the run's date is taken in IST.
 // Best-effort from the activities hook — callers log and swallow the error.

@@ -354,6 +354,19 @@ func (s *Service) Evaluate(ctx context.Context, userID string) (*Profile, error)
 		}
 	}
 
+	li := levelInfo(xp)
+
+	var announce bool
+	if err := s.db.QueryRow(ctx, `SELECT announce_badges FROM users WHERE id = $1`, userID).Scan(&announce); err != nil {
+		return nil, err
+	}
+
+	return &Profile{XP: xp, Level: li, Badges: statuses, New: fresh, AnnounceBadges: announce}, nil
+}
+
+// levelInfo maps an XP total to the current level + progress toward the next
+// (1.0 once at the top level). Shared by Evaluate and the read-only Snapshot.
+func levelInfo(xp int) LevelInfo {
 	li := LevelInfo{Index: levelOf(xp), Progress: 1}
 	li.Title = Levels[li.Index].Title
 	if li.Index < len(Levels)-1 {
@@ -362,13 +375,40 @@ func (s *Service) Evaluate(ctx context.Context, userID string) (*Profile, error)
 		span := float64(next.At - Levels[li.Index].At)
 		li.Progress = float64(xp-Levels[li.Index].At) / span
 	}
+	return li
+}
 
-	var announce bool
-	if err := s.db.QueryRow(ctx, `SELECT announce_badges FROM users WHERE id = $1`, userID).Scan(&announce); err != nil {
-		return nil, err
+// Snapshot is a READ-ONLY view of a user's XP, level, and earned-badge count.
+// Unlike Evaluate it never awards or announces, so it's safe to call when
+// VIEWING another runner's public profile (no surprise pushes to that runner).
+func (s *Service) Snapshot(ctx context.Context, userID string) (xp int, level LevelInfo, earnedBadges int, err error) {
+	m, err := s.computeMetrics(ctx, userID)
+	if err != nil {
+		return 0, LevelInfo{}, 0, err
 	}
-
-	return &Profile{XP: xp, Level: li, Badges: statuses, New: fresh, AnnounceBadges: announce}, nil
+	earned := map[string]bool{}
+	rows, err := s.db.Query(ctx, `SELECT badge_id FROM user_badges WHERE user_id = $1`, userID)
+	if err != nil {
+		return 0, LevelInfo{}, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, LevelInfo{}, 0, err
+		}
+		earned[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return 0, LevelInfo{}, 0, err
+	}
+	xp = int(m.totalKM*10) + m.dayCount*25 + m.chDone*150 + m.attendance*50
+	for _, b := range Catalog {
+		if earned[b.ID] {
+			xp += b.XP
+		}
+	}
+	return xp, levelInfo(xp), len(earned), nil
 }
 
 // OnRun is the activities hook: after a run saves, award anything newly earned,

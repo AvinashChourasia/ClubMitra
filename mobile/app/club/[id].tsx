@@ -5,7 +5,7 @@
 
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, ImageBackground, Pressable, RefreshControl, ScrollView, Share, Text, View } from "react-native";
-import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 
@@ -33,7 +33,7 @@ import {
   challengeTarget,
   type Challenge,
 } from "../../lib/challenges";
-import { leaderboard, type BoardEntry, type Period } from "../../lib/runlog";
+import { leaderboard, clubStanding, type BoardEntry, type ClubStanding, type Period } from "../../lib/runlog";
 import { chapterFeed, type FeedItem } from "../../lib/activities";
 import { formatDistance, formatPace } from "../../lib/format";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
@@ -134,8 +134,10 @@ function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId
     ["monthly", "Month"],
     ["alltime", "All-time"],
   ];
+  const router = useRouter();
   const [period, setPeriod] = useState<Period>("weekly");
   const [entries, setEntries] = useState<BoardEntry[] | null>(null);
+  const [standing, setStanding] = useState<ClubStanding | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -152,8 +154,78 @@ function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId
     }, [getToken, chapterId, period])
   );
 
+  // Club standing (XP/level + Member of the Week) is period-independent — fetch
+  // once per focus.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        const token = await getToken();
+        if (!token) return;
+        try {
+          const s = await clubStanding(token, chapterId);
+          if (active) setStanding(s);
+        } catch {
+          /* leave whatever we had */
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }, [getToken, chapterId])
+  );
+
+  const mow = standing?.member_of_week;
+
   return (
     <View style={{ gap: 12 }}>
+      {/* Club standing — collective level + this week's standout runner */}
+      {standing && (
+        <View style={[styles.card, { gap: 12 }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="ribbon" size={24} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16 }}>{standing.level_title}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>
+                {standing.xp.toLocaleString()} club XP · {Math.round(standing.total_km).toLocaleString()} km all-time
+              </Text>
+            </View>
+          </View>
+
+          {standing.next_title && standing.next_at != null ? (
+            <View style={{ gap: 5 }}>
+              <View style={{ height: 8, borderRadius: 4, backgroundColor: colors.divider, overflow: "hidden" }}>
+                <View style={{ width: `${Math.round(Math.max(0, Math.min(1, standing.progress)) * 100)}%`, height: "100%", backgroundColor: colors.primary }} />
+              </View>
+              <Text style={{ color: colors.subtle, fontSize: 11 }}>
+                {(standing.next_at - standing.xp).toLocaleString()} XP to {standing.next_title}
+              </Text>
+            </View>
+          ) : (
+            <Text style={{ color: colors.success, fontSize: 12, fontWeight: "700" }}>Top club level reached 🏆</Text>
+          )}
+
+          {mow ? (
+            <Pressable
+              onPress={() => router.push(`/u/${mow.user_id}` as Href)}
+              style={{ flexDirection: "row", alignItems: "center", gap: 11, backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 11 }}
+            >
+              <Avatar name={mow.display_name} size={42} bg={colors.warning} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.warning, fontWeight: "800", fontSize: 10.5, letterSpacing: 0.5 }}>⭐ MEMBER OF THE WEEK</Text>
+                <Text style={{ color: colors.text, fontWeight: "800", fontSize: 14.5 }} numberOfLines={1}>{mow.display_name}</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  {mow.km.toFixed(1)} km · {mow.runs} run{mow.runs === 1 ? "" : "s"} this week
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.subtle} />
+            </Pressable>
+          ) : null}
+        </View>
+      )}
+
       <View style={{ flexDirection: "row", backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 3 }}>
         {PERIODS.map(([key, label]) => (
           <Pressable
@@ -179,8 +251,11 @@ function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId
             const me = e.user_id === meId;
             const medal = e.rank <= 3 ? MEDAL[e.rank - 1] : null;
             return (
-              <View
+              <Pressable
                 key={e.user_id}
+                onPress={() => {
+                  if (!me) router.push(`/u/${e.user_id}` as Href);
+                }}
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
@@ -207,7 +282,7 @@ function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId
                 <Text style={{ color: colors.text, fontWeight: "800" }}>
                   {e.km.toFixed(1)} <Text style={{ color: colors.muted, fontWeight: "600", fontSize: 12 }}>km</Text>
                 </Text>
-              </View>
+              </Pressable>
             );
           })
         )}

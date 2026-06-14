@@ -340,7 +340,7 @@ clubmitra/
 
 ---
 
-### Phase 4 — GPS Tracking + Race Calendar `(Month 4)`
+### Phase 4 — GPS Tracking + Race Calendar `(Month 4)` ✅ COMPLETE
 
 - [x] GPS run recording: live route, distance, pace, elevation
 - [x] Offline run recording with auto-sync
@@ -365,9 +365,8 @@ clubmitra/
 - [x] Background GPS (requires EAS dev build)
 - [x] City leaderboard: all verified runners in a city ranked collectively
 - [x] Race calendar: LIVE-fed from MarathonMitra's official public events API (api.marathonmitra.com — paginated background sync, upsert by slug); banner-image cards with distance chips + organizer, city & distance filters; cards tap through to the MarathonMitra event page; "I'm going", add to phone/Google calendar
-- [x] Race calendar map view — interactive map, one pin per city (count badge), tap a pin → that city's races; reflects the active filters; honours the searchable city picker
+- [x] Race calendar map view — interactive map, one labelled flag per race (fanned out within its city so each separates as you zoom), tap a flag → its MarathonMitra event page; reflects the active filters & searchable city picker
 - [x] Similar races list / race recommendations — "Recommended for you" strip on the calendar, scored by your city + the distances you save (excludes already-saved)
-- [ ] Calendar embed widget for club websites *(web deliverable — out of scope for the mobile app)*
 
 ---
 
@@ -404,8 +403,8 @@ clubmitra/
 - [x] Public explore: discover clubs and challenges by city and sport — `app/explore.tsx` + `lib/discover.ts` + backend `/public` routes (guest-browsable, auth gate fires only on join)
 - [ ] Club public profile page (discoverability for non-members)
 - [ ] Global club directory (searchable)
-- [ ] Follow individual runners
-- [ ] Club XP + club levels + Member of the Week (gamification layer 2)
+- [x] Follow individual runners — public runner profile (identity, gamification level, run + social stats), Follow/Following with optimistic toggle + follow push, followers/following lists; reached from chat sender taps (`internal/social`, `app/u/[id]`) *(needs migration 00034 applied)*
+- [x] Club XP + club levels + Member of the Week — chapter-level XP/level from all-time logged distance (6-tier ladder) + this week's top runner, on the club Leaderboard tab; ranked rows + MoW tap through to runner profiles (`runlog.ClubStanding`)
 - [ ] Org-wide challenge leaderboard (all chapters compete)
 - [ ] Push notifications full suite — rank changes, milestone alerts, re-engagement
 - [ ] Polls: admin creates quick polls for club members
@@ -677,7 +676,7 @@ PLATFORM_CUT_PCT=10
 | 1 | Club core — members, attendance, challenges | Month 1 ✅ |
 | 2 | Rolling leaderboards, analytics, inventory, messaging | Month 2 ✅ |
 | 3 | Payments (Razorpay + Stripe), GPX, desktop admin, paid inventory | Month 3 |
-| 4 | GPS tracking, interactive maps, race calendar, city leaderboard | Month 4 🚧 |
+| 4 | GPS tracking, interactive maps, race calendar, city leaderboard | Month 4 ✅ |
 | 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 |
 | 6+ | Europe launch, leagues, coaches, physical events, white-label | Month 7+ |
 

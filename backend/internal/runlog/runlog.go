@@ -44,6 +44,36 @@ type BoardEntry struct {
 	Runs        int     `json:"runs"`
 }
 
+// ClubStanding is a chapter's club-level gamification: an XP/level derived from
+// all its logged distance, plus this week's standout runner (Member of the Week).
+type ClubStanding struct {
+	XP           int         `json:"xp"`
+	Level        int         `json:"level"`
+	LevelTitle   string      `json:"level_title"`
+	NextAt       *int        `json:"next_at,omitempty"`
+	NextTitle    *string     `json:"next_title,omitempty"`
+	Progress     float64     `json:"progress"` // 0..1 toward the next level (1 at top)
+	TotalKM      float64     `json:"total_km"`
+	TotalRuns    int         `json:"total_runs"`
+	WeekKM       float64     `json:"week_km"`
+	WeekRunners  int         `json:"week_runners"`
+	MemberOfWeek *BoardEntry `json:"member_of_week,omitempty"`
+}
+
+// ClubLevels is the club-level ladder. Club XP = cumulative km×10 + runs×5, so
+// titles celebrate the club's collective mileage, not any one runner.
+var ClubLevels = []struct {
+	At    int
+	Title string
+}{
+	{0, "New Club"},
+	{2000, "Active Club"},
+	{10000, "Thriving Club"},
+	{30000, "Powerhouse"},
+	{75000, "Elite Club"},
+	{150000, "Legendary Club"},
+}
+
 // Repository is the run_logs data access.
 type Repository struct{ db *pgxpool.Pool }
 
@@ -151,4 +181,18 @@ func (r *Repository) Board(ctx context.Context, chapterID uuid.UUID, from, to *s
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ChapterTotals sums logged distance + run count for a chapter over an optional
+// date window (both nil = all-time). Powers the club XP and weekly totals. No
+// membership-status filter: club XP counts everything the club has ever logged.
+func (r *Repository) ChapterTotals(ctx context.Context, chapterID uuid.UUID, from, to *string) (km float64, runs int, err error) {
+	const q = `
+		SELECT COALESCE(SUM(distance_km), 0)::float8, COUNT(*)::int
+		FROM run_logs
+		WHERE chapter_id = $1 AND deleted_at IS NULL
+		  AND ($2::date IS NULL OR ran_on >= $2::date)
+		  AND ($3::date IS NULL OR ran_on <= $3::date)`
+	err = r.db.QueryRow(ctx, q, chapterID, from, to).Scan(&km, &runs)
+	return
 }

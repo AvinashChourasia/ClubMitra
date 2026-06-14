@@ -22,7 +22,27 @@ func (h *Handler) Routes() http.Handler {
 	r.Post("/", h.log)
 	r.Get("/mine", h.mine)
 	r.Get("/leaderboard/{chapterID}/{period}", h.leaderboard)
+	r.Get("/club/{chapterID}", h.clubStanding)
 	return r
+}
+
+// clubStanding returns a chapter's club-level XP/level + Member of the Week.
+func (h *Handler) clubStanding(w http.ResponseWriter, r *http.Request) {
+	if _, ok := httpx.UserIDFromContext(r.Context()); !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	chapterID, err := uuid.Parse(chi.URLParam(r, "chapterID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid chapter id")
+		return
+	}
+	st, err := h.svc.ClubStanding(r.Context(), chapterID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, st)
 }
 
 type logRequest struct {

@@ -2,7 +2,7 @@
 // can post announcements. Tapping someone's name opens a direct chat with them.
 
 import { useCallback, useEffect, useState } from "react";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 
 import { useAuth } from "../../../lib/auth";
 import { getChapter, myChapters, isChapterAdmin } from "../../../lib/clubs";
@@ -99,7 +99,7 @@ export default function ClubGroupChat() {
       canAnnounce={isAdmin}
       announce={announce}
       onSenderPress={(senderId) => {
-        if (senderId !== user?.id) router.push(`/thread/dm/${senderId}`);
+        if (senderId !== user?.id) router.push(`/u/${senderId}` as Href);
       }}
     />
   );

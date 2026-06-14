@@ -38,6 +38,7 @@ import (
 	"github.com/avinash/clubmitra/backend/internal/races"
 	"github.com/avinash/clubmitra/backend/internal/realtime"
 	"github.com/avinash/clubmitra/backend/internal/runlog"
+	"github.com/avinash/clubmitra/backend/internal/social"
 	"github.com/avinash/clubmitra/backend/internal/uploads"
 	"github.com/avinash/clubmitra/backend/internal/users"
 )
@@ -141,6 +142,11 @@ func main() {
 	gamSvc := gamification.NewService(pool, userRepo, notifier, messagingSvc)
 	gamHandler := gamification.NewHandler(gamSvc)
 
+	// Social graph: follow other runners + public runner profiles. Pulls a
+	// read-only level snapshot from gamification and run stats from activities;
+	// a new follow pings the followee.
+	socialHandler := social.NewHandler(social.NewRepository(pool), gamSvc, notifier)
+
 	// Realtime: the websocket hub delivers new messages + typing instantly;
 	// clients keep a slow poll as fallback. Auth = the same access token, passed
 	// as ?token= (websockets can't carry our Authorization header reliably).
@@ -162,7 +168,7 @@ func main() {
 	// 4. Build the HTTP server around the router.
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, runlogHandler, analyticsHandler, inventoryHandler, messagingHandler, racesHandler, gamHandler, hub, tokenMgr),
+		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, runlogHandler, analyticsHandler, inventoryHandler, messagingHandler, racesHandler, gamHandler, socialHandler, hub, tokenMgr),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -192,7 +198,7 @@ func main() {
 }
 
 // newRouter builds the middleware stack and mounts all routes.
-func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, runlogHandler *runlog.Handler, analyticsHandler *analytics.Handler, inventoryHandler *inventory.Handler, messagingHandler *messaging.Handler, racesHandler *races.Handler, gamHandler *gamification.Handler, hub *realtime.Hub, tokenMgr *auth.TokenManager) http.Handler {
+func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, runlogHandler *runlog.Handler, analyticsHandler *analytics.Handler, inventoryHandler *inventory.Handler, messagingHandler *messaging.Handler, racesHandler *races.Handler, gamHandler *gamification.Handler, socialHandler *social.Handler, hub *realtime.Hub, tokenMgr *auth.TokenManager) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID) // tag each request with a unique id
@@ -233,6 +239,7 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 			r.Mount("/messaging", messagingHandler.Routes())
 			r.Mount("/races", racesHandler.Routes())
 			r.Mount("/gamification", gamHandler.Routes())
+			r.Mount("/social", socialHandler.Routes())
 			// Club core declares its own /organisations and /chapters subtrees,
 			// so it mounts at the group root rather than under a single prefix.
 			r.Mount("/", orgHandler.Routes())
