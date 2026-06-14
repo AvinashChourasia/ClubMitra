@@ -46,12 +46,27 @@ export const CHALLENGE_TYPES: { key: ChallengeType; label: string }[] = [
   { key: "streak", label: "Streak" },
 ];
 
+// Scope options offered when creating a challenge. The flat club model offers
+// Public / Club / City — "chapter" is the club scope; the legacy "org" scope is
+// no longer offered (existing org challenges still display as "Club").
 export const VISIBILITIES: { key: Visibility; label: string }[] = [
   { key: "public", label: "Public" },
-  { key: "chapter", label: "Chapter" },
+  { key: "chapter", label: "Club" },
   { key: "city", label: "City" },
-  { key: "org", label: "Org-wide" },
 ];
+
+// visibilityLabel renders a challenge's scope for users in the flat club model.
+export function visibilityLabel(v: Visibility, city?: string | null): string {
+  switch (v) {
+    case "city":
+      return city || "City";
+    case "chapter":
+    case "org": // legacy org-wide reads as club-wide now
+      return "Club";
+    default:
+      return "Public";
+  }
+}
 
 // --- progress helpers (distance is km; days/streak are day counts) ---
 export function challengeUnit(c: Challenge): "km" | "days" {

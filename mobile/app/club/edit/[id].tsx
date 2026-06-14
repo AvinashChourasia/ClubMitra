@@ -1,4 +1,4 @@
-// Edit a club (chapter): name, city, description, visibility. Admin-only — the
+// Edit a club: name, city, description, visibility. Admin-only — the
 // backend gates the PUT, and we only link here from the detail screen when the
 // caller is an admin.
 

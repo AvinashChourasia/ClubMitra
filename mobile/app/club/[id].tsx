@@ -1,7 +1,7 @@
-// Club (chapter) detail. Header + invite code, then three tabs: Members
-// (default), Run schedule (7-day list + calendar), and Challenges scoped to this
-// club/org. Admins manage members, schedule runs, edit the club; the owner can
-// promote members and soft-delete the club. Role comes from /chapters/mine.
+// Club detail. Header + invite code, then three tabs: Members (default), Run
+// schedule (7-day list + calendar), and Challenges scoped to this club. Admins
+// manage members, schedule runs, edit the club; the owner can promote members
+// and soft-delete the club.
 
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, ImageBackground, Pressable, RefreshControl, ScrollView, Share, Text, View } from "react-native";
@@ -453,7 +453,7 @@ export default function ClubDetail() {
     ];
     if (isOwner) {
       buttons.push(
-        { text: "Make chapter admin", onPress: () => withToken((t) => assignRole(t, chapter.org_id, m.user_id, "chapter_admin", id)) },
+        { text: "Make admin", onPress: () => withToken((t) => assignRole(t, chapter.org_id, m.user_id, "chapter_admin", id)) },
         { text: "Make co-admin", onPress: () => withToken((t) => assignRole(t, chapter.org_id, m.user_id, "co_admin", id)) }
       );
     }

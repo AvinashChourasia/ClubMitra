@@ -1,4 +1,4 @@
-// Clubs tab: the chapters you belong to or run. Open a club, join one with an
+// Clubs tab: the clubs you belong to or run. Open a club, join one with an
 // invite code, or create your own.
 
 import { useCallback, useState } from "react";
@@ -9,7 +9,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
-import { myChapters, isChapterAdmin, type MyChapter } from "../../lib/clubs";
+import { myChapters, isChapterAdmin, roleLabel, type MyChapter } from "../../lib/clubs";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 import { Avatar } from "../../components/Avatar";
 import { Tap } from "../../components/Tap";
@@ -107,7 +107,7 @@ export default function Clubs() {
                   <Text style={{ color: colors.muted, fontSize: 13 }}>📍 {c.city}</Text>
                 </View>
                 {isChapterAdmin(c.role) ? (
-                  <Badge text={(c.role ?? "").replace("_", " ")} tone="admin" />
+                  <Badge text={roleLabel(c.role)} tone="admin" />
                 ) : c.status ? (
                   <Badge text={c.status} tone="member" />
                 ) : null}

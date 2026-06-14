@@ -63,7 +63,7 @@ func NewService(repo *Repository, notify notifier) *Service {
 func (s *Service) CreateOrg(ctx context.Context, name, description, creatorID string) (*Organisation, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, ValidationError{Msg: "organisation name is required"}
+		return nil, ValidationError{Msg: "club name is required"}
 	}
 	return s.repo.CreateOrg(ctx, name, strings.TrimSpace(description), creatorID)
 }
@@ -88,7 +88,7 @@ var selfServiceStatuses = map[string]bool{"active": true, "on_leave": true}
 func (s *Service) UpdateOrg(ctx context.Context, id uuid.UUID, name, description string) (*Organisation, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, ValidationError{Msg: "organisation name is required"}
+		return nil, ValidationError{Msg: "club name is required"}
 	}
 	return s.repo.UpdateOrg(ctx, id, name, strings.TrimSpace(description))
 }
@@ -127,7 +127,7 @@ func (s *Service) UpdateChapter(ctx context.Context, id uuid.UUID, name, city, d
 	name = strings.TrimSpace(name)
 	city = strings.TrimSpace(city)
 	if name == "" {
-		return nil, ValidationError{Msg: "chapter name is required"}
+		return nil, ValidationError{Msg: "club name is required"}
 	}
 	if city == "" {
 		return nil, ValidationError{Msg: "city is required"}
@@ -181,7 +181,7 @@ func (s *Service) CreateChapter(ctx context.Context, orgID uuid.UUID, name, city
 	name = strings.TrimSpace(name)
 	city = strings.TrimSpace(city)
 	if name == "" {
-		return nil, ValidationError{Msg: "chapter name is required"}
+		return nil, ValidationError{Msg: "club name is required"}
 	}
 	if city == "" {
 		return nil, ValidationError{Msg: "city is required"}

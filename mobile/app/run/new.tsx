@@ -1,4 +1,4 @@
-// Schedule a run for a chapter (admins only). Supports one-time and recurring
+// Schedule a run for a club (admins only). Supports one-time and recurring
 // schedules (weekdays / weekends / alternate / custom days) over a date range,
 // with an optional time. The client expands the recurrence into concrete
 // occurrences and creates them all in one call.

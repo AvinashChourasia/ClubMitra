@@ -93,7 +93,7 @@ func (s *Service) Create(ctx context.Context, c NewChallenge) (*Challenge, error
 		}
 	case VisibilityChapter:
 		if c.ChapterID == nil {
-			return nil, ValidationError{Msg: "chapter_id is required for a chapter-visibility challenge"}
+			return nil, ValidationError{Msg: "pick a club for a club challenge"}
 		}
 	case VisibilityOrg:
 		if c.OrgID == nil {

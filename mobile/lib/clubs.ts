@@ -147,7 +147,22 @@ export function assignRole(token: string, orgId: string, userId: string, role: s
   });
 }
 
-// Is this role one that can manage a chapter (see invite code, add members)?
+// Is this role one that can manage the club (see invite code, add members)?
 export function isChapterAdmin(role?: string | null): boolean {
   return role === "org_admin" || role === "chapter_admin" || role === "co_admin";
+}
+
+// roleLabel renders a backend role for the flat one-club model: the org creator
+// reads as the Owner; the others are admins. Members get no badge ("").
+export function roleLabel(role?: string | null): string {
+  switch (role) {
+    case "org_admin":
+      return "Owner";
+    case "chapter_admin":
+      return "Admin";
+    case "co_admin":
+      return "Co-admin";
+    default:
+      return "";
+  }
 }

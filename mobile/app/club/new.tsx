@@ -1,7 +1,7 @@
-// Create a club. A club is an organisation with at least one city chapter, so
-// this single screen creates the org and its first chapter together — the
-// creator becomes its org admin. They land on the new chapter (with its invite
-// code to share).
+// Create a club. One club, one name — the user gives a single club name and
+// city, and we land them on the new club with its invite code to share.
+// (Under the hood this still creates the org + its one chapter, sharing the
+// same name, but that's invisible: the experience is a single flat club.)
 
 import { useState } from "react";
 import {
@@ -31,8 +31,7 @@ export default function NewClub() {
   const { getAccessToken } = useAuth();
   const router = useRouter();
 
-  const [orgName, setOrgName] = useState("");
-  const [chapterName, setChapterName] = useState("");
+  const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [description, setDescription] = useState("");
   const [logo, setLogo] = useState<string | null>(null);
@@ -43,18 +42,18 @@ export default function NewClub() {
 
   async function onSubmit() {
     setError(null);
-    if (!orgName.trim()) return setError("Enter the organisation name.");
-    if (!chapterName.trim()) return setError("Enter the chapter name.");
+    if (!name.trim()) return setError("Enter the club name.");
     if (!city.trim()) return setError("Enter the city.");
 
     setSubmitting(true);
     try {
       const token = await getAccessToken();
-      // Upload freshly-picked images first; persist the hosted URLs on the chapter.
+      // Upload freshly-picked images first; persist the hosted URLs on the club.
       const logoUrl = logo && !isRemote(logo) ? await uploadClubImage(token!, logo) : logo ?? undefined;
       const bannerUrl = banner && !isRemote(banner) ? await uploadClubImage(token!, banner) : banner ?? undefined;
-      const org = await createOrg(token!, orgName.trim(), description.trim());
-      const chapter = await createChapter(token!, org.id, chapterName.trim(), city.trim(), description.trim(), {
+      // One name for the whole club (the org + its single chapter share it).
+      const org = await createOrg(token!, name.trim(), description.trim());
+      const chapter = await createChapter(token!, org.id, name.trim(), city.trim(), description.trim(), {
         ...feeSettings(fee),
         logo: logoUrl,
         banner: bannerUrl,
@@ -72,18 +71,15 @@ export default function NewClub() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Create a club</Text>
-          <Text style={styles.subtitle}>You&apos;ll be its admin. Add a city chapter to start.</Text>
+          <Text style={styles.subtitle}>You&apos;ll be its admin. Name it and pick your city to start.</Text>
 
           <PhotoPicker uri={logo} onChange={setLogo} label="Add club logo" />
 
           <Text style={styles.fieldLabel}>Banner (optional)</Text>
           <PhotoPicker uri={banner} onChange={setBanner} label="Add club banner" shape="banner" size={120} />
 
-          <Text style={styles.fieldLabel}>Organisation name</Text>
-          <TextInput style={styles.input} placeholder="e.g. XYZ Running Academy" placeholderTextColor={colors.muted} value={orgName} onChangeText={setOrgName} />
-
-          <Text style={styles.fieldLabel}>Chapter name</Text>
-          <TextInput style={styles.input} placeholder="e.g. Bangalore Runners" placeholderTextColor={colors.muted} value={chapterName} onChangeText={setChapterName} />
+          <Text style={styles.fieldLabel}>Club name</Text>
+          <TextInput style={styles.input} placeholder="e.g. Bangalore Runners" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />
 
           <Text style={styles.fieldLabel}>City</Text>
           <CityPicker value={city || null} onChange={setCity} placeholder="Select city" />

@@ -36,6 +36,7 @@ import {
   challengePhase,
   daysUntil,
   type Challenge,
+  visibilityLabel,
   type LeaderboardEntry,
   type ChapterEntry,
 } from "../../lib/challenges";
@@ -200,7 +201,7 @@ export default function ChallengeDetail() {
               </View>
               <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                 <HeroChip text={t.label} />
-                <HeroChip text={challenge.visibility === "city" && challenge.city ? challenge.city : challenge.visibility} />
+                <HeroChip text={visibilityLabel(challenge.visibility, challenge.city)} />
                 {phase === "live" ? (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.95)", borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 }}>
                     <LiveDot color={t.tint} size={6} />

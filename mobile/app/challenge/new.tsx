@@ -70,7 +70,7 @@ export default function NewChallenge() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Chapters the user can scope a challenge to (those they administer).
+  // Clubs the user can scope a challenge to (those they administer).
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -93,7 +93,7 @@ export default function NewChallenge() {
 
   const endDate = addDays(startDate, Number(length));
   const unit = type === "distance" ? "km" : "days";
-  const needsChapter = visibility === "chapter" || visibility === "org";
+  const needsChapter = visibility === "chapter";
   const selectedChapter = useMemo(() => adminChapters.find((c) => c.id === chapterId), [adminChapters, chapterId]);
 
   async function onSubmit() {
@@ -116,7 +116,6 @@ export default function NewChallenge() {
         visibility,
         city: visibility === "city" ? city.trim() : undefined,
         chapter_id: visibility === "chapter" ? selectedChapter!.id : undefined,
-        org_id: visibility === "org" ? selectedChapter!.org_id : undefined,
         target_km: type === "distance" ? targetNum : undefined,
         target_days: type !== "distance" ? Math.round(targetNum) : undefined,
         start_date: startISO(startDate),
@@ -165,7 +164,7 @@ export default function NewChallenge() {
 
         {needsChapter && (
           <>
-            <Text style={styles.fieldLabel}>{visibility === "org" ? "Organisation (via your club)" : "Club"}</Text>
+            <Text style={styles.fieldLabel}>Club</Text>
             {adminChapters.length === 0 ? (
               <Text style={{ color: colors.muted }}>You don&apos;t admin any club to scope this to.</Text>
             ) : (

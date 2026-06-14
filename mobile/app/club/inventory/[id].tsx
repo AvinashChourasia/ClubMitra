@@ -1,4 +1,4 @@
-// Chapter inventory manager (admin-only). List club gear, add items, and move
+// Club inventory manager (admin-only). List club gear, add items, and move
 // stock (issue / return / restock). Reached from the club detail screen.
 
 import { useCallback, useState } from "react";

@@ -1,7 +1,7 @@
 // Manage club — the admin console, reached from the gear in the club header.
 // Keeps management (edit, inventory, insights, delete) out of the member-facing
 // tab strip. Tools route to their own screens; Insights renders inline for roles
-// allowed analytics (org / chapter admin, not co-admin).
+// allowed analytics (club owner / admin, not co-admin).
 
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";

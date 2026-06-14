@@ -230,7 +230,7 @@ func (h *Handler) join(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !allowed {
-			httpx.Error(w, http.StatusForbidden, "only a chapter admin can enrol the club")
+			httpx.Error(w, http.StatusForbidden, "only a club admin can enrol the club")
 			return
 		}
 		if err := h.svc.JoinAsChapter(r.Context(), id, chapterID); err != nil {
