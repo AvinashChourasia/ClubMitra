@@ -77,6 +77,22 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("JWT_REFRESH_SECRET is required")
 	}
 
+	// In production, refuse to boot on a weak or well-known secret. The dev
+	// defaults shipped in .env.example are public, so anyone could forge tokens
+	// (full account takeover) if they ever reached a real deployment.
+	if cfg.Env == "production" {
+		for _, s := range []struct {
+			name, val string
+		}{
+			{"JWT_SECRET", cfg.JWTSecret},
+			{"JWT_REFRESH_SECRET", cfg.JWTRefreshSecret},
+		} {
+			if len(s.val) < 32 || weakSecrets[s.val] {
+				return nil, fmt.Errorf("%s is too weak for production (use a unique random value of 32+ chars)", s.name)
+			}
+		}
+	}
+
 	// Cloudinary is optional: parse it if present, ignore if not (uploads stay
 	// disabled and the signature endpoint returns 503).
 	if cu := os.Getenv("CLOUDINARY_URL"); cu != "" {
@@ -88,6 +104,15 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// weakSecrets are values that must never sign tokens in production — the public
+// dev defaults from .env.example, plus obvious placeholders.
+var weakSecrets = map[string]bool{
+	"dev-access-secret-change-me":  true,
+	"dev-refresh-secret-change-me": true,
+	"change-me":                    true,
+	"secret":                       true,
 }
 
 // getEnv returns the value of an env var, or a fallback if it's unset/empty.

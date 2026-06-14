@@ -145,7 +145,8 @@ function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId
       (async () => {
         const token = await getToken();
         if (!token) return;
-        const data = await leaderboard(token, chapterId, period);
+        // Boards are members-only server-side; degrade to empty for non-members.
+        const data = await leaderboard(token, chapterId, period).catch(() => []);
         if (active) setEntries(data);
       })();
       return () => {
@@ -316,7 +317,9 @@ export default function ClubDetail() {
     const [ch, mine, runList, allChallenges] = await Promise.all([
       getChapter(token, id),
       myChapters(token),
-      listRuns(token, id),
+      // Runs are members-only on the server now; a non-member viewing this club
+      // (e.g. from a challenge's club leaderboard) just sees no schedule.
+      listRuns(token, id).catch(() => [] as Run[]),
       listChallenges(token),
     ]);
     setChapter(ch);
@@ -521,20 +524,23 @@ export default function ClubDetail() {
               </GradientCard>
             )}
 
-            {/* Invite code (compact) */}
-            <View style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12 }]}>
-              <Pressable onPress={copyCode} style={{ flex: 1 }}>
-                <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                  Invite code {copied ? "· Copied!" : "· tap to copy"}
-                </Text>
-                <Text style={{ fontSize: 22, fontWeight: "800", color: copied ? colors.success : colors.text, letterSpacing: 3 }}>
-                  {chapter.invite_code}
-                </Text>
-              </Pressable>
-              <Pressable onPress={shareInvite} style={{ backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 }}>
-                <Text style={{ color: "#fff", fontWeight: "700" }}>Share</Text>
-              </Pressable>
-            </View>
+            {/* Invite code (compact) — only members get a code from the server;
+                non-members see this hidden. */}
+            {chapter.invite_code ? (
+              <View style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12 }]}>
+                <Pressable onPress={copyCode} style={{ flex: 1 }}>
+                  <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Invite code {copied ? "· Copied!" : "· tap to copy"}
+                  </Text>
+                  <Text style={{ fontSize: 22, fontWeight: "800", color: copied ? colors.success : colors.text, letterSpacing: 3 }}>
+                    {chapter.invite_code}
+                  </Text>
+                </Pressable>
+                <Pressable onPress={shareInvite} style={{ backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 }}>
+                  <Text style={{ color: "#fff", fontWeight: "700" }}>Share</Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             {/* Your membership banner */}
             {myStatus === "pending" && (

@@ -47,9 +47,10 @@ func (n *Notifier) SaveToken(ctx context.Context, userID, token, platform string
 	return err
 }
 
-// DeleteToken removes a token (on logout / unregister).
-func (n *Notifier) DeleteToken(ctx context.Context, token string) error {
-	_, err := n.db.Exec(ctx, `DELETE FROM device_tokens WHERE token = $1`, token)
+// DeleteToken removes the caller's own token (on logout / unregister). Scoped to
+// the user so one account can't unregister another's device (denial-of-push).
+func (n *Notifier) DeleteToken(ctx context.Context, userID, token string) error {
+	_, err := n.db.Exec(ctx, `DELETE FROM device_tokens WHERE token = $1 AND user_id = $2`, token, userID)
 	return err
 }
 

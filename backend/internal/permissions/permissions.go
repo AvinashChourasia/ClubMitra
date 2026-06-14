@@ -125,6 +125,29 @@ func (c *Checker) HasChapterRole(ctx context.Context, userID string, chapterID u
 	return false, nil
 }
 
+// IsChapterMember reports whether a user may see a chapter's club-internal data
+// (run schedule, attendee roster, rolling leaderboards). True when they hold a
+// non-deleted membership row OR any role on the chapter/org. This is the
+// member-level counterpart to HasChapterRole, for reads that should be
+// club-private but not admin-only.
+func (c *Checker) IsChapterMember(ctx context.Context, userID string, chapterID uuid.UUID) (bool, error) {
+	const q = `
+		SELECT EXISTS (
+			SELECT 1 FROM chapter_members
+			WHERE chapter_id = $2 AND user_id = $1 AND deleted_at IS NULL
+		) OR EXISTS (
+			SELECT 1 FROM org_roles r
+			JOIN chapters c ON c.id = $2
+			WHERE r.user_id = $1 AND r.deleted_at IS NULL
+			  AND (r.chapter_id = c.id OR (r.chapter_id IS NULL AND r.org_id = c.org_id))
+		)`
+	var ok bool
+	if err := c.db.QueryRow(ctx, q, userID, chapterID).Scan(&ok); err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
 // errNoRole signals "the user holds no applicable role" (a 403), distinct from a
 // real query failure (a 500).
 var errNoRole = errors.New("no applicable role")

@@ -110,9 +110,31 @@ func (s *Service) Create(ctx context.Context, c NewChallenge) (*Challenge, error
 	return ch, err
 }
 
-// Get returns a challenge with the user's participation state.
+// Get returns a challenge with the user's participation state — but only if the
+// challenge is visible to them (else ErrNotFound, so private challenges don't
+// leak existence by UUID).
 func (s *Service) Get(ctx context.Context, userID string, id uuid.UUID) (*Challenge, error) {
+	if err := s.requireVisible(ctx, userID, id); err != nil {
+		return nil, err
+	}
 	return s.repo.Get(ctx, userID, id)
+}
+
+// CanView reports whether a user may see a challenge (visibility check).
+func (s *Service) CanView(ctx context.Context, userID string, id uuid.UUID) (bool, error) {
+	return s.repo.CanView(ctx, userID, id)
+}
+
+// requireVisible returns ErrNotFound unless the user may see the challenge.
+func (s *Service) requireVisible(ctx context.Context, userID string, id uuid.UUID) error {
+	ok, err := s.repo.CanView(ctx, userID, id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // List returns visible challenges (browse) or just the user's (joinedOnly).
@@ -137,6 +159,10 @@ var ErrPaymentRequired = errors.New("payment required to join this challenge")
 // leaderboard at their current score. If the challenge has a join fee, `paid`
 // must be true (the client completes the mock payment first).
 func (s *Service) Join(ctx context.Context, userID string, challengeID uuid.UUID, paid bool) (*Challenge, error) {
+	// You can only join a challenge you're allowed to see (membership/city/public).
+	if err := s.requireVisible(ctx, userID, challengeID); err != nil {
+		return nil, err
+	}
 	ch, err := s.repo.Get(ctx, userID, challengeID)
 	if err != nil {
 		return nil, err

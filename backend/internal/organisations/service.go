@@ -33,12 +33,12 @@ type ValidationError struct{ Msg string }
 
 func (e ValidationError) Error() string { return e.Msg }
 
-// assignableRoles are the roles an org admin may grant. (org_admin itself is
-// granted only implicitly, to whoever creates the org.)
+// assignableRoles are the roles an org admin may grant. org_admin is granted
+// only implicitly to whoever creates the org — it is NOT hand-assignable, so an
+// admin can't mint a co-equal org_admin (which could then act org-wide).
 var assignableRoles = map[string]bool{
 	permissions.RoleChapterAdmin: true,
 	permissions.RoleCoAdmin:      true,
-	permissions.RoleOrgAdmin:     true,
 }
 
 // notifier fans club events out to members/admins. Local interface so the
@@ -226,7 +226,19 @@ func (s *Service) AssignRole(ctx context.Context, orgID uuid.UUID, chapterID *uu
 		return ValidationError{Msg: "user_id is required"}
 	}
 	if !assignableRoles[role] {
-		return ValidationError{Msg: "role must be one of org_admin, chapter_admin, co_admin"}
+		return ValidationError{Msg: "role must be one of chapter_admin, co_admin"}
+	}
+	// The route only proves the caller is org_admin of orgID. Verify the target
+	// chapter actually belongs to that org, so an admin of org A can't grant a
+	// role on a chapter in org B by passing its id in the body.
+	if chapterID != nil {
+		ch, err := s.repo.GetChapter(ctx, *chapterID)
+		if err != nil {
+			return err
+		}
+		if ch.OrgID != orgID {
+			return ValidationError{Msg: "that chapter is not in this club"}
+		}
 	}
 	return s.repo.AssignRole(ctx, orgID, chapterID, userID, role, assignedBy)
 }

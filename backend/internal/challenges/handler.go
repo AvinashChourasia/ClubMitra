@@ -48,13 +48,17 @@ func (h *Handler) Routes() http.Handler {
 // chapterLeaderboard ranks the clubs competing in a challenge by combined
 // member progress (org-wide chapter-vs-chapter board).
 func (h *Handler) chapterLeaderboard(w http.ResponseWriter, r *http.Request) {
-	if _, ok := httpx.UserIDFromContext(r.Context()); !ok {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
 		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid challenge id")
+		return
+	}
+	if !h.requireChallengeVisible(w, r, userID, id) {
 		return
 	}
 	entries, err := h.svc.ChapterLeaderboard(r.Context(), id)
@@ -346,14 +350,33 @@ func writeErr(w http.ResponseWriter, err error) {
 	}
 }
 
+// requireChallengeVisible gates a leaderboard read: the challenge must be
+// visible to the caller (so private rosters don't leak by UUID).
+func (h *Handler) requireChallengeVisible(w http.ResponseWriter, r *http.Request, userID string, id uuid.UUID) bool {
+	ok, err := h.svc.CanView(r.Context(), userID, id)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return false
+	}
+	if !ok {
+		httpx.Error(w, http.StatusNotFound, "challenge not found")
+		return false
+	}
+	return true
+}
+
 // leaderboard returns the ranked board for a challenge.
 func (h *Handler) leaderboard(w http.ResponseWriter, r *http.Request) {
-	if _, ok := httpx.UserIDFromContext(r.Context()); !ok {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
 		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	id, ok := parseID(w, r)
 	if !ok {
+		return
+	}
+	if !h.requireChallengeVisible(w, r, userID, id) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))

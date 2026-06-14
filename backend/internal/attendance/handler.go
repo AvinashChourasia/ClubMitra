@@ -242,9 +242,17 @@ func (h *Handler) myRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
 	chapterID, err := uuid.Parse(r.URL.Query().Get("chapter_id"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "a valid chapter_id query parameter is required")
+		return
+	}
+	if !h.requireChapterMember(w, r, actorID, chapterID) {
 		return
 	}
 	runs, err := h.svc.ListRuns(r.Context(), chapterID)
@@ -256,8 +264,17 @@ func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
+	actorID, _ := httpx.UserIDFromContext(r.Context())
 	runID, ok := h.runID(w, r)
 	if !ok {
+		return
+	}
+	chapterID, err := h.svc.ChapterOfRun(r.Context(), runID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	if !h.requireChapterMember(w, r, actorID, chapterID) {
 		return
 	}
 	run, err := h.svc.GetRun(r.Context(), runID)
@@ -284,23 +301,27 @@ func (h *Handler) checkIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the run's chapter once: self check-in requires membership;
+	// marking SOMEONE ELSE requires a chapter-admin role.
+	chapterID, err := h.svc.ChapterOfRun(r.Context(), runID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+
 	// Default: the caller checks themselves in (marked_by NULL).
 	target := actorID
 	var markedBy *string
 
-	// Marking SOMEONE ELSE present requires a chapter-admin role on the run's
-	// chapter; record who did the marking.
 	if req.UserID != "" && req.UserID != actorID {
-		chapterID, err := h.svc.ChapterOfRun(r.Context(), runID)
-		if err != nil {
-			h.writeError(w, err)
-			return
-		}
 		if !h.requireChapterAdmin(w, r, actorID, chapterID) {
 			return
 		}
 		target = req.UserID
 		markedBy = &actorID
+	} else if !h.requireChapterMember(w, r, actorID, chapterID) {
+		// Self check-in: you must belong to the club running this run.
+		return
 	}
 
 	run, err := h.svc.CheckIn(r.Context(), runID, target, markedBy)
@@ -342,8 +363,17 @@ func (h *Handler) checkOut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listAttendees(w http.ResponseWriter, r *http.Request) {
+	actorID, _ := httpx.UserIDFromContext(r.Context())
 	runID, ok := h.runID(w, r)
 	if !ok {
+		return
+	}
+	chapterID, err := h.svc.ChapterOfRun(r.Context(), runID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	if !h.requireChapterMember(w, r, actorID, chapterID) {
 		return
 	}
 	attendees, err := h.svc.ListAttendees(r.Context(), runID)
@@ -355,9 +385,19 @@ func (h *Handler) listAttendees(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) memberHistory(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
 	userID := chi.URLParam(r, "userID")
 	if userID == "" {
 		httpx.Error(w, http.StatusBadRequest, "user id is required")
+		return
+	}
+	// A runner's attendance history is private to them — no cross-user reads.
+	if userID != actorID {
+		httpx.Error(w, http.StatusForbidden, "you can only view your own attendance history")
 		return
 	}
 	history, err := h.svc.MemberHistory(r.Context(), userID)
@@ -389,6 +429,21 @@ func (h *Handler) requireChapterAdmin(w http.ResponseWriter, r *http.Request, us
 	}
 	if !ok {
 		httpx.Error(w, http.StatusForbidden, "you do not have permission to do that")
+		return false
+	}
+	return true
+}
+
+// requireChapterMember gates a club-internal read: the caller must belong to the
+// chapter (or hold a role on it). Writes 403/500 and returns false otherwise.
+func (h *Handler) requireChapterMember(w http.ResponseWriter, r *http.Request, userID string, chapterID uuid.UUID) bool {
+	ok, err := h.check.IsChapterMember(r.Context(), userID, chapterID)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return false
+	}
+	if !ok {
+		httpx.Error(w, http.StatusForbidden, "you must be a member of this club to view that")
 		return false
 	}
 	return true

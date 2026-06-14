@@ -193,7 +193,7 @@ export default function Home() {
           <>
             {/* Next run */}
             <View style={{ gap: 10 }}>
-              <SectionHeader title="Next run" action={{ label: "Schedule", onPress: () => router.push("/clubs") }} />
+              <SectionHeader title="Next run" action={{ label: "Schedule", onPress: () => router.push("/schedule" as Href) }} />
               {nextRun ? (
                 <Tap onPress={() => router.push(`/run/${nextRun.id}`)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
                   <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>

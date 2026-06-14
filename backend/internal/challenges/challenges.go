@@ -174,6 +174,36 @@ func (r *Repository) Get(ctx context.Context, userID string, id uuid.UUID) (*Cha
 	return ch, err
 }
 
+// CanView reports whether a user may see a challenge — the same visibility
+// predicate as List, evaluated for one challenge. Gates Get/Join/leaderboards
+// so a private (chapter/org/city) challenge can't be read or joined just by
+// knowing its UUID.
+func (r *Repository) CanView(ctx context.Context, userID string, id uuid.UUID) (bool, error) {
+	const q = `
+		SELECT EXISTS (
+			SELECT 1 FROM challenges c
+			WHERE c.id = $1 AND c.deleted_at IS NULL
+			  AND (
+			    c.visibility = 'public'
+			    OR c.creator_id = $2
+			    OR (c.visibility = 'city'
+			        AND c.city IS NOT DISTINCT FROM (SELECT city FROM users WHERE id = $2))
+			    OR (c.visibility = 'chapter' AND c.chapter_id IN (
+			          SELECT chapter_id FROM chapter_members
+			          WHERE user_id = $2 AND deleted_at IS NULL))
+			    OR (c.visibility = 'org' AND c.org_id IN (
+			          SELECT ch.org_id FROM chapter_members m
+			          JOIN chapters ch ON ch.id = m.chapter_id
+			          WHERE m.user_id = $2 AND m.deleted_at IS NULL))
+			  )
+		)`
+	var ok bool
+	if err := r.db.QueryRow(ctx, q, id, userID).Scan(&ok); err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
 // List returns challenges VISIBLE to the user, annotated with their
 // participation. Visibility: public to all; city to matching profile city;
 // chapter to that chapter's members; org to members of any chapter in the org;

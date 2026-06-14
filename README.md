@@ -585,6 +585,31 @@ GET    /api/v1/races/similar/:id
 
 ---
 
+## Security
+
+A full authentication + authorization + injection + client/infra audit was run across phases 1–5 (June 2026). Summary below; the auth crypto, query layer, and secret handling came back strong, and the access-control gaps found have been fixed.
+
+### Fixed (June 2026 hardening pass)
+- **Club-private reads now membership-gated.** Added `permissions.IsChapterMember` and gated the run schedule (`GET /runs?chapter_id`), single run (`GET /runs/{id}`), attendee roster (`GET /runs/{id}/attendance`), and the rolling leaderboards + club standing (`/runlog/leaderboard`, `/runlog/club`). Previously any authenticated user could read any club's run locations, attendee identities, and boards.
+- **Per-user IDOR closed.** `GET /members/{id}/attendance` is now self-only; self check-in requires membership of the run's club; `DELETE /push/token` is scoped to the caller (no more unregistering another user's device).
+- **Invite-code leak closed.** `GET /chapters/{id}` strips the invite code for non-members, so it can't be used to join invite-only clubs.
+- **Challenge visibility enforced.** `CanView` gates challenge fetch, join, and both leaderboards — private (chapter/org/city) challenges no longer leak rosters or accept joins by UUID.
+- **Privilege-escalation closed.** Role assignment can no longer grant `org_admin` (implicit-to-creator only), and a body-supplied `chapter_id` is verified to belong to the path org (no cross-org escalation).
+- **Auth hardening.** Per-IP rate limiting on `/auth/*` (`httprate`) against brute-force/stuffing; production refuses to boot on a weak/known-default JWT secret.
+
+### Verified solid (no action needed)
+- JWT pins the HMAC algorithm (blocks `alg:none`/confusion); refresh tokens are 256-bit random, stored SHA-256-hashed, rotated with reuse→revoke-all theft detection; bcrypt with a 72-byte cap; login is timing-safe and non-enumerable.
+- All SQL is pgx-parameterized (no string-built queries); request bodies capped at 1 MB with unknown-field rejection; no SSRF (the only outbound fetch is the env-configured MarathonMitra sync); `password_hash` and email/phone never leak to other users; Cloudinary secret stays server-side (client gets only a scoped signature).
+- Tokens stored in SecureStore (not AsyncStorage); no secrets in the mobile bundle; HTTPS in prod; deep-link/push-tap navigation only uses client-constructed routes (no open-redirect). CORS intentionally absent (native-only client).
+
+### Known / accepted for now
+- **Mock payments** (challenge join fee, membership fee) trust a client `paid` flag — by design until Phase 3 wires Razorpay/Stripe; must become server-verified then.
+- **WebSocket token in query string** can appear in access logs — low practical risk (needs log access); move it to a header before scaling log access.
+- **`POST /races`** (user-submitted races) isn't admin-gated; unused by the app today, gate or moderate before exposing it.
+- Free-text fields lack per-field length caps (bounded only by the 1 MB body limit); add `CHECK (char_length…)` limits when convenient.
+
+---
+
 ## Getting Started
 
 ### Prerequisites

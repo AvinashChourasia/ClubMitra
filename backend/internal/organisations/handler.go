@@ -245,6 +245,15 @@ func (h *Handler) getChapter(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err)
 		return
 	}
+	// The invite code is the join secret — never hand it to a non-member, or an
+	// uninvited user could use it to join an invite-only club.
+	if userID, ok := httpx.UserIDFromContext(r.Context()); ok {
+		if member, mErr := h.check.IsChapterMember(r.Context(), userID, chapterID); mErr != nil || !member {
+			chapter.InviteCode = ""
+		}
+	} else {
+		chapter.InviteCode = ""
+	}
 	httpx.JSON(w, http.StatusOK, chapter)
 }
 

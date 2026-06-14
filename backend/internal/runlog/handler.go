@@ -8,13 +8,39 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/avinash/clubmitra/backend/internal/httpx"
+	"github.com/avinash/clubmitra/backend/internal/permissions"
 )
 
 // Handler exposes run-logging + rolling-leaderboard endpoints, mounted at /runlog.
-type Handler struct{ svc *Service }
+type Handler struct {
+	svc   *Service
+	check *permissions.Checker
+}
 
-// NewHandler wires the handler to the service.
-func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
+// NewHandler wires the handler to the service + permission checker (boards are
+// club-private — only members may read them).
+func NewHandler(svc *Service, check *permissions.Checker) *Handler {
+	return &Handler{svc: svc, check: check}
+}
+
+// requireMember gates a club-private read on the caller belonging to the chapter.
+func (h *Handler) requireMember(w http.ResponseWriter, r *http.Request, chapterID uuid.UUID) bool {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return false
+	}
+	member, err := h.check.IsChapterMember(r.Context(), userID, chapterID)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return false
+	}
+	if !member {
+		httpx.Error(w, http.StatusForbidden, "you must be a member of this club to view that")
+		return false
+	}
+	return true
+}
 
 // Routes returns the /runlog sub-router (behind auth).
 func (h *Handler) Routes() http.Handler {
@@ -28,13 +54,12 @@ func (h *Handler) Routes() http.Handler {
 
 // clubStanding returns a chapter's club-level XP/level + Member of the Week.
 func (h *Handler) clubStanding(w http.ResponseWriter, r *http.Request) {
-	if _, ok := httpx.UserIDFromContext(r.Context()); !ok {
-		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
-		return
-	}
 	chapterID, err := uuid.Parse(chi.URLParam(r, "chapterID"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid chapter id")
+		return
+	}
+	if !h.requireMember(w, r, chapterID) {
 		return
 	}
 	st, err := h.svc.ClubStanding(r.Context(), chapterID)
@@ -98,13 +123,12 @@ func (h *Handler) mine(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) leaderboard(w http.ResponseWriter, r *http.Request) {
-	if _, ok := httpx.UserIDFromContext(r.Context()); !ok {
-		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
-		return
-	}
 	chapterID, err := uuid.Parse(chi.URLParam(r, "chapterID"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid chapter id")
+		return
+	}
+	if !h.requireMember(w, r, chapterID) {
 		return
 	}
 	board, err := h.svc.Leaderboard(r.Context(), chapterID, chi.URLParam(r, "period"))

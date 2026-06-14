@@ -54,7 +54,8 @@ func (h *Handler) registerToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deleteToken(w http.ResponseWriter, r *http.Request) {
-	if _, ok := httpx.UserIDFromContext(r.Context()); !ok {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
 		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
@@ -63,7 +64,7 @@ func (h *Handler) deleteToken(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.n.DeleteToken(r.Context(), req.Token); err != nil {
+	if err := h.n.DeleteToken(r.Context(), userID, req.Token); err != nil {
 		httpx.InternalError(w, err)
 		return
 	}

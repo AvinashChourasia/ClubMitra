@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httprate"
 
 	"github.com/google/uuid"
 
@@ -126,7 +127,7 @@ func main() {
 
 	// Run logging + chapter rolling leaderboards (daily/weekly/monthly/all-time).
 	runlogSvc := runlog.NewService(runlog.NewRepository(pool))
-	runlogHandler := runlog.NewHandler(runlogSvc)
+	runlogHandler := runlog.NewHandler(runlogSvc, permChecker)
 
 	// Chapter analytics: drop-off, engagement, volume (admin-only).
 	analyticsHandler := analytics.NewHandler(analytics.NewRepository(pool), permChecker)
@@ -214,7 +215,10 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 		// Public routes: no token required.
 		r.Get("/health", handleHealth)
 		r.Get("/version", handleVersion)
-		r.Mount("/auth", authHandler.Routes())
+		// Throttle auth by client IP: blunts password brute-force, credential
+		// stuffing, and mass account creation. RealIP (set above) keys it to the
+		// true client behind Render's proxy.
+		r.With(httprate.LimitByIP(20, time.Minute)).Mount("/auth", authHandler.Routes())
 		// Realtime chat socket — authenticates via ?token= inside the handler.
 		r.Get("/ws", hub.ServeHTTP)
 		// Guest discovery: read-only teasers (clubs by city, the city picker,
