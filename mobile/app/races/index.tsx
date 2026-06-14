@@ -15,6 +15,8 @@ import * as Haptics from "expo-haptics";
 import { useAuth } from "../../lib/auth";
 import { listRaces, toggleGoing, deleteRace, addRaceToCalendar, dateBlock, countdownLabel, shortDist, cityMatch, MARATHONMITRA_SUBMIT_URL, type Race } from "../../lib/races";
 import { Tap } from "../../components/Tap";
+import { RaceCarousel } from "../../components/RaceCarousel";
+import { RaceMap } from "../../components/RaceMap";
 import { colors, styles, gradients, glow, radius, shadow, useThemeMode } from "../../lib/theme";
 
 // Distance filter chips → which token must appear in the race's distances.
@@ -46,6 +48,7 @@ export default function Races() {
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "map">("list");
 
   const load = useCallback(async () => {
     try {
@@ -76,6 +79,31 @@ export default function Races() {
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [races]);
+
+  // Recommendations: races scored by affinity — your city, and the distances you
+  // already chase (learned from races you've saved). Saved ones are excluded
+  // (recommend the NEW ones), and we only surface races with a real signal.
+  const recommended = useMemo(() => {
+    const list = races ?? [];
+    const myCity = user?.city;
+    const myDistances = new Set<string>();
+    for (const r of list) {
+      if (r.going) for (const t of r.distances.split("·")) myDistances.add(t.trim());
+    }
+    const score = (r: Race) => {
+      let s = 0;
+      if (myCity && cityMatch(r.city, myCity)) s += 3;
+      if (myDistances.size && r.distances.split("·").some((t) => myDistances.has(t.trim()))) s += 2;
+      return s;
+    };
+    return list
+      .filter((r) => !r.going)
+      .map((r) => ({ r, s: score(r) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s || a.r.race_date.localeCompare(b.r.race_date))
+      .slice(0, 8)
+      .map((x) => x.r);
+  }, [races, user?.city]);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -171,13 +199,17 @@ export default function Races() {
     setPickerOpen(false);
   }
 
+  // Opening a race = its MarathonMitra event page (details + registration).
+  function openRace(r: Race) {
+    if (r.url) Linking.openURL(r.url).catch(() => {});
+  }
+
+  const showRecommended = viewMode === "list" && scope !== "saved" && dist === "" && recommended.length >= 3;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>
-      <ScrollView
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
-        keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-      >
+      {/* Fixed top: header + filters stay put while the body scrolls or maps */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12, backgroundColor: colors.bgSecondary }}>
         {/* Header */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <Tap
@@ -192,6 +224,14 @@ export default function Races() {
             <Text style={{ fontSize: 24, fontWeight: "800", color: colors.text }}>Race calendar</Text>
             <Text style={{ color: colors.muted, fontSize: 13 }}>Find your next start line</Text>
           </View>
+          {/* List ↔ Map toggle */}
+          <Tap
+            onPress={() => setViewMode((m) => (m === "list" ? "map" : "list"))}
+            hitSlop={8}
+            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}
+          >
+            <Ionicons name={viewMode === "list" ? "map-outline" : "list-outline"} size={20} color={colors.primary} />
+          </Tap>
           <Tap onPress={onAddRace} hitSlop={8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="add" size={22} color="#fff" />
           </Tap>
@@ -220,39 +260,67 @@ export default function Races() {
             <Chip key={f.key} small label={f.label} active={dist === f.key} onPress={() => setDist(dist === f.key ? "" : f.key)} />
           ))}
         </View>
+      </View>
 
-        {races === null ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
-        ) : visible.length === 0 ? (
-          <View style={[styles.card, { alignItems: "center", paddingVertical: 32 }]}>
-            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name={emptyIcon} size={28} color={colors.primary} />
+      {/* Body: map or scrollable list */}
+      {races === null ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+      ) : viewMode === "map" ? (
+        <View style={{ flex: 1, marginTop: 8 }}>
+          <RaceMap races={visible} onPressRace={openRace} />
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={{ padding: 16, paddingTop: 12, gap: 12, paddingBottom: 40 }}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        >
+          {/* Recommended for you — affinity-curated strip */}
+          {showRecommended && (
+            <View style={{ gap: 8, marginBottom: 2 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Ionicons name="sparkles" size={15} color={colors.primary} />
+                <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Recommended for you</Text>
+              </View>
+              <RaceCarousel races={recommended} onPressRace={openRace} />
             </View>
-            <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, marginTop: 12, textAlign: "center" }}>{emptyTitle}</Text>
-            <Text style={{ color: colors.muted, marginTop: 4, textAlign: "center", paddingHorizontal: 12 }}>{emptyBody}</Text>
-          </View>
-        ) : (
-          visible.map((r, i) => (
-            <RaceCard
-              key={r.id}
-              race={r}
-              index={i}
-              busy={busyId === r.id}
-              mine={r.created_by === user.id}
-              saved={r.going}
-              onGoing={() => void onGoing(r)}
-              onCalendar={() => void onAddToCalendar(r)}
-              onDelete={() => onDelete(r)}
-            />
-          ))
-        )}
+          )}
 
-        {visible.length > 0 && (
-          <Text style={{ color: colors.subtle, fontSize: 11, textAlign: "center" }}>
-            {visible.length} {visible.length === 1 ? "race" : "races"} · data from MarathonMitra · tap a card for details
-          </Text>
-        )}
-      </ScrollView>
+          {visible.length === 0 ? (
+            <View style={[styles.card, { alignItems: "center", paddingVertical: 32 }]}>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name={emptyIcon} size={28} color={colors.primary} />
+              </View>
+              <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, marginTop: 12, textAlign: "center" }}>{emptyTitle}</Text>
+              <Text style={{ color: colors.muted, marginTop: 4, textAlign: "center", paddingHorizontal: 12 }}>{emptyBody}</Text>
+            </View>
+          ) : (
+            <>
+              {showRecommended && (
+                <Text style={{ color: colors.muted, fontWeight: "800", fontSize: 13, marginTop: 2 }}>
+                  {scope === "city" && city ? `All races in ${city}` : "All upcoming races"}
+                </Text>
+              )}
+              {visible.map((r, i) => (
+                <RaceCard
+                  key={r.id}
+                  race={r}
+                  index={i}
+                  busy={busyId === r.id}
+                  mine={r.created_by === user.id}
+                  saved={r.going}
+                  onGoing={() => void onGoing(r)}
+                  onCalendar={() => void onAddToCalendar(r)}
+                  onDelete={() => onDelete(r)}
+                />
+              ))}
+              <Text style={{ color: colors.subtle, fontSize: 11, textAlign: "center" }}>
+                {visible.length} {visible.length === 1 ? "race" : "races"} · data from MarathonMitra · tap a card for details
+              </Text>
+            </>
+          )}
+        </ScrollView>
+      )}
 
       <CityFilterSheet
         visible={pickerOpen}

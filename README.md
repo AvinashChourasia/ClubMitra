@@ -365,9 +365,9 @@ clubmitra/
 - [x] Background GPS (requires EAS dev build)
 - [x] City leaderboard: all verified runners in a city ranked collectively
 - [x] Race calendar: LIVE-fed from MarathonMitra's official public events API (api.marathonmitra.com — paginated background sync, upsert by slug); banner-image cards with distance chips + organizer, city & distance filters; cards tap through to the MarathonMitra event page; "I'm going", add to phone/Google calendar
-- [ ] Race calendar map view (interactive, search by location)
-- [ ] Similar races list / race recommendations
-- [ ] Calendar embed widget for club websites
+- [x] Race calendar map view — interactive map, one pin per city (count badge), tap a pin → that city's races; reflects the active filters; honours the searchable city picker
+- [x] Similar races list / race recommendations — "Recommended for you" strip on the calendar, scored by your city + the distances you save (excludes already-saved)
+- [ ] Calendar embed widget for club websites *(web deliverable — out of scope for the mobile app)*
 
 ---
 
@@ -401,7 +401,7 @@ clubmitra/
       the wall), badge awards batched into one INSERT…unnest round trip
 
 #### Remaining Phase 5
-- [ ] Public explore: discover clubs and challenges by city and sport
+- [x] Public explore: discover clubs and challenges by city and sport — `app/explore.tsx` + `lib/discover.ts` + backend `/public` routes (guest-browsable, auth gate fires only on join)
 - [ ] Club public profile page (discoverability for non-members)
 - [ ] Global club directory (searchable)
 - [ ] Follow individual runners
