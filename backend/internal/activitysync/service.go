@@ -152,9 +152,15 @@ func (s *Service) Sync(ctx context.Context, userID string) (int, error) {
 		_ = s.repo.updateTokens(ctx, userID, provider, conn.AccessToken, conn.RefreshToken, conn.ExpiresAt)
 	}
 
+	// Stamp the sync window from BEFORE we list, not after we finish processing:
+	// otherwise a slow run-loop shrinks the next sync's overlap and a run that
+	// errored mid-loop could fall outside the window and be missed.
+	syncStart := time.Now()
+
 	// First sync pulls the last 30 days (not a whole history); later syncs pull
-	// since the last sync with a small overlap for safety.
-	after := time.Now().AddDate(0, 0, -30)
+	// since the last sync with a 6h overlap (Strava back-fills moving_time after
+	// post-processing, and the overlap re-covers anything that errored last time).
+	after := syncStart.AddDate(0, 0, -30)
 	if conn.LastSyncedAt != nil {
 		after = conn.LastSyncedAt.Add(-6 * time.Hour)
 	}
@@ -175,7 +181,7 @@ func (s *Service) Sync(ctx context.Context, userID string) (int, error) {
 		}
 		start, err := time.Parse(time.RFC3339, a.StartDate)
 		if err != nil {
-			_ = s.repo.recordImport(ctx, provider, extID, userID, nil)
+			_ = s.repo.recordImport(ctx, provider, extID, userID, nil) // permanently unparseable — skip for good
 			continue
 		}
 		// Don't double-count a run the user ALSO recorded in-app.
@@ -184,10 +190,13 @@ func (s *Service) Sync(ctx context.Context, userID string) (int, error) {
 			continue
 		}
 		pts, err := s.buildPoints(ctx, conn.AccessToken, a, start)
-		if err != nil || len(pts) < 2 {
-			// No GPS track (e.g. treadmill) or a transient stream error: ledger it
-			// so we don't refetch every sync. (GPS runs are the v1 target.)
-			_ = s.repo.recordImport(ctx, provider, extID, userID, nil)
+		if err != nil {
+			if errors.Is(err, errNoGPSTrack) {
+				// Genuinely no GPS (treadmill/Zwift) — ledger so we don't refetch.
+				_ = s.repo.recordImport(ctx, provider, extID, userID, nil)
+			}
+			// Otherwise it's a transient stream-fetch error: DON'T ledger, so the
+			// next sync retries it.
 			continue
 		}
 		pausedS := float64(a.ElapsedTime - a.MovingTime)
@@ -196,8 +205,15 @@ func (s *Service) Sync(ctx context.Context, userID string) (int, error) {
 		}
 		act, err := s.acts.Record(ctx, userID, pts, true, pausedS)
 		if err != nil {
-			log.Printf("activitysync: record %s failed: %v", extID, err)
-			continue // transient — retry next sync (no ledger row yet)
+			var ve activities.ValidationError
+			if errors.As(err, &ve) {
+				// Permanently un-storable (e.g. degenerate data) — ledger it so we
+				// don't retry the same bad activity on every future sync.
+				_ = s.repo.recordImport(ctx, provider, extID, userID, nil)
+			} else {
+				log.Printf("activitysync: record %s failed (transient): %v", extID, err) // retry next sync
+			}
+			continue
 		}
 		_ = s.repo.recordImport(ctx, provider, extID, userID, &act.ID)
 		imported++
@@ -206,33 +222,46 @@ func (s *Service) Sync(ctx context.Context, userID string) (int, error) {
 		}
 	}
 
-	_ = s.repo.markSynced(ctx, userID, provider, time.Now())
+	_ = s.repo.markSynced(ctx, userID, provider, syncStart)
 	return imported, nil
 }
 
+// errNoGPSTrack means an activity has no usable GPS stream (treadmill/indoor) —
+// a permanent skip, distinct from a transient stream-fetch error (which retries).
+var errNoGPSTrack = errors.New("no gps track")
+
 // buildPoints turns a Strava activity's streams into the run pipeline's points:
 // real lat/lng + timestamps + altitude, so distance/pace/elevation/splits are
-// computed exactly as for an in-app recording.
+// computed exactly as for an in-app recording. We only build points that have a
+// real timestamp (index into the time stream), so the result is always
+// chronologically ordered — what Record requires.
 func (s *Service) buildPoints(ctx context.Context, token string, a stravaActivity, start time.Time) ([]geo.Point, error) {
 	st, err := s.strava.streams(ctx, token, a.ID)
 	if err != nil {
-		return nil, err
+		return nil, err // transient — caller retries
 	}
-	ll := st.LatLng.Data
-	if len(ll) < 2 {
-		return nil, nil // no GPS track to build a route from
+	// Every point needs a real timestamp, so cap at the shorter of latlng/time
+	// (Strava normally aligns them; this is defensive against a mismatch that
+	// would otherwise produce out-of-order points and a hard Record rejection).
+	n := len(st.LatLng.Data)
+	if len(st.Time.Data) < n {
+		n = len(st.Time.Data)
 	}
-	pts := make([]geo.Point, 0, len(ll))
-	for i, p := range ll {
-		ts := start
-		if i < len(st.Time.Data) {
-			ts = start.Add(time.Duration(st.Time.Data[i] * float64(time.Second)))
-		}
+	if n < 2 {
+		return nil, errNoGPSTrack
+	}
+	pts := make([]geo.Point, 0, n)
+	for i := 0; i < n; i++ {
 		alt := 0.0
 		if i < len(st.Altitude.Data) {
 			alt = st.Altitude.Data[i]
 		}
-		pts = append(pts, geo.Point{Lat: p[0], Lng: p[1], Altitude: alt, Timestamp: ts})
+		pts = append(pts, geo.Point{
+			Lat:       st.LatLng.Data[i][0],
+			Lng:       st.LatLng.Data[i][1],
+			Altitude:  alt,
+			Timestamp: start.Add(time.Duration(st.Time.Data[i] * float64(time.Second))),
+		})
 	}
 	return pts, nil
 }

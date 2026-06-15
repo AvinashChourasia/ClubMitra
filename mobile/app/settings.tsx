@@ -189,12 +189,15 @@ function StravaCard({ getToken }: { getToken: () => Promise<string | null> }) {
         text: "Disconnect",
         style: "destructive",
         onPress: async () => {
+          setBusy(true);
           try {
             const token = await getToken();
             if (token) await stravaDisconnect(token);
             await refresh();
-          } catch {
-            /* ignore */
+          } catch (e) {
+            Alert.alert("Couldn't disconnect", e instanceof ApiError ? e.message : "Try again in a moment");
+          } finally {
+            setBusy(false);
           }
         },
       },

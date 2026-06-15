@@ -80,7 +80,9 @@ func (c *stravaClient) authorizeURL(redirectURI, state string) string {
 	q.Set("response_type", "code")
 	q.Set("redirect_uri", redirectURI)
 	q.Set("approval_prompt", "auto")
-	q.Set("scope", "activity:read")
+	// read_all (not plain activity:read) so runs a user marked "Only You" still
+	// import — otherwise they connect and nothing shows up. Still read-only.
+	q.Set("scope", "activity:read_all")
 	q.Set("state", state)
 	return stravaAuthURL + "?" + q.Encode()
 }
