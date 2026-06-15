@@ -10,6 +10,49 @@ tracking — built for running clubs of every size.
 
 ---
 
+## ⭐ Priority Board — driven by the 206-response community survey (June 2026)
+
+> Validated against 206 real responses (20 club admins, 83 members, 103 solo
+> runners). Full analysis in `ClubMitra_Survey_Analysis_v2.md`. Priority tags
+> below (`P0`–`P3`, `DONE`, `NOT REQUIRED`) reflect **demand**, not feature area.
+
+**The single most important finding:** **68% of runners will not switch their
+recording app.** Only 13% would record directly in ClubMitra. They use Strava
+(81%) and Garmin (14%) and expect those runs to count automatically. We made
+challenges **GPS-native only** (recorded-in-app or GPX import), which blocks
+two-thirds of runners. **This is the #1 gap and the top build priority.**
+
+| Priority | Task | Status | Why |
+|---|---|---|---|
+| **P0** | **Strava read-only sync** (OAuth, auto-import activities → credit challenges/boards/badges) | ❌ MISSING | 68% of runners require it; without it leaderboards stay empty |
+| **P0** | **Garmin Connect sync** (auto-import) | ❌ MISSING | 14% on Garmin; same blocker |
+| **P0** | Frictionless GPX path (Strava/Garmin export guide + share-sheet intake) | 🟡 import exists, UX missing | Bridges sync gap until OAuth ships |
+| **P1** | Run a live pilot challenge (MarathonMitra 100K) with the 130+ runner leads | ❌ not started | Convert survey takers → active users now |
+| **P1** | Reposition pitch: "keep members running together" (not "save 10–15 hrs") | ❌ copy/deck | 14/20 admins spend <5 hrs/wk — time-saving pitch is false |
+| **P1** | Real payments (Razorpay Route) — Phase 3 | 🟡 MOCK | Needed for revenue, but see fee note below |
+| **P1** | RunMitra → ClubMitra rename + store readiness (icon/splash/listing) | ❌ pending | Blocks soft launch |
+| **P2** | Inactive-member alerts surfaced prominently to admins | 🟡 analytics built | Admins named it unprompted (12/20) |
+| **P2** | Event-registration fees (real money flow vs membership) | ❌ not built | Events have money; memberships mostly don't |
+| **P3** | Membership-fee collection polish | 🟡 MOCK | **DE-PRIORITISED** — admin's LAST priority (4/20), 75% clubs free |
+| **NOT REQUIRED** | More messaging depth (search-in-thread, voice waveforms) | ❌ queued | **DROP** — survey said "keep it simple"; chat is already over-built |
+| **DONE ✅** | Challenges + leaderboards | ✅ | Admin #1 want — the hero, already shipped |
+| **DONE ✅** | Race & event calendar | ✅ | Admin #2 want — validated, already shipped (MM-fed) |
+| **DONE ✅** | Streaks + badges + XP | ✅ | Streak = #3 runner motivator — validated |
+| **DONE ✅** | Attendance + self check-in | ✅ | Admin top-5 — validated |
+| **DONE ✅** | Inventory CRUD | ✅ | Admin top-6, a differentiator — keep |
+
+**Revenue correction:** the membership-fee transaction-cut model is weak — 75%
+of clubs charge no fee and admins rank fee-collection last. Lead revenue with
+**freemium subscription + event-registration cuts**; treat membership-fee cuts
+as a long-tail stream. Update the pitch deck accordingly.
+
+**Effort vs demand mismatch (be honest):** the 7-day sprint deepened
+WhatsApp-grade chat and in-app GPS recording — both ranked low by the market —
+while the one thing the market made mandatory (Strava/Garmin sync) was removed.
+Reorder around sync; freeze chat.
+
+---
+
 ## What ClubMitra Solves
 
 Running clubs today run on WhatsApp + spreadsheets + UPI screenshots. ClubMitra
@@ -299,6 +342,18 @@ clubmitra/
 > Real money on both rails — gated by merchant onboarding (Razorpay Route KYC in
 > India, Stripe Connect onboarding globally), so the account setup should already
 > be underway from Phase 2. Plus the remaining Epeak-parity surface.
+
+#### 🚨 P0 — Activity Sync (NEW — top priority from survey, was missing entirely)
+> 68% of surveyed runners will not switch recording apps. Challenges are
+> GPS-native only today, which blocks them. This must ship before soft launch
+> or the hero feature (challenges + leaderboards) has no data to rank.
+- [ ] **Strava OAuth (read-only)** — connect account, store refresh token
+- [ ] Strava webhook / poll — auto-import new activities through `svc.Record`
+- [ ] **Garmin Connect import** — auto-pull completed activities
+- [ ] De-dupe synced vs in-app-recorded runs (same activity, one credit)
+- [ ] Imported runs credit challenges + rolling boards + badges (existing pipeline)
+- [ ] In-app GPX export guide for Strava/Garmin + share-sheet intake (bridge until OAuth lands)
+- [ ] Transparent data scope (survey: "don't want to give permissions to too many apps")
 
 #### Payments — Real money (provider-agnostic, replaces MOCK)
 - [ ] `pkg/payments/` — provider-agnostic interface (Provider)
@@ -700,10 +755,16 @@ PLATFORM_CUT_PCT=10
 |---|---|---|
 | 1 | Club core — members, attendance, challenges | Month 1 ✅ |
 | 2 | Rolling leaderboards, analytics, inventory, messaging | Month 2 ✅ |
-| 3 | Payments (Razorpay + Stripe), GPX, desktop admin, paid inventory | Month 3 |
+| 3 | **P0 Strava/Garmin sync**, payments (Razorpay + Stripe), GPX, desktop admin | Month 3 |
 | 4 | GPS tracking, interactive maps, race calendar, city leaderboard | Month 4 ✅ |
 | 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 ✅ |
 | 6+ | Europe launch, leagues, coaches, physical events, white-label | Month 7+ |
+
+> **Survey-driven reorder (June 2026):** the next build is **activity sync
+> (Strava/Garmin)** — the #1 runner requirement and currently missing — then a
+> live pilot challenge, then real payments. Messaging depth is frozen ("keep it
+> simple"); membership-fee work is de-prioritised (75% of clubs charge no fee).
+> See the Priority Board at the top and `ClubMitra_Survey_Analysis_v2.md`.
 
 **Target:** India soft launch end of Month 2. Europe expansion Month 7+.
 

@@ -3,17 +3,27 @@
 > Standalone running-club operating system. ClubMitra owns identity — no external
 > auth dependency. A MarathonMitra product with its own backend, database, and app.
 >
-> **Status (June 2026):** Phases 1, 2 and 4 are **built and live** — club core,
-> messaging (WhatsApp-grade chat + realtime), analytics, inventory, GPS run
-> tracking (record + GPX import), GPS-native challenges, rolling + city
-> leaderboards, streak freezes, race calendar (MarathonMitra-fed), and the
-> Phase 5 **gamification core** (badges + XP + levels + achievement wall).
-> **Phase 3 — real payments — is the big remaining build**, gated on Razorpay
-> Route KYC; membership/challenge fees run a MOCK confirm step today.
+> **Status (June 2026):** Phases 1, 2, 4 and 5 are **built and live** — club
+> core, messaging (WhatsApp-grade chat + realtime), analytics, inventory, GPS
+> run tracking (record + GPX import), GPS-native challenges, rolling + city
+> leaderboards, streak freezes, race calendar (MarathonMitra-fed), and the full
+> Phase 5 layer (badges + XP + levels + achievement wall, explore + public club
+> profiles + directory, follows + runner profiles, club XP / Member of the
+> Week, org-wide board, re-engagement push, polls).
+> **Phase 3 is the big remaining build** — led now by **Activity Sync** (the #1
+> survey gap, below), then real payments (gated on Razorpay Route KYC;
+> membership/challenge fees run a MOCK confirm step today).
 >
 > **Removed by design** (simpler product, GPS made them redundant):
 > trust scoring (00027), manual run logging (client, June 2026), challenge
 > proof + admin review (00031), finisher certificates (descoped).
+>
+> **⭐ Survey-driven gap (206 responses, June 2026):** 68% of runners won't
+> switch recording apps — they expect Strava (81%) / Garmin (14%) runs to count
+> automatically. Challenges are GPS-native only today, which blocks them.
+> **Activity Sync (Strava OAuth + Garmin import) is the #1 missing subsystem**
+> and the top Phase 3 build — design added below. Messaging depth is frozen
+> ("keep it simple"); membership-fee work de-prioritised (75% of clubs free).
 >
 > **Market:** India first (Razorpay + INR). Global-ready — provider-agnostic
 > payments, multi-currency, country + timezone-aware chapters. Europe Month 7+
@@ -400,6 +410,55 @@ Client, after save:
 
 ---
 
+## Activity Sync — Strava + Garmin *(Phase 3, P0 — NOT built, top priority)*
+
+> **Why this is now the most important unbuilt subsystem.** The 206-response
+> survey: only **13%** of runners will record in-app; **68%** require their
+> existing app's runs to sync automatically (Strava 81%, Garmin 14%). Challenges
+> are GPS-native only, so without sync the leaderboard — the #1 admin-requested
+> feature — sits empty for two-thirds of members. Build before soft launch.
+
+```
+internal/activitysync  (new package)
+
+Strava (read-only OAuth):
+  GET  /integrations/strava/connect      → OAuth consent URL (scope: activity:read)
+  GET  /integrations/strava/callback     → exchange code → store tokens
+  POST /integrations/strava/webhook      → Strava push: new activity id
+       (fallback: poll /athlete/activities every N min if webhook unset)
+  → fetch activity (distance, moving time, start, polyline, elevation)
+  → decode summary polyline → LineString → feed svc.Record (same pipeline)
+
+Garmin (Connect import):
+  OAuth (Garmin Connect / Health API) → pull completed activities
+  → same normalise → svc.Record path
+
+New tables:
+  oauth_connections(user_id, provider, access_token, refresh_token,
+                    expires_at, athlete_id, scope, created_at)   -- tokens encrypted at rest
+  external_activities(provider, external_id PRIMARY KEY part, user_id,
+                      activity_id, imported_at)                  -- de-dupe ledger
+
+De-dupe: an in-app recorded run and its later Strava mirror must credit ONCE.
+  Match on (user_id, start_time ±2 min, distance ±2%) → skip if already credited.
+
+Credit path: imported runs flow through the SAME SetRecordedHook →
+  challenges + rolling boards + gamification → no special-casing downstream.
+
+Bridge until OAuth ships: in-app "export your run from Strava/Garmin" guide +
+  share-sheet GPX intake → existing POST /activities/import-gpx.
+
+Privacy (survey: "don't want to give permissions to too many apps"):
+  read-only scope, explicit per-provider consent screen, disconnect = token
+  revoke + stop importing (keeps already-credited runs).
+```
+
+> Design intentionally reuses the run-recorded pipeline — sync is a third
+> **write path** into `svc.Record` alongside live GPS and GPX import. No changes
+> to challenges, leaderboards, or gamification needed once a synced run lands.
+
+---
+
 ## Realtime architecture *(built)*
 
 ```
@@ -568,15 +627,24 @@ Phase 2  ✅ messaging (→ later WhatsApp-grade + realtime + voice + push),
 Phase 4  ✅ GPS engine: record + background + autopause + pace-gradient
             routes + replay; GPX import; streak freezes; city board;
             activity feed; race calendar (MarathonMitra); run share
-Phase 5  ◐  gamification core ✅ (badges + XP + levels + wall + unlock
-            celebrations + chat announce). Remaining: club XP / Member of
-            the Week, follows, kudos, org-wide board, polls, explore.
-Phase 3  ⏳ payments (Razorpay Route first — KYC is the gate), finance
-            dashboard, plan enforcement, paid inventory; GPX on scheduled
-            runs + nav deep-links; desktop admin panel; training fields.
-Also queued: store readiness (icon/splash/listing), RunMitra→ClubMitra
-            rename, chat search + voice waveforms, race-calendar extras.
+Phase 5  ✅ gamification core (badges + XP + levels + wall + unlock
+            celebrations + chat announce); social: explore + public club
+            profiles + global directory, follows + runner profiles, club XP /
+            levels / Member of the Week, org-wide challenge board, re-engagement
+            push, polls.
+Phase 3  ⏳ P0 Activity Sync (Strava OAuth + Garmin import) — #1 survey gap,
+            credits via the existing run pipeline; then payments (Razorpay Route
+            first — KYC is the gate), finance dashboard, plan enforcement, paid
+            inventory; GPX on scheduled runs + nav deep-links; desktop admin
+            panel; training fields.
+Also queued: store readiness (icon/splash/listing), RunMitra→ClubMitra rename.
+            FROZEN (survey "keep it simple"): chat search + voice waveforms.
+            DE-PRIORITISED: membership-fee polish (75% of clubs charge no fee).
 ```
+
+> **Next build, in order (survey-driven):** Strava/Garmin sync → live pilot
+> challenge with existing leads → real payments. See README Priority Board and
+> `ClubMitra_Survey_Analysis_v2.md`.
 
 ---
 
