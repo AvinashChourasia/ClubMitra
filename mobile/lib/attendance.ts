@@ -15,6 +15,7 @@ export type Run = {
   notes?: string | null;
   created_at: string;
   attendee_count: number;
+  checkin_open: boolean; // organiser has check-in running (QR shown)
 };
 
 // A run on the user's personal schedule (across all their clubs).
@@ -26,6 +27,10 @@ export type Attendee = {
   checked_in_at: string;
   self_check_in: boolean;
 };
+
+// A member's attendance record within one club ("attended 8 of 12").
+export type MemberAttendance = { run_id: string; title: string; scheduled_at: string; checked_in_at: string };
+export type ChapterAttendance = { attended: number; total_runs: number; history: MemberAttendance[] };
 
 // List endpoints coerce null -> [] defensively (an empty list must never crash
 // a .map / .length on the screen).
@@ -132,10 +137,14 @@ export function expandOccurrences(opts: {
   return out;
 }
 
-// checkIn marks the caller present (omit userId), or — for admins — another
-// member present by id.
-export function checkIn(token: string, runId: string, userId?: string) {
-  return request<Run>(`/runs/${runId}/checkin`, { method: "POST", body: userId ? { user_id: userId } : {}, token });
+// checkIn marks attendance. A MEMBER self-checks-in by passing the live `code`
+// (scanned/typed from the organiser's QR) — required now that couch check-in is
+// closed. An ADMIN marks another member present by passing their userId (no code).
+export function checkIn(token: string, runId: string, opts?: { userId?: string; code?: string }) {
+  const body: Record<string, string> = {};
+  if (opts?.userId) body.user_id = opts.userId;
+  if (opts?.code) body.code = opts.code;
+  return request<Run>(`/runs/${runId}/checkin`, { method: "POST", body, token });
 }
 
 // checkOut removes the caller's check-in (with an optional reason).
@@ -145,4 +154,26 @@ export function checkOut(token: string, runId: string, reason?: string) {
 
 export async function listAttendees(token: string, runId: string) {
   return (await request<Attendee[] | null>(`/runs/${runId}/attendance`, { token })) ?? [];
+}
+
+// --- QR check-in (organiser side) ---
+
+// openCheckin / closeCheckin start and stop check-in for a run (admin only).
+export function openCheckin(token: string, runId: string) {
+  return request<Run>(`/runs/${runId}/checkin/open`, { method: "POST", token });
+}
+export function closeCheckin(token: string, runId: string) {
+  return request<Run>(`/runs/${runId}/checkin/close`, { method: "POST", token });
+}
+
+// getCheckinCode returns the run's current rotating code + seconds-to-rotate
+// (admin only) — the organiser's QR screen polls this every window.
+export function getCheckinCode(token: string, runId: string) {
+  return request<{ code: string; expires_in_s: number }>(`/runs/${runId}/checkin/code`, { token });
+}
+
+// memberChapterAttendance: a member's record within one club. Allowed for the
+// member themselves or an admin of that chapter (the backend enforces it).
+export function memberChapterAttendance(token: string, chapterId: string, userId: string) {
+  return request<ChapterAttendance>(`/members/${userId}/attendance?chapter_id=${chapterId}`, { token });
 }

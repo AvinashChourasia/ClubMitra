@@ -115,7 +115,7 @@ func main() {
 	orgHandler := organisations.NewHandler(orgSvc, permChecker)
 
 	// Attendance: scheduled group runs + member check-ins.
-	attendanceSvc := attendance.NewService(attendance.NewRepository(pool), notifier)
+	attendanceSvc := attendance.NewService(attendance.NewRepository(pool), notifier, cfg.JWTSecret)
 	attendanceHandler := attendance.NewHandler(attendanceSvc, permChecker)
 
 	activitiesSvc := activities.NewService(activities.NewRepository(pool))

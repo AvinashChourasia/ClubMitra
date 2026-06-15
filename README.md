@@ -245,6 +245,8 @@ clubmitra/
 - [x] Attendance: admin schedules group run (title, date, time, location, distance target)
 - [x] Post-run check-in: member marks attendance (or admin marks them)
 - [x] Attendance history per member and per run
+- [x] **Trustable QR check-in (June 2026):** organiser taps "Open check-in" → a QR + 6-digit code that **rotates every 30s** (TOTP-style HMAC, no stored tokens); members scan or type it to self-check-in — closing the couch-check-in loophole (a forwarded screenshot expires in seconds). Code-entry works in Expo Go today; camera scan rides the next APK build (`expo-camera`). Migration 00037.
+- [x] **Attendance visibility:** live roster on the host screen; admin taps a member → their record in this club ("attended 8 of 12 · 67%"); members see their own via "My attendance"; pending approvals surfaced on the Members tab
 - [x] Challenge create: title, type (distance/days/streak), duration, target, visibility
 - [x] Challenge visibility: public / chapter-only / city-only / org-wide
 - [x] Challenge join: individual runner or club joins

@@ -2,6 +2,10 @@ package attendance
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -23,13 +27,72 @@ type notifier interface {
 
 // Service holds attendance business logic over the repository.
 type Service struct {
-	repo   *Repository
-	notify notifier
+	repo       *Repository
+	notify     notifier
+	checkinKey []byte // HMAC key for rotating check-in codes
 }
 
-// NewService wires the service to its repository and (optional) notifier.
-func NewService(repo *Repository, notify notifier) *Service {
-	return &Service{repo: repo, notify: notify}
+// NewService wires the service to its repository, (optional) notifier, and the
+// secret that signs rotating check-in codes (derived from the JWT secret in
+// main, so there's no extra config to set).
+func NewService(repo *Repository, notify notifier, checkinSecret string) *Service {
+	key := sha256.Sum256([]byte("clubmitra-checkin-v1:" + checkinSecret))
+	return &Service{repo: repo, notify: notify, checkinKey: key[:]}
+}
+
+// checkinWindowSecs is how long one rotating code is valid. Short enough that a
+// screenshot forwarded to an absent friend expires before they can use it.
+const checkinWindowSecs = 30
+
+// checkinCode derives the 6-digit code for a run in a given 30-second window —
+// TOTP-style: an HMAC of (runID, window) with dynamic truncation. Deterministic,
+// so the server can both generate (for the admin's QR) and validate (on scan)
+// without storing per-window state.
+func (s *Service) checkinCode(runID uuid.UUID, window int64) string {
+	mac := hmac.New(sha256.New, s.checkinKey)
+	fmt.Fprintf(mac, "%s:%d", runID.String(), window)
+	sum := mac.Sum(nil)
+	off := sum[len(sum)-1] & 0x0f
+	bin := binary.BigEndian.Uint32(sum[off:off+4]) & 0x7fffffff
+	return fmt.Sprintf("%06d", bin%1_000_000)
+}
+
+// CurrentCheckinCode returns the run's current code + seconds until it rotates.
+// Admin-only (the handler gates it): only the organiser showing the QR sees it.
+func (s *Service) CurrentCheckinCode(runID uuid.UUID, now time.Time) (code string, expiresInS int) {
+	window := now.Unix() / checkinWindowSecs
+	return s.checkinCode(runID, window), int(checkinWindowSecs - now.Unix()%checkinWindowSecs)
+}
+
+// validCheckinCode accepts the current OR immediately-previous window's code, so
+// a scan made right as the code rotates (or with a little network latency) still
+// succeeds. Constant-time compare.
+func (s *Service) validCheckinCode(runID uuid.UUID, code string, now time.Time) bool {
+	code = strings.TrimSpace(code)
+	if len(code) != 6 {
+		return false
+	}
+	w := now.Unix() / checkinWindowSecs
+	for _, win := range []int64{w, w - 1} {
+		if hmac.Equal([]byte(s.checkinCode(runID, win)), []byte(code)) {
+			return true
+		}
+	}
+	return false
+}
+
+// OpenCheckin / CloseCheckin flip a run's check-in (organiser action; the
+// handler enforces admin). Returns the refreshed run.
+func (s *Service) SetCheckinOpen(ctx context.Context, runID uuid.UUID, open bool) (*Run, error) {
+	if err := s.repo.SetCheckinOpen(ctx, runID, open); err != nil {
+		return nil, err
+	}
+	return s.repo.GetRun(ctx, runID)
+}
+
+// MemberChapterAttendance returns a member's attendance record within a chapter.
+func (s *Service) MemberChapterAttendance(ctx context.Context, chapterID uuid.UUID, userID string) (*ChapterAttendanceSummary, error) {
+	return s.repo.MemberChapterAttendance(ctx, chapterID, userID)
 }
 
 // ScheduleRun validates and creates a run. Authorization (must be a chapter
@@ -110,15 +173,33 @@ func (s *Service) GetRun(ctx context.Context, runID uuid.UUID) (*Run, error) {
 	return s.repo.GetRun(ctx, runID)
 }
 
-// CheckIn records attendance for a run. It first loads the run (to resolve the
-// chapter and to 404 on an unknown/deleted run), then writes the attendance row.
-// markedBy is nil for a self check-in, or the admin's id when marking someone.
-func (s *Service) CheckIn(ctx context.Context, runID uuid.UUID, userID string, markedBy *string) (*Run, error) {
+// CheckIn records attendance for a run. markedBy is nil for a self check-in, or
+// the admin's id when marking someone else.
+//
+//   - Admin marking a member (markedBy != nil): trusted, no code needed,
+//     source 'admin'. Works whether or not check-in is "open".
+//   - Self check-in (markedBy == nil): the trust path. Requires check-in to be
+//     OPEN and a valid rotating code (scanned from the organiser's QR or typed).
+//     This is what closes the couch-check-in loophole, so source is 'qr'.
+func (s *Service) CheckIn(ctx context.Context, runID uuid.UUID, userID string, markedBy *string, code string) (*Run, error) {
 	run, err := s.repo.GetRun(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.CheckIn(ctx, run.ID, run.ChapterID, userID, markedBy); err != nil {
+
+	source := "admin"
+	if markedBy == nil {
+		// Self check-in must prove presence via the live code.
+		if !run.CheckinOpen {
+			return nil, ValidationError{Msg: "check-in isn't open yet — ask the organiser to start it"}
+		}
+		if !s.validCheckinCode(run.ID, code, time.Now()) {
+			return nil, ValidationError{Msg: "that code has expired — scan the organiser's QR again"}
+		}
+		source = "qr"
+	}
+
+	if err := s.repo.CheckIn(ctx, run.ID, run.ChapterID, userID, markedBy, source); err != nil {
 		return nil, err
 	}
 	// Re-fetch so the returned attendee_count reflects this check-in.

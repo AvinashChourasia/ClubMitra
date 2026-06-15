@@ -449,6 +449,10 @@ export default function ClubDetail() {
       return;
     }
     const buttons: { text: string; style?: "destructive" | "cancel"; onPress?: () => void }[] = [
+      {
+        text: "View attendance",
+        onPress: () => router.push(`/member/${m.user_id}?chapter=${id}&name=${encodeURIComponent(m.name)}` as Href),
+      },
       ...MEMBER_STATUSES.filter((s) => s !== m.status).map((s) => ({
         text: `Set ${s.replace("_", " ")}`,
         onPress: () => withToken((t) => setMemberStatus(t, id, m.user_id, s)),
@@ -622,8 +626,23 @@ export default function ClubDetail() {
                     <Text style={{ color: colors.muted }}>No members yet — share the invite code.</Text>
                   ) : (
                     <>
-                      {isAdmin && <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 4 }}>Tap a member to manage.</Text>}
-                      {members.map((m, i) => (
+                      {isAdmin &&
+                        (() => {
+                          const pending = members.filter((m) => m.status === "pending").length;
+                          return pending > 0 ? (
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.primarySoft, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8 }}>
+                              <Ionicons name="person-add" size={15} color={colors.primary} />
+                              <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 13 }}>
+                                {pending} pending approval{pending === 1 ? "" : "s"} — tap to review
+                              </Text>
+                            </View>
+                          ) : (
+                            <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 4 }}>Tap a member to manage.</Text>
+                          );
+                        })()}
+                      {[...members]
+                        .sort((a, b) => (a.status === "pending" ? -1 : 0) - (b.status === "pending" ? -1 : 0))
+                        .map((m, i) => (
                         <Pressable
                           key={m.user_id}
                           onPress={() => manageMember(m)}
@@ -663,6 +682,14 @@ export default function ClubDetail() {
                     <Text style={{ color: "#fff", fontWeight: "700" }}>+ Schedule a run</Text>
                   </Pressable>
                 )}
+                <Pressable
+                  onPress={() => router.push(`/member/${user.id}?chapter=${id}&name=${encodeURIComponent(user.name)}` as Href)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14 }}
+                >
+                  <Ionicons name="checkmark-done-circle-outline" size={18} color={colors.primary} />
+                  <Text style={{ color: colors.text, fontWeight: "700", flex: 1 }}>My attendance</Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.subtle} />
+                </Pressable>
                 <RunScheduleView runs={runs} onOpenRun={(rid) => router.push(`/run/${rid}`)} showChapter={false} />
               </>
             )}

@@ -56,6 +56,12 @@
         {
           "microphonePermission": "ClubMitra uses the microphone to record voice notes in chat."
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "ClubMitra uses your camera to scan the check-in QR code at a club run."
+        }
       ]
     ],
     "experiments": {

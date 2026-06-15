@@ -4,13 +4,14 @@ import { useCallback, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
 import { ApiError } from "../../lib/api";
-import { getRun, listAttendees, checkIn, checkOut, type Run, type Attendee } from "../../lib/attendance";
+import { getRun, listAttendees, checkOut, type Run, type Attendee } from "../../lib/attendance";
 import { myChapters, isChapterAdmin } from "../../lib/clubs";
 import { colors, styles } from "../../lib/theme";
-import { formatRunWhen, isPast } from "../../lib/format";
+import { formatRunWhen } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
 
 export default function RunDetail() {
@@ -58,19 +59,6 @@ export default function RunDetail() {
 
   const alreadyIn = attendees.some((a) => a.user_id === user.id);
 
-  async function doCheckIn() {
-    setChecking(true);
-    try {
-      const token = await getAccessToken();
-      await checkIn(token!, id);
-      await load();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Something went wrong");
-    } finally {
-      setChecking(false);
-    }
-  }
-
   async function doCheckOut() {
     setChecking(true);
     try {
@@ -113,9 +101,26 @@ export default function RunDetail() {
               {run.location ? <Text style={{ color: colors.muted, marginTop: 6 }}>📍 {run.location}</Text> : null}
               {run.distance_target ? <Text style={{ color: colors.muted, marginTop: 2 }}>🎯 {run.distance_target} km target</Text> : null}
               {run.notes ? <Text style={{ color: colors.text, marginTop: 8 }}>{run.notes}</Text> : null}
+              {run.checkin_open && (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success }} />
+                  <Text style={{ color: colors.success, fontWeight: "800", fontSize: 12.5 }}>Check-in is open now</Text>
+                </View>
+              )}
             </View>
 
-            {/* Check-in / out toggle */}
+            {/* Admin: host the QR check-in (open/close, rotating code, roster). */}
+            {isAdmin && (
+              <Pressable
+                onPress={() => router.push(`/run/host/${id}`)}
+                style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, backgroundColor: colors.text, borderRadius: 14, paddingVertical: 15 }}
+              >
+                <Ionicons name="qr-code" size={18} color={colors.bg} />
+                <Text style={{ color: colors.bg, fontWeight: "800", fontSize: 15 }}>{run.checkin_open ? "Manage check-in" : "Open check-in (QR)"}</Text>
+              </Pressable>
+            )}
+
+            {/* Member check-in / out */}
             {alreadyIn ? (
               <View style={{ gap: 8 }}>
                 <View style={{ backgroundColor: colors.success, borderRadius: 14, paddingVertical: 15, alignItems: "center" }}>
@@ -131,15 +136,13 @@ export default function RunDetail() {
               </View>
             ) : (
               <Pressable
-                onPress={doCheckIn}
-                disabled={checking}
-                style={{ backgroundColor: colors.primary, opacity: checking ? 0.7 : 1, borderRadius: 14, paddingVertical: 15, alignItems: "center" }}
+                onPress={() => router.push(`/run/scan/${id}`)}
+                style={{ backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 15, alignItems: "center", gap: 2 }}
               >
-                {checking ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>{isPast(run.scheduled_at) ? "Check in" : "Check in early"}</Text>
-                )}
+                <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>Scan to check in</Text>
+                <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 12 }}>
+                  {run.checkin_open ? "Scan the organiser's QR or enter the code" : "Opens when the organiser starts check-in"}
+                </Text>
               </Pressable>
             )}
 

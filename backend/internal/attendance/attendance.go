@@ -30,6 +30,9 @@ type Run struct {
 	// AttendeeCount is populated on list/get so clients can show "12 checked in"
 	// without a second call.
 	AttendeeCount int `json:"attendee_count"`
+	// CheckinOpen is true while the organiser has check-in running (QR shown).
+	// Members can only self-check-in (scan/code) while this is true.
+	CheckinOpen bool `json:"checkin_open"`
 }
 
 // NewRun carries the fields needed to schedule a run.
@@ -78,6 +81,15 @@ type MemberAttendance struct {
 	Title       string    `json:"title"`
 	ScheduledAt time.Time `json:"scheduled_at"`
 	CheckedInAt time.Time `json:"checked_in_at"`
+}
+
+// ChapterAttendanceSummary is one member's attendance WITHIN a single chapter:
+// how many of the chapter's past runs they made, the total, and the list. Drives
+// the "attended 8 of 12 · 67%" record on the member-detail + My-attendance views.
+type ChapterAttendanceSummary struct {
+	Attended  int                `json:"attended"`
+	TotalRuns int                `json:"total_runs"`
+	History   []MemberAttendance `json:"history"`
 }
 
 // ErrNotFound is returned when a run lookup matches nothing.
@@ -183,7 +195,7 @@ func (r *Repository) ListUserRuns(ctx context.Context, userID string) ([]MyRun, 
 	const q = `
 		SELECT r.id, r.chapter_id, r.created_by, r.title, r.scheduled_at, r.has_time,
 		       r.location, r.location_lat, r.location_lng, r.distance_target, r.notes, r.created_at,
-		       COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS attendee_count,
+		       COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS attendee_count, r.checkin_open,
 		       c.name AS chapter_name,
 		       EXISTS (SELECT 1 FROM run_attendance ma
 		               WHERE ma.run_id = r.id AND ma.user_id = $1 AND ma.deleted_at IS NULL) AS checked_in
@@ -205,7 +217,7 @@ func (r *Repository) ListUserRuns(ctx context.Context, userID string) ([]MyRun, 
 		if err := rows.Scan(
 			&m.ID, &m.ChapterID, &m.CreatedBy, &m.Title, &m.ScheduledAt, &m.HasTime,
 			&m.Location, &m.LocationLat, &m.LocationLng, &m.DistanceTarget, &m.Notes, &m.CreatedAt,
-			&m.AttendeeCount, &m.ChapterName, &m.CheckedIn,
+			&m.AttendeeCount, &m.CheckinOpen, &m.ChapterName, &m.CheckedIn,
 		); err != nil {
 			return nil, err
 		}
@@ -220,7 +232,7 @@ func (r *Repository) ListRuns(ctx context.Context, chapterID uuid.UUID) ([]Run, 
 	const q = `
 		SELECT r.id, r.chapter_id, r.created_by, r.title, r.scheduled_at, r.has_time,
 		       r.location, r.location_lat, r.location_lng, r.distance_target, r.notes, r.created_at,
-		       COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS attendee_count
+		       COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS attendee_count, r.checkin_open
 		FROM runs r
 		LEFT JOIN run_attendance a ON a.run_id = r.id
 		WHERE r.chapter_id = $1 AND r.deleted_at IS NULL
@@ -248,7 +260,7 @@ func (r *Repository) GetRun(ctx context.Context, runID uuid.UUID) (*Run, error) 
 	const q = `
 		SELECT r.id, r.chapter_id, r.created_by, r.title, r.scheduled_at, r.has_time,
 		       r.location, r.location_lat, r.location_lng, r.distance_target, r.notes, r.created_at,
-		       COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS attendee_count
+		       COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS attendee_count, r.checkin_open
 		FROM runs r
 		LEFT JOIN run_attendance a ON a.run_id = r.id
 		WHERE r.id = $1 AND r.deleted_at IS NULL
@@ -261,15 +273,69 @@ func (r *Repository) GetRun(ctx context.Context, runID uuid.UUID) (*Run, error) 
 }
 
 // CheckIn records a member's attendance for a run. markedBy is nil for a
-// self check-in. ON CONFLICT keeps it idempotent (and revives a removed row).
-func (r *Repository) CheckIn(ctx context.Context, runID, chapterID uuid.UUID, userID string, markedBy *string) error {
+// self check-in; source is 'self' | 'qr' | 'admin'. ON CONFLICT keeps it
+// idempotent (and revives a removed row).
+func (r *Repository) CheckIn(ctx context.Context, runID, chapterID uuid.UUID, userID string, markedBy *string, source string) error {
 	const q = `
-		INSERT INTO run_attendance (run_id, user_id, chapter_id, marked_by)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO run_attendance (run_id, user_id, chapter_id, marked_by, source)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (run_id, user_id) DO UPDATE
-			SET deleted_at = NULL, marked_by = EXCLUDED.marked_by`
-	_, err := r.db.Exec(ctx, q, runID, userID, chapterID, markedBy)
+			SET deleted_at = NULL, marked_by = EXCLUDED.marked_by, source = EXCLUDED.source`
+	_, err := r.db.Exec(ctx, q, runID, userID, chapterID, markedBy, source)
 	return err
+}
+
+// SetCheckinOpen flips a run's check-in open/closed (organiser action; the
+// handler enforces admin). Returns ErrNotFound if the run is missing/deleted.
+func (r *Repository) SetCheckinOpen(ctx context.Context, runID uuid.UUID, open bool) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE runs SET checkin_open = $2 WHERE id = $1 AND deleted_at IS NULL`, runID, open)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// MemberChapterAttendance returns one member's attendance within a chapter:
+// how many of the chapter's PAST runs (scheduled on/before now) they made, the
+// total, and the attended runs themselves (newest first).
+func (r *Repository) MemberChapterAttendance(ctx context.Context, chapterID uuid.UUID, userID string) (*ChapterAttendanceSummary, error) {
+	out := &ChapterAttendanceSummary{History: []MemberAttendance{}}
+	const counts = `
+		SELECT
+			(SELECT COUNT(*) FROM runs
+			   WHERE chapter_id = $1 AND deleted_at IS NULL AND scheduled_at <= now())::int AS total_runs,
+			(SELECT COUNT(*) FROM run_attendance a
+			   JOIN runs r ON r.id = a.run_id
+			   WHERE r.chapter_id = $1 AND r.deleted_at IS NULL
+			     AND a.user_id = $2 AND a.deleted_at IS NULL)::int AS attended`
+	if err := r.db.QueryRow(ctx, counts, chapterID, userID).Scan(&out.TotalRuns, &out.Attended); err != nil {
+		return nil, err
+	}
+	const list = `
+		SELECT a.run_id, r.title, r.scheduled_at, a.checked_in_at
+		FROM run_attendance a
+		JOIN runs r ON r.id = a.run_id
+		WHERE r.chapter_id = $1 AND r.deleted_at IS NULL
+		  AND a.user_id = $2 AND a.deleted_at IS NULL
+		ORDER BY r.scheduled_at DESC
+		LIMIT 100`
+	rows, err := r.db.Query(ctx, list, chapterID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var m MemberAttendance
+		if err := rows.Scan(&m.RunID, &m.Title, &m.ScheduledAt, &m.CheckedInAt); err != nil {
+			return nil, err
+		}
+		out.History = append(out.History, m)
+	}
+	return out, rows.Err()
 }
 
 // CheckOut soft-deletes the user's attendance for a run, recording an optional
@@ -342,7 +408,7 @@ func scanRunWithCount(s scanRow) (*Run, error) {
 	err := s.Scan(
 		&run.ID, &run.ChapterID, &run.CreatedBy, &run.Title, &run.ScheduledAt, &run.HasTime,
 		&run.Location, &run.LocationLat, &run.LocationLng, &run.DistanceTarget, &run.Notes, &run.CreatedAt,
-		&run.AttendeeCount,
+		&run.AttendeeCount, &run.CheckinOpen,
 	)
 	if err != nil {
 		return nil, err

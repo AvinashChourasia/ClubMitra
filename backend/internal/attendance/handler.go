@@ -42,6 +42,11 @@ func (h *Handler) RunRoutes() http.Handler {
 		r.Post("/checkin", h.checkIn)
 		r.Post("/checkout", h.checkOut)
 		r.Get("/attendance", h.listAttendees)
+		// QR attendance: organiser opens/closes check-in and reads the rotating
+		// code to render the QR; members check in via /checkin with that code.
+		r.Post("/checkin/open", h.openCheckin)
+		r.Post("/checkin/close", h.closeCheckin)
+		r.Get("/checkin/code", h.checkinCode)
 	})
 	return r
 }
@@ -69,6 +74,7 @@ type scheduleRunRequest struct {
 
 type checkInRequest struct {
 	UserID string  `json:"user_id"` // optional: omit/self = self check-in
+	Code   string  `json:"code"`    // rotating QR code; required for self check-in
 	Notes  *string `json:"notes"`
 }
 
@@ -324,12 +330,68 @@ func (h *Handler) checkIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := h.svc.CheckIn(r.Context(), runID, target, markedBy)
+	run, err := h.svc.CheckIn(r.Context(), runID, target, markedBy, req.Code)
 	if err != nil {
 		h.writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, run)
+}
+
+// openCheckin / closeCheckin let an organiser start and stop check-in for a run
+// (chapter-admin only). While open, the run shows a rotating QR and members can
+// self-check-in with the live code.
+func (h *Handler) openCheckin(w http.ResponseWriter, r *http.Request)  { h.setCheckin(w, r, true) }
+func (h *Handler) closeCheckin(w http.ResponseWriter, r *http.Request) { h.setCheckin(w, r, false) }
+
+func (h *Handler) setCheckin(w http.ResponseWriter, r *http.Request, open bool) {
+	actorID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	runID, ok := h.runID(w, r)
+	if !ok {
+		return
+	}
+	chapterID, err := h.svc.ChapterOfRun(r.Context(), runID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	if !h.requireChapterAdmin(w, r, actorID, chapterID) {
+		return
+	}
+	run, err := h.svc.SetCheckinOpen(r.Context(), runID, open)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, run)
+}
+
+// checkinCode returns the run's CURRENT rotating code + seconds-to-rotate, for
+// the organiser's QR screen. Admin-only — members must scan/type it, never fetch it.
+func (h *Handler) checkinCode(w http.ResponseWriter, r *http.Request) {
+	actorID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	runID, ok := h.runID(w, r)
+	if !ok {
+		return
+	}
+	chapterID, err := h.svc.ChapterOfRun(r.Context(), runID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	if !h.requireChapterAdmin(w, r, actorID, chapterID) {
+		return
+	}
+	code, expiresIn := h.svc.CurrentCheckinCode(runID, time.Now())
+	httpx.JSON(w, http.StatusOK, map[string]any{"code": code, "expires_in_s": expiresIn})
 }
 
 func (h *Handler) checkOut(w http.ResponseWriter, r *http.Request) {
@@ -395,7 +457,29 @@ func (h *Handler) memberHistory(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "user id is required")
 		return
 	}
-	// A runner's attendance history is private to them — no cross-user reads.
+
+	// Chapter-scoped view (?chapter_id=): a member's attendance record WITHIN a
+	// club — "attended 8 of 12". Allowed for the member themselves, or an admin
+	// of that chapter (so admins can review each person; members see their own).
+	if cid := r.URL.Query().Get("chapter_id"); cid != "" {
+		chapterID, err := uuid.Parse(cid)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "invalid chapter_id")
+			return
+		}
+		if userID != actorID && !h.requireChapterAdmin(w, r, actorID, chapterID) {
+			return
+		}
+		summary, err := h.svc.MemberChapterAttendance(r.Context(), chapterID, userID)
+		if err != nil {
+			h.writeError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, summary)
+		return
+	}
+
+	// Cross-chapter history is private to the runner themselves.
 	if userID != actorID {
 		httpx.Error(w, http.StatusForbidden, "you can only view your own attendance history")
 		return
