@@ -17,12 +17,19 @@ export default function DirectChat() {
   const [otherLastReadAt, setOtherLastReadAt] = useState<string | null>(null);
 
   // load fills the header (other) + read receipt time, and returns the messages.
+  // load runs on every poll (~4s); only push state when it actually changed, so
+  // we don't re-render the whole thread (and interrupt a swipe) for no reason.
   const load = useCallback(async () => {
     const token = await getAccessToken();
     if (!token) return [];
     const thread = await directThread(token, id);
-    setOther(thread.other);
-    setOtherLastReadAt(thread.other_last_read_at ?? null);
+    setOther((prev) =>
+      prev && prev.id === thread.other.id && prev.name === thread.other.name && prev.profile_photo === thread.other.profile_photo
+        ? prev
+        : thread.other
+    );
+    const lastRead = thread.other_last_read_at ?? null;
+    setOtherLastReadAt((prev) => (prev === lastRead ? prev : lastRead));
     return thread.messages;
   }, [getAccessToken, id]);
 

@@ -279,7 +279,14 @@ export function ChatThread({
         if (typingTimer.current) clearTimeout(typingTimer.current);
         setActiveThread(null);
       };
-    }, [reload, realtime, getToken, meId])
+      // Key on the PRIMITIVE scope/id, never the `realtime` OBJECT: the DM
+      // screen recreates that object literal on every poll-driven re-render, and
+      // depending on it would tear this effect down every few seconds — each
+      // teardown re-runs reload(true), yanking the list to the bottom (no
+      // scroll) and churning the gesture tree (no swipe). With primitives the
+      // effect only re-subscribes when the conversation actually changes.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [reload, realtime?.scope, realtime?.id, getToken, meId])
   );
 
   async function onRefresh() {
