@@ -34,6 +34,7 @@ import {
   type Challenge,
 } from "../../lib/challenges";
 import { leaderboard, clubStanding, type BoardEntry, type ClubStanding, type Period } from "../../lib/runlog";
+import { chapterAnnouncements, type Message as MsgType } from "../../lib/messaging";
 import { chapterFeed, type FeedItem } from "../../lib/activities";
 import { formatDistance, formatPace } from "../../lib/format";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
@@ -305,6 +306,7 @@ export default function ClubDetail() {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [role, setRole] = useState<string | null>(null);
   const [myStatus, setMyStatus] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState<MsgType | null>(null);
   const [tab, setTab] = useState<Tab>("feed");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -328,6 +330,10 @@ export default function ClubDetail() {
     setMyStatus(myc?.status ?? null);
     setRuns(runList);
     setChallenges(allChallenges.filter((c) => c.chapter_id === id || (ch.org_id && c.org_id === ch.org_id)));
+    // Latest announcement for the club-page banner (members only; best-effort).
+    chapterAnnouncements(token, id)
+      .then((a) => setAnnouncement(a[0] ?? null))
+      .catch(() => setAnnouncement(null));
     try {
       setMembers(await listMembers(token, id)); // admin-only; 403 => not an admin
     } catch (e) {
@@ -582,6 +588,36 @@ export default function ClubDetail() {
                   </Text>
                 </View>
                 <Text style={{ color: colors.accent, fontWeight: "700" }}>{myStatus === "on_leave" ? "Resume" : "On leave"}</Text>
+              </Pressable>
+            )}
+
+            {/* Latest announcement — surfaced here so club news isn't buried in
+                the chat thread. Tap to open the group chat. */}
+            {announcement && (
+              <Pressable
+                onPress={() => router.push(`/thread/club/${id}` as Href)}
+                style={{ flexDirection: "row", gap: 10, backgroundColor: colors.primarySoft, borderRadius: 14, padding: 12, borderLeftWidth: 3, borderLeftColor: colors.primary }}
+              >
+                <Ionicons name="megaphone" size={18} color={colors.primary} style={{ marginTop: 1 }} />
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 11.5, letterSpacing: 0.4 }}>ANNOUNCEMENT</Text>
+                    <Text style={{ color: colors.subtle, fontSize: 11 }}>· {timeAgo(announcement.created_at)}</Text>
+                  </View>
+                  {announcement.body ? <Text style={{ color: colors.text, fontSize: 14, marginTop: 2 }} numberOfLines={3}>{announcement.body}</Text> : null}
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.subtle} style={{ alignSelf: "center" }} />
+              </Pressable>
+            )}
+
+            {/* Admins: post an announcement (also pushes to members). */}
+            {isAdmin && (
+              <Pressable
+                onPress={() => router.push(`/thread/club/${id}` as Href)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 7, alignSelf: "flex-start" }}
+              >
+                <Ionicons name="add-circle-outline" size={16} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 13 }}>Post an announcement</Text>
               </Pressable>
             )}
 

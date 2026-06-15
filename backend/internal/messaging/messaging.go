@@ -160,6 +160,34 @@ func (r *Repository) ensureRunConversation(ctx context.Context, chapterID, runID
 	return id, err
 }
 
+// listAnnouncements returns a conversation's most recent announcement messages
+// (newest first) — a lean read for the club page's announcement card, without
+// loading the whole thread, reactions, or replies.
+func (r *Repository) listAnnouncements(ctx context.Context, conversationID uuid.UUID, limit int) ([]Message, error) {
+	const q = `
+		SELECT m.id, m.sender_id, u.name, m.body, m.created_at
+		FROM messages m
+		JOIN users u ON u.id = m.sender_id
+		WHERE m.conversation_id = $1 AND m.is_announcement = true AND m.deleted_at IS NULL
+		ORDER BY m.created_at DESC
+		LIMIT $2`
+	rows, err := r.db.Query(ctx, q, conversationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Message, 0)
+	for rows.Next() {
+		var m Message
+		m.IsAnnouncement = true
+		if err := rows.Scan(&m.ID, &m.SenderID, &m.SenderName, &m.Body, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // listMessages returns a conversation's recent messages, oldest-last (the client
 // renders bottom-up), each carrying its reply preview and aggregated reactions
 // (with the viewer's own reaction flagged). Capped at 100 — pagination later.

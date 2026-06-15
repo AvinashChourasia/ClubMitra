@@ -11,8 +11,10 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../../lib/auth";
 import { ApiError } from "../../../lib/api";
-import { getChapter, myChapters, deleteChapter, isChapterAdmin } from "../../../lib/clubs";
+import { getChapter, myChapters, listMembers, deleteChapter, isChapterAdmin } from "../../../lib/clubs";
+import { listRuns, type Run } from "../../../lib/attendance";
 import { getDropoff, getEngagement, getVolume, type Dropoff, type Engagement, type VolumePoint } from "../../../lib/analytics";
+import { formatRunWhen } from "../../../lib/format";
 import { colors, styles, useThemeMode } from "../../../lib/theme";
 
 function ToolRow({ icon, label, onPress, danger, last }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean; last?: boolean }) {
@@ -116,6 +118,8 @@ export default function ManageClub() {
 
   const [name, setName] = useState("club");
   const [role, setRole] = useState<string | null>(null);
+  const [nextRun, setNextRun] = useState<Run | null>(null);
+  const [pending, setPending] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
@@ -130,6 +134,22 @@ export default function ManageClub() {
             setName(ch.name);
             setRole(mine.find((c) => c.id === id)?.role ?? null);
           }
+          // The run to host check-in for: the soonest one from the start of
+          // today onward; falls back to the most recent if none upcoming.
+          listRuns(token, id)
+            .then((runs) => {
+              if (!active) return;
+              const since = new Date();
+              since.setHours(0, 0, 0, 0);
+              const upcoming = runs
+                .filter((r) => new Date(r.scheduled_at) >= since)
+                .sort((a, b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at));
+              setNextRun(upcoming[0] ?? runs[0] ?? null);
+            })
+            .catch(() => {});
+          listMembers(token, id)
+            .then((ms) => active && setPending(ms.filter((m) => m.status === "pending").length))
+            .catch(() => {});
         } catch {
           /* keep defaults */
         } finally {
@@ -185,8 +205,45 @@ export default function ManageClub() {
           <Text style={{ color: colors.muted, marginTop: 12 }}>You don&apos;t manage this club.</Text>
         ) : (
           <>
+            {/* Next run → one tap to host QR check-in */}
+            {nextRun && (
+              <View style={[styles.card, { gap: 10 }]}>
+                <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Next run</Text>
+                <View>
+                  <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16 }} numberOfLines={1}>{nextRun.title}</Text>
+                  <Text style={{ color: colors.primary, fontWeight: "700", marginTop: 2 }}>{formatRunWhen(nextRun.scheduled_at, nextRun.has_time)}</Text>
+                </View>
+                <Pressable
+                  onPress={() => router.push(`/run/host/${nextRun.id}`)}
+                  style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, backgroundColor: colors.text, borderRadius: 12, paddingVertical: 13 }}
+                >
+                  <Ionicons name="qr-code" size={17} color={colors.bg} />
+                  <Text style={{ color: colors.bg, fontWeight: "800" }}>{nextRun.checkin_open ? "Manage check-in" : "Open check-in (QR)"}</Text>
+                </Pressable>
+                <Pressable onPress={() => router.push(`/run/${nextRun.id}`)} hitSlop={6} style={{ alignItems: "center" }}>
+                  <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 13 }}>View run & roster</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {/* Pending approvals */}
+            {pending > 0 && (
+              <Pressable
+                onPress={() => router.replace(`/club/${id}`)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.primarySoft, borderRadius: 14, padding: 14 }}
+              >
+                <Ionicons name="person-add" size={20} color={colors.primary} />
+                <Text style={{ flex: 1, color: colors.primary, fontWeight: "800" }}>
+                  {pending} pending approval{pending === 1 ? "" : "s"}
+                </Text>
+                <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 13 }}>Review ›</Text>
+              </Pressable>
+            )}
+
             <View style={styles.card}>
               <Text style={[styles.sectionTitle, { marginBottom: 2 }]}>Club tools</Text>
+              <ToolRow icon="calendar-outline" label="Schedule a run" onPress={() => router.push(`/run/new?chapter_id=${id}`)} />
+              <ToolRow icon="megaphone-outline" label="Post an announcement" onPress={() => router.push(`/thread/club/${id}`)} />
               <ToolRow icon="create-outline" label="Edit club details" onPress={() => router.push(`/club/edit/${id}`)} />
               <ToolRow icon="cube-outline" label="Inventory" onPress={() => router.push(`/club/inventory/${id}`)} last={!isOwner} />
               {isOwner && <ToolRow icon="trash-outline" label="Delete club" danger last onPress={confirmDelete} />}

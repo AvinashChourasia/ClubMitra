@@ -277,6 +277,23 @@ func (s *Service) ChapterMessages(ctx context.Context, userID string, chapterID 
 	return msgs, nil
 }
 
+// ChapterAnnouncements returns the chapter's most recent announcements for the
+// club-page card (member-gated). Does NOT mark the chat read — viewing the card
+// isn't reading the thread.
+func (s *Service) ChapterAnnouncements(ctx context.Context, userID string, chapterID uuid.UUID, limit int) ([]Message, error) {
+	if err := s.requireMember(ctx, chapterID, userID); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+	convID, err := s.repo.ensureChapterConversation(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.listAnnouncements(ctx, convID, limit)
+}
+
 // PostChapter posts a message to a chapter chat (optionally quoting another).
 func (s *Service) PostChapter(ctx context.Context, userID string, chapterID uuid.UUID, body, mediaURL, mediaType *string, replyToID *uuid.UUID) (*Message, error) {
 	if err := s.requireMember(ctx, chapterID, userID); err != nil {

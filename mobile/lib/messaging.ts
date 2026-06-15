@@ -76,6 +76,12 @@ export function announce(token: string, chapterId: string, body: string) {
   return request<Message>(`/messaging/chapter/${chapterId}/announce`, { method: "POST", body: { body }, token });
 }
 
+// chapterAnnouncements: the latest announcements for the club-page card (lean,
+// member-gated; doesn't mark the chat read). Coerces null -> [].
+export async function chapterAnnouncements(token: string, chapterId: string) {
+  return (await request<Message[] | null>(`/messaging/chapter/${chapterId}/announcements`, { token })) ?? [];
+}
+
 // --- direct (1:1) chat, keyed by the other user's id ---
 export function directThread(token: string, userId: string) {
   return request<DirectThread>(`/messaging/dm/${userId}`, { token });

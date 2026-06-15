@@ -53,6 +53,25 @@ export type Member = {
   joined_at: string;
 };
 
+// MemberDetail is the admin-facing profile of one member (mirrors the backend).
+export type MemberDetail = {
+  user_id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  age?: number | null;
+  tshirt_size?: string | null;
+  city?: string | null;
+  status: string;
+  joined_at: string;
+  fee_paid_until?: string | null;
+};
+
+// getMemberDetail: admin-only profile of a member (403 for non-admins).
+export function getMemberDetail(token: string, chapterId: string, userId: string) {
+  return request<MemberDetail>(`/chapters/${chapterId}/members/${userId}`, { token });
+}
+
 export type Organisation = { id: string; name: string; description: string };
 
 // myChapters: the clubs the signed-in user belongs to or admins.

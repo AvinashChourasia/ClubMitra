@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/auth";
 import { ApiError } from "../../lib/api";
 import { memberChapterAttendance, type ChapterAttendance } from "../../lib/attendance";
+import { getMemberDetail, type MemberDetail } from "../../lib/clubs";
 import { ProgressRing } from "../../components/ProgressRing";
 import { Avatar } from "../../components/Avatar";
 import { Tap } from "../../components/Tap";
@@ -23,11 +24,21 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+function Detail({ label, value, last }: { label: string; value: string; last?: boolean }) {
+  return (
+    <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 9, borderBottomWidth: last ? 0 : 1, borderBottomColor: colors.border }}>
+      <Text style={{ color: colors.muted, fontSize: 14 }}>{label}</Text>
+      <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600", textTransform: label === "Status" ? "capitalize" : "none" }}>{value}</Text>
+    </View>
+  );
+}
+
 export default function MemberAttendance() {
   const { id, chapter, name } = useLocalSearchParams<{ id: string; chapter?: string; name?: string }>();
   const { user, getAccessToken } = useAuth();
   const router = useRouter();
   const [data, setData] = useState<ChapterAttendance | null>(null);
+  const [profile, setProfile] = useState<MemberDetail | null>(null); // admins only
   const [error, setError] = useState<string | null>(null);
 
   useFocusEffect(
@@ -39,6 +50,10 @@ export default function MemberAttendance() {
           if (!token || !chapter) return;
           const d = await memberChapterAttendance(token, chapter, id);
           if (active) setData(d);
+          // Admin-facing profile card — best-effort: 403 for non-admins/self.
+          getMemberDetail(token, chapter, id)
+            .then((p) => active && setProfile(p))
+            .catch(() => {});
         } catch (e) {
           if (active) setError(e instanceof ApiError ? e.message : "Couldn't load attendance");
         }
@@ -90,6 +105,21 @@ export default function MemberAttendance() {
                 </Text>
               </View>
             </View>
+
+            {/* Admin profile card — contact + kit + membership (admins only) */}
+            {profile && (
+              <View style={[styles.card, { gap: 2 }]}>
+                <Text style={styles.sectionTitle}>Member details</Text>
+                <Detail label="Status" value={profile.status.replace("_", " ")} />
+                {profile.email ? <Detail label="Email" value={profile.email} /> : null}
+                {profile.phone ? <Detail label="Phone" value={profile.phone} /> : null}
+                {profile.city ? <Detail label="City" value={profile.city} /> : null}
+                {profile.tshirt_size ? <Detail label="T-shirt" value={profile.tshirt_size} /> : null}
+                {profile.age != null ? <Detail label="Age" value={String(profile.age)} /> : null}
+                <Detail label="Joined" value={fmtDate(profile.joined_at)} />
+                {profile.fee_paid_until ? <Detail label="Fee paid until" value={fmtDate(profile.fee_paid_until)} last /> : null}
+              </View>
+            )}
 
             {/* The runs they showed up to */}
             <View style={[styles.card, { gap: 2 }]}>

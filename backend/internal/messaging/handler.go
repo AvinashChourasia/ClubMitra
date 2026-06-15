@@ -25,6 +25,7 @@ func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/conversations", h.inbox) // the chat list (club groups + DMs)
 	r.Get("/chapter/{chapterID}", h.chapterList)
+	r.Get("/chapter/{chapterID}/announcements", h.chapterAnnouncements) // club-page card
 	r.Post("/chapter/{chapterID}", h.chapterPost)
 	r.Post("/chapter/{chapterID}/announce", h.announce)
 	r.Post("/chapter/{chapterID}/poll", h.chapterPoll) // admin: post a poll
@@ -248,6 +249,15 @@ func (h *Handler) chapterList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msgs, err := h.svc.ChapterMessages(r.Context(), uid, cid)
+	h.respond(w, msgs, err)
+}
+
+func (h *Handler) chapterAnnouncements(w http.ResponseWriter, r *http.Request) {
+	uid, cid, ok := h.userAnd(w, r, "chapterID")
+	if !ok {
+		return
+	}
+	msgs, err := h.svc.ChapterAnnouncements(r.Context(), uid, cid, 5)
 	h.respond(w, msgs, err)
 }
 
