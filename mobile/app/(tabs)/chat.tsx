@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
 import { inbox, setChatPrefs, type InboxItem } from "../../lib/messaging";
+import { swr } from "../../lib/cache";
 import { ensureConnected, subscribe, type RTEvent } from "../../lib/realtime";
 import { setUnreadTotal, sumUnread } from "../../lib/unread";
 import { Avatar } from "../../components/Avatar";
@@ -65,10 +66,12 @@ export default function Chat() {
   const load = useCallback(async () => {
     const token = await getAccessToken();
     if (!token) return;
-    const list = await inbox(token);
-    setItems(list);
-    setUnreadTotal(sumUnread(list));
-  }, [getAccessToken]);
+    // Cached inbox paints instantly (offline / cold backend), then refreshes.
+    await swr(`${user?.id}:inbox`, () => inbox(token), (list) => {
+      setItems(list);
+      setUnreadTotal(sumUnread(list));
+    });
+  }, [getAccessToken, user?.id]);
 
   useFocusEffect(
     useCallback(() => {

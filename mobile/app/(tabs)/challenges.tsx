@@ -27,6 +27,7 @@ import { ProgressRing } from "../../components/ProgressRing";
 import { GradientCard } from "../../components/GradientCard";
 import { TYPE_THEME, LiveDot } from "../../components/ChallengeBits";
 import { SearchBar } from "../../components/discovery";
+import { swr } from "../../lib/cache";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 import { GuestChallenges } from "../../components/GuestScreens";
 
@@ -45,12 +46,14 @@ export default function Challenges() {
   const load = useCallback(async () => {
     try {
       const token = await getAccessToken();
-      if (token) setChallenges(await listChallenges(token, joinedOnly));
+      if (!token) return;
+      // Cached challenges paint instantly (offline / cold backend), then refresh.
+      await swr(`${user?.id}:challenges:${joinedOnly ? "joined" : "all"}`, () => listChallenges(token, joinedOnly), setChallenges);
     } catch {
-      // Keep the last-good list; only land on "empty" if we never had data.
+      // No cache AND fetch failed — only now land on "empty".
       setChallenges((prev) => prev ?? []);
     }
-  }, [getAccessToken, joinedOnly]);
+  }, [getAccessToken, joinedOnly, user?.id]);
 
   useFocusEffect(
     useCallback(() => {

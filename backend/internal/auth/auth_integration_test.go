@@ -111,22 +111,20 @@ func TestAuthFlow(t *testing.T) {
 		t.Fatal("access token verified under wrong secret — signature not checked!")
 	}
 
-	// --- Refresh rotation + theft detection ---
+	// --- Refresh: non-rotating, stable token (rotation removed deliberately) ---
 	r0 := pair.RefreshToken
 	rot1, err := svc.Refresh(ctx, r0)
 	if err != nil {
 		t.Fatalf("refresh r0: %v", err)
 	}
-	if rot1.RefreshToken == r0 {
-		t.Fatal("refresh did not rotate the token")
+	// The refresh token is intentionally stable now — refresh hands back a new
+	// ACCESS token but keeps the same refresh token (kills the mobile
+	// lost-write logout). It must keep working when presented again.
+	if rot1.RefreshToken != r0 {
+		t.Fatal("refresh token should be stable (non-rotating)")
 	}
-	r2 := rot1.RefreshToken
-	// Replaying the already-rotated r0 must revoke the whole family.
-	if _, err := svc.Refresh(ctx, r0); !errors.Is(err, auth.ErrInvalidRefreshToken) {
-		t.Fatalf("replay r0: want ErrInvalidRefreshToken, got %v", err)
-	}
-	if _, err := svc.Refresh(ctx, r2); !errors.Is(err, auth.ErrInvalidRefreshToken) {
-		t.Fatalf("r2 after theft: want ErrInvalidRefreshToken, got %v", err)
+	if _, err := svc.Refresh(ctx, r0); err != nil {
+		t.Fatalf("re-presenting the stable token must keep working, got %v", err)
 	}
 
 	// --- Logout revokes the refresh token ---

@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
 import { myChapters, isChapterAdmin, roleLabel, type MyChapter } from "../../lib/clubs";
+import { swr } from "../../lib/cache";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 import { Avatar } from "../../components/Avatar";
 import { Tap } from "../../components/Tap";
@@ -49,12 +50,15 @@ export default function Clubs() {
   const load = useCallback(async () => {
     try {
       const token = await getAccessToken();
-      if (token) setClubs(await myChapters(token));
+      if (!token) return;
+      // Cached clubs paint instantly (even offline / backend asleep), then
+      // refresh in the background and persist for next launch.
+      await swr(`${user?.id}:clubs`, () => myChapters(token), setClubs);
     } catch {
-      // Keep the last-good list; only land on "empty" if we never had data.
+      // No cache AND the fetch failed — only now land on "empty".
       setClubs((prev) => prev ?? []);
     }
-  }, [getAccessToken]);
+  }, [getAccessToken, user?.id]);
 
   useFocusEffect(
     useCallback(() => {

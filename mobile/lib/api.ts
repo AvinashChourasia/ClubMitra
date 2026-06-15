@@ -49,14 +49,26 @@ type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
   token?: string | null;
+  timeoutMs?: number;
 };
+
+// Hard ceiling on any single request. The free-tier backend can cold-start for
+// ~30s after sleeping, so this is generous — but it must never be infinite: an
+// un-bounded fetch leaves screens (and the run-finish flow) hanging forever,
+// and a hung refresh is what used to push frustrated users to force-quit
+// mid-rotation. A timeout surfaces as ApiError(0), which every caller already
+// treats as transient (keep last-good data, never sign out).
+const DEFAULT_TIMEOUT_MS = 45000;
 
 // request is the single entry point for all API calls.
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, token } = opts;
+  const { method = "GET", body, token, timeoutMs = DEFAULT_TIMEOUT_MS } = opts;
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
@@ -64,10 +76,14 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
     });
   } catch {
-    // fetch only rejects on network failure (server down, wrong IP, no Wi-Fi).
+    // fetch rejects on network failure (server down, wrong IP, no Wi-Fi) or
+    // when we abort on timeout. Both are transient from the caller's view.
     throw new ApiError(0, "Cannot reach the server. Check your connection.");
+  } finally {
+    clearTimeout(timer);
   }
 
   // 204 No Content (e.g. logout) has no body to parse.

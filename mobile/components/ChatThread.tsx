@@ -32,11 +32,11 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useRouter } from "expo-router";
-// ScrollView comes from gesture-handler (not react-native) so the message list
-// shares one gesture system with the per-bubble Swipeable. With RN's core
-// ScrollView, Swipeable's pan handler swallows the vertical drag on Android and
-// the list can't be scrolled. See react-native-gesture-handler docs.
-import { ScrollView, Swipeable } from "react-native-gesture-handler";
+// ScrollView from gesture-handler (not react-native) so the message list plays
+// nicely with the app's gesture system. Swipe-to-reply per bubble was removed:
+// its pan gesture fought the vertical scroll on Android (the list wouldn't
+// scroll up) and was redundant with long-press → Reply.
+import { ScrollView } from "react-native-gesture-handler";
 import * as Haptics from "expo-haptics";
 import {
   AudioModule,
@@ -119,7 +119,6 @@ export function ChatThread({
   const seq = useRef(0);
   const nearBottom = useRef(true);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const swipeRefs = useRef<Record<string, Swipeable | null>>({});
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [pending, setPending] = useState<Pending[]>([]);
   const [text, setText] = useState("");
@@ -749,26 +748,6 @@ export function ChatThread({
                         <Text style={{ color: colors.muted, fontSize: 10, marginTop: 4 }}>{timeOf(m.created_at)}</Text>
                       </View>
                     ) : (
-                      <Swipeable
-                        friction={2}
-                        leftThreshold={42}
-                        overshootLeft={false}
-                        renderLeftActions={() => (
-                          <View style={{ justifyContent: "center", paddingHorizontal: 14 }}>
-                            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
-                              <Ionicons name="arrow-undo" size={16} color={colors.muted} />
-                            </View>
-                          </View>
-                        )}
-                        onSwipeableWillOpen={() => {
-                          Haptics.selectionAsync().catch(() => {});
-                          setReplyTo(m);
-                          setTimeout(() => swipeRefs.current[m.id]?.close(), 120);
-                        }}
-                        ref={(ref) => {
-                          if (ref) swipeRefs.current[m.id] = ref;
-                        }}
-                      >
                       <View style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "80%", marginTop: showName ? 8 : 2, marginBottom: hasReactions ? 12 : 0 }}>
                         {showName && (
                           <Pressable onPress={() => onSenderPress?.(m.sender_id, m.sender_name)} disabled={!onSenderPress}>
@@ -816,7 +795,6 @@ export function ChatThread({
                           </View>
                         )}
                       </View>
-                      </Swipeable>
                     )}
                   </View>
                 );

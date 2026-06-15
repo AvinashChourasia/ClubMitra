@@ -74,8 +74,18 @@ func (r *RefreshRepository) Revoke(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-// RevokeAllForUser revokes every active token for a user (used on a detected
-// token-reuse attack, or "log out everywhere").
+// ExtendExpiry slides an active token's expiry forward — called on each refresh
+// so an actively-used session never lapses. Scoped to non-revoked rows, so a
+// logged-out token stays dead.
+func (r *RefreshRepository) ExtendExpiry(ctx context.Context, id uuid.UUID, newExpiry time.Time) error {
+	const q = `UPDATE refresh_tokens SET expires_at = $2 WHERE id = $1 AND revoked_at IS NULL`
+	_, err := r.db.Exec(ctx, q, id, newExpiry)
+	return err
+}
+
+// RevokeAllForUser revokes every active token for a user ("log out everywhere";
+// also available for incident response). No longer triggered automatically by
+// refresh — see Service.Refresh for why rotation/reuse-nuking was removed.
 func (r *RefreshRepository) RevokeAllForUser(ctx context.Context, userID string) error {
 	const q = `UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`
 	_, err := r.db.Exec(ctx, q, userID)

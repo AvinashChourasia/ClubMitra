@@ -175,20 +175,29 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*TokenPa
 	}
 
 	if !stored.IsActive() {
-		// If the token was explicitly revoked (not merely expired), its presence
-		// here means someone is replaying a used/stolen token. Defensively kill
-		// every token for this user, forcing a fresh login everywhere.
-		if stored.RevokedAt != nil {
-			_ = s.refresh.RevokeAllForUser(ctx, stored.UserID)
-		}
+		// Revoked (logged out) or past its 30-day expiry → genuinely dead.
 		return nil, ErrInvalidRefreshToken
 	}
 
-	// Rotate: revoke the presented token before issuing the replacement.
-	if err := s.refresh.Revoke(ctx, stored.ID); err != nil {
+	// Non-rotating refresh. We deliberately do NOT rotate the refresh token on
+	// every use anymore: rotation's lost-write race against a mobile client +
+	// a sleeping free-tier backend (app killed before it stored the rotated
+	// token → next launch presents the now-revoked one) was nuking live
+	// sessions and dumping runners to the login screen ("logged out, data
+	// gone"). Instead we hand back a fresh access token, keep the same refresh
+	// token, and SLIDE its expiry — so an active runner stays logged in
+	// indefinitely, while logout (revoke) still kills it instantly and the
+	// 30-day idle cap still applies. A leaked token is usable until that cap;
+	// an acceptable trade for a club app, and revisitable with a tracked
+	// successor column if the threat model ever demands rotation back.
+	access, err := s.tokens.NewAccessToken(stored.UserID)
+	if err != nil {
 		return nil, err
 	}
-	return s.issueTokens(ctx, stored.UserID)
+	// Best-effort expiry slide; a failed extend just shortens this token's life,
+	// never breaks the refresh.
+	_ = s.refresh.ExtendExpiry(ctx, stored.ID, time.Now().Add(s.refreshTTL))
+	return &TokenPair{AccessToken: access, RefreshToken: rawRefreshToken}, nil
 }
 
 // Logout revokes the given refresh token. We don't error on an unknown token —

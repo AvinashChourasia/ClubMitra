@@ -24,6 +24,7 @@ import {
   type LatLng,
 } from "../../lib/activities";
 import { getGamification, tierColor, type GamificationProfile, type BadgeStatus } from "../../lib/gamification";
+import { swr, readCache, writeCache } from "../../lib/cache";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { runningLevelLabel } from "../../lib/profile";
 import { formatDistance, formatDuration, formatPace } from "../../lib/format";
@@ -130,40 +131,47 @@ export default function Profile() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    try {
-      const token = await getAccessToken();
-      if (!token) return;
-      const [c, s, acts] = await Promise.all([
-        myChapters(token).catch(() => [] as MyChapter[]),
-        getStats(token).catch(() => null),
-        listActivities(token, 100).catch(() => [] as Activity[]),
-      ]);
-      setClubs(c);
-      setStats(s);
-      setActivities(acts);
-      getGamification(token).then(setGam).catch(() => {});
+    const token = await getAccessToken();
+    if (!token) return;
+    const uid = user?.id;
+    // Your athlete card is the most "this is MY data" screen — so each piece
+    // paints from its local cache instantly (even offline / cold backend) and
+    // refreshes in the background. Nothing here can silently vanish.
+    void swr(`${uid}:clubs`, () => myChapters(token), setClubs).catch(() => setClubs((p) => p ?? []));
+    void swr(`${uid}:stats`, () => getStats(token), setStats).catch(() => {});
+    void swr(`${uid}:gamification`, () => getGamification(token), setGam).catch(() => {});
 
-      // Last run's route thumbnail + this week's city rank — both best-effort.
-      const latest = acts[0];
-      if (latest) {
-        getRoute(token, latest.id)
-          .then((r) => {
-            setLastRoute(geoJSONToLatLng(r.geometry));
-            setLastTimes(offsetsToTimes(r.offsets_s));
-          })
-          .catch(() => setLastRoute([]));
-      } else {
-        setLastRoute([]);
-      }
-      cityLeaderboard(token, "week")
-        .then((b) => {
-          const me = b.entries.find((e) => e.user_id === user?.id);
-          setCityRank(me?.rank ?? null);
-        })
-        .catch(() => setCityRank(null));
+    // Runs: hydrate cache, then fetch fresh — captured locally so the route
+    // thumbnail uses the latest run id.
+    const cachedActs = await readCache<Activity[]>(`${uid}:activities`);
+    if (cachedActs) setActivities(cachedActs);
+    let acts = cachedActs ?? [];
+    try {
+      acts = await listActivities(token, 100);
+      setActivities(acts);
+      void writeCache(`${uid}:activities`, acts);
     } catch {
-      setClubs([]);
+      /* keep cached runs */
     }
+
+    // Last run's route thumbnail + this week's city rank — secondary, not cached.
+    const latest = acts[0];
+    if (latest) {
+      getRoute(token, latest.id)
+        .then((r) => {
+          setLastRoute(geoJSONToLatLng(r.geometry));
+          setLastTimes(offsetsToTimes(r.offsets_s));
+        })
+        .catch(() => setLastRoute([]));
+    } else {
+      setLastRoute([]);
+    }
+    cityLeaderboard(token, "week")
+      .then((b) => {
+        const me = b.entries.find((e) => e.user_id === user?.id);
+        setCityRank(me?.rank ?? null);
+      })
+      .catch(() => setCityRank(null));
   }, [getAccessToken, user?.id]);
 
   useFocusEffect(
