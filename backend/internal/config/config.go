@@ -34,6 +34,13 @@ type Config struct {
 	// feeds the race calendar. Unset = calendar serves only local rows.
 	MarathonMitraURL string
 
+	// Strava sync (optional): read-only OAuth app credentials from
+	// https://www.strava.com/settings/api. Unset = the integration is dormant
+	// (the connect endpoint returns 503). Stored tokens are encrypted with a key
+	// derived from JWT_SECRET.
+	StravaClientID     string
+	StravaClientSecret string
+
 	// How long tokens stay valid. Access tokens are deliberately short
 	// (small damage window if stolen); refresh tokens are long (so users
 	// rarely have to log in again).
@@ -52,15 +59,17 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		RedisURL:         os.Getenv("REDIS_URL"),
-		JWTSecret:        os.Getenv("JWT_SECRET"),
-		JWTRefreshSecret: os.Getenv("JWT_REFRESH_SECRET"),
-		Port:             getEnv("PORT", "8080"),
-		Env:              getEnv("ENV", "development"),
-		MarathonMitraURL: os.Getenv("MARATHONMITRA_API_URL"),
-		AccessTokenTTL:   15 * time.Minute,
-		RefreshTokenTTL:  30 * 24 * time.Hour, // 30 days
+		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		RedisURL:           os.Getenv("REDIS_URL"),
+		JWTSecret:          os.Getenv("JWT_SECRET"),
+		JWTRefreshSecret:   os.Getenv("JWT_REFRESH_SECRET"),
+		Port:               getEnv("PORT", "8080"),
+		Env:                getEnv("ENV", "development"),
+		MarathonMitraURL:   os.Getenv("MARATHONMITRA_API_URL"),
+		StravaClientID:     os.Getenv("STRAVA_CLIENT_ID"),
+		StravaClientSecret: os.Getenv("STRAVA_CLIENT_SECRET"),
+		AccessTokenTTL:     15 * time.Minute,
+		RefreshTokenTTL:    30 * 24 * time.Hour, // 30 days
 	}
 
 	// Fail fast: it's far better to crash on startup with a clear message than

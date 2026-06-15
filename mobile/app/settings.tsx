@@ -3,8 +3,8 @@
 // tab itself). Calling useThemeMode() subscribes it so a theme toggle re-themes
 // it instantly.
 
-import { useEffect, useState } from "react";
-import { Linking, Platform, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { Redirect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,8 +12,9 @@ import Constants from "expo-constants";
 import * as Updates from "expo-updates";
 
 import { useAuth } from "../lib/auth";
-import { request } from "../lib/api";
+import { ApiError, request } from "../lib/api";
 import { getGamification, setBadgeAnnounce } from "../lib/gamification";
+import { stravaStatus, stravaSync, stravaDisconnect, connectStrava, type StravaStatus } from "../lib/integrations";
 import { colors, styles, useThemeMode, type ThemeMode } from "../lib/theme";
 import { runningLevelLabel } from "../lib/profile";
 import { Avatar } from "../components/Avatar";
@@ -127,6 +128,123 @@ function BadgeAnnounceToggle() {
   );
 }
 
+// StravaCard — connect Strava so your Strava runs auto-count toward challenges,
+// leaderboards and badges. Hidden entirely when the backend isn't configured.
+function StravaCard({ getToken }: { getToken: () => Promise<string | null> }) {
+  const [status, setStatus] = useState<StravaStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const token = await getToken();
+      if (token) setStatus(await stravaStatus(token));
+    } catch {
+      /* leave as-is */
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function onConnect() {
+    setBusy(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const outcome = await connectStrava(token);
+      if (outcome === "connected") {
+        const { imported } = await stravaSync(token).catch(() => ({ imported: 0 }));
+        await refresh();
+        Alert.alert("Strava connected 🟠", imported > 0 ? `Imported ${imported} recent run${imported === 1 ? "" : "s"} — they now count toward your challenges.` : "We'll import your runs automatically from here.");
+      } else if (outcome === "failed") {
+        Alert.alert("Couldn't connect", "Strava didn't complete the link. Please try again.");
+      }
+    } catch (e) {
+      Alert.alert("Couldn't connect", e instanceof ApiError ? e.message : "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSync() {
+    setBusy(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const { imported } = await stravaSync(token);
+      await refresh();
+      Alert.alert("Synced", imported > 0 ? `Imported ${imported} new run${imported === 1 ? "" : "s"}.` : "You're all caught up — no new runs.");
+    } catch (e) {
+      Alert.alert("Sync failed", e instanceof ApiError ? e.message : "Try again in a moment");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onDisconnect() {
+    Alert.alert("Disconnect Strava?", "New runs will stop importing. Runs already imported stay.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Disconnect",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const token = await getToken();
+            if (token) await stravaDisconnect(token);
+            await refresh();
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    ]);
+  }
+
+  // Dormant on the backend → don't show the feature at all.
+  if (!status || !status.configured) return null;
+
+  return (
+    <View style={styles.card}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <Ionicons name="sync-circle" size={20} color="#FC4C02" />
+        <Text style={styles.sectionTitle}>Sync from Strava</Text>
+      </View>
+      {status.connected ? (
+        <>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success }} />
+            <Text style={{ color: colors.text, fontWeight: "700", flex: 1 }}>Connected</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>
+              {status.last_synced_at ? `synced ${new Date(status.last_synced_at).toLocaleDateString([], { day: "numeric", month: "short" })}` : "not synced yet"}
+            </Text>
+          </View>
+          <Text style={{ color: colors.muted, fontSize: 12.5, marginBottom: 8 }}>
+            Your Strava runs import automatically and count toward challenges, leaderboards & badges.
+          </Text>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Pressable onPress={onSync} disabled={busy} style={{ flex: 1, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, backgroundColor: colors.primary, opacity: busy ? 0.6 : 1, borderRadius: 999, paddingVertical: 11 }}>
+              {busy ? <ActivityIndicator color="#fff" size="small" /> : <><Ionicons name="refresh" size={15} color="#fff" /><Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Sync now</Text></>}
+            </Pressable>
+            <Pressable onPress={onDisconnect} disabled={busy} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 11 }}>
+              <Text style={{ color: colors.danger, fontWeight: "700", fontSize: 13 }}>Disconnect</Text>
+            </Pressable>
+          </View>
+        </>
+      ) : (
+        <>
+          <Text style={{ color: colors.muted, fontSize: 13, marginBottom: 10 }}>
+            Run with Strava? Connect once and your runs count here automatically — no need to re-record in ClubMitra.
+          </Text>
+          <Pressable onPress={onConnect} disabled={busy} style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 7, backgroundColor: "#FC4C02", opacity: busy ? 0.6 : 1, borderRadius: 999, paddingVertical: 13 }}>
+            {busy ? <ActivityIndicator color="#fff" /> : <><Ionicons name="logo-electron" size={16} color="#fff" /><Text style={{ color: "#fff", fontWeight: "800", fontSize: 14 }}>Connect Strava</Text></>}
+          </Pressable>
+        </>
+      )}
+    </View>
+  );
+}
+
 function AppearanceToggle() {
   const { mode, setMode } = useThemeMode();
   return (
@@ -149,7 +267,7 @@ function AppearanceToggle() {
 }
 
 export default function Settings() {
-  const { user, logout } = useAuth();
+  const { user, logout, getAccessToken } = useAuth();
   const router = useRouter();
   useThemeMode(); // subscribe so this screen re-themes instantly on toggle
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -204,6 +322,9 @@ export default function Settings() {
             </View>
           )}
         </View>
+
+        {/* Connected apps — Strava sync */}
+        <StravaCard getToken={getAccessToken} />
 
         {/* Appearance */}
         <View style={styles.card}>

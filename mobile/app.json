@@ -62,7 +62,8 @@
         {
           "cameraPermission": "ClubMitra uses your camera to scan the check-in QR code at a club run."
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

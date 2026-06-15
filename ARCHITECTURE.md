@@ -410,9 +410,17 @@ Client, after save:
 
 ---
 
-## Activity Sync — Strava + Garmin *(Phase 3, P0 — NOT built, top priority)*
+## Activity Sync — Strava + Garmin *(Phase 3, P0 — BUILT, dormant until keyed)*
 
-> **Why this is now the most important unbuilt subsystem.** The 206-response
+> **Status:** the Strava sync (`internal/activitysync`, migration 00038) is built
+> end to end and **dormant until `STRAVA_CLIENT_ID`/`STRAVA_CLIENT_SECRET` are set**
+> (callback domain `clubmitra-api.onrender.com`). Read-only OAuth (`activity:read`),
+> tokens AES-GCM-encrypted at rest (key from JWT secret), poll-on-demand import
+> (connect / "Sync now"), accurate points from Strava **streams** fed to
+> `svc.Record`, de-dupe ledger (external id + ±2-min start match). Garmin's native
+> API needs Developer-Program approval, so it stays on the GPX bridge for now.
+
+> **Why this is the most important subsystem.** The 206-response
 > survey: only **13%** of runners will record in-app; **68%** require their
 > existing app's runs to sync automatically (Strava 81%, Garmin 14%). Challenges
 > are GPS-native only, so without sync the leaderboard — the #1 admin-requested
@@ -662,6 +670,11 @@ CLOUDINARY_CLOUD=... CLOUDINARY_KEY=... CLOUDINARY_SECRET=...
 
 # Race calendar feed (optional — races sync only when set)
 MARATHONMITRA_API_URL=https://api.marathonmitra.com/...
+
+# Strava sync (optional — dormant until both are set). From
+# https://www.strava.com/settings/api; callback domain = clubmitra-api.onrender.com
+STRAVA_CLIENT_ID=...
+STRAVA_CLIENT_SECRET=...
 
 # Phase 3 (not yet used)
 RAZORPAY_KEY_ID=... RAZORPAY_KEY_SECRET=... RAZORPAY_WEBHOOK_SECRET=...

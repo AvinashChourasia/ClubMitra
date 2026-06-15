@@ -24,8 +24,8 @@ two-thirds of runners. **This is the #1 gap and the top build priority.**
 
 | Priority | Task | Status | Why |
 |---|---|---|---|
-| **P0** | **Strava read-only sync** (OAuth, auto-import activities → credit challenges/boards/badges) | ❌ MISSING | 68% of runners require it; without it leaderboards stay empty |
-| **P0** | **Garmin Connect sync** (auto-import) | ❌ MISSING | 14% on Garmin; same blocker |
+| **P0** | **Strava read-only sync** (OAuth, auto-import activities → credit challenges/boards/badges) | ✅ BUILT (dormant — needs Strava API keys on Render) | 68% of runners require it; the #1 gap, now closed |
+| **P0** | **Garmin Connect sync** (auto-import) | 🟡 via GPX bridge (native API needs Garmin program approval) | 14% on Garmin; export→import works today |
 | **P0** | Frictionless GPX path (Strava/Garmin export guide + share-sheet intake) | 🟡 import exists, UX missing | Bridges sync gap until OAuth ships |
 | **P1** | Run a live pilot challenge (MarathonMitra 100K) with the 130+ runner leads | ❌ not started | Convert survey takers → active users now |
 | **P1** | Reposition pitch: "keep members running together" (not "save 10–15 hrs") | ❌ copy/deck | 14/20 admins spend <5 hrs/wk — time-saving pitch is false |
@@ -345,17 +345,19 @@ clubmitra/
 > India, Stripe Connect onboarding globally), so the account setup should already
 > be underway from Phase 2. Plus the remaining Epeak-parity surface.
 
-#### 🚨 P0 — Activity Sync (NEW — top priority from survey, was missing entirely)
-> 68% of surveyed runners will not switch recording apps. Challenges are
-> GPS-native only today, which blocks them. This must ship before soft launch
-> or the hero feature (challenges + leaderboards) has no data to rank.
-- [ ] **Strava OAuth (read-only)** — connect account, store refresh token
-- [ ] Strava webhook / poll — auto-import new activities through `svc.Record`
-- [ ] **Garmin Connect import** — auto-pull completed activities
-- [ ] De-dupe synced vs in-app-recorded runs (same activity, one credit)
-- [ ] Imported runs credit challenges + rolling boards + badges (existing pipeline)
-- [ ] In-app GPX export guide for Strava/Garmin + share-sheet intake (bridge until OAuth lands)
-- [ ] Transparent data scope (survey: "don't want to give permissions to too many apps")
+#### 🚨 P0 — Activity Sync (BUILT June 2026 — the #1 survey gap, now closed)
+> 68% of surveyed runners won't switch recording apps. The Strava sync is built
+> end to end and **dormant until Strava API keys are set on Render** (migration
+> 00038, `internal/activitysync`). Set `STRAVA_CLIENT_ID`/`STRAVA_CLIENT_SECRET`
+> (callback domain `clubmitra-api.onrender.com`) to activate.
+- [x] **Strava OAuth (read-only, `activity:read`)** — connect from Settings; tokens AES-GCM-encrypted at rest (key from JWT secret)
+- [x] Poll-on-demand import (connect / "Sync now") through `svc.Record` — accurate distance/pace/elevation from Strava streams; webhooks deferred (robust on a sleeping free tier)
+- [x] De-dupe synced vs in-app-recorded runs (ledger by external id + ±2-min start match) — one credit
+- [x] Imported runs credit challenges + rolling boards + badges + streaks (the existing run pipeline, unchanged)
+- [x] Transparent, read-only scope; one-tap disconnect (keeps already-imported runs)
+- [ ] **Garmin Connect import** — native API needs Garmin Developer Program approval; GPX export→import bridges it meanwhile
+- [ ] Strava webhook subscription (push) — optional upgrade over polling
+- [ ] In-app GPX export guide for Strava/Garmin + share-sheet intake (UX polish on the existing import)
 
 #### Payments — Real money (provider-agnostic, replaces MOCK)
 - [ ] `pkg/payments/` — provider-agnostic interface (Provider)

@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/avinash/clubmitra/backend/internal/activities"
+	"github.com/avinash/clubmitra/backend/internal/activitysync"
 	"github.com/avinash/clubmitra/backend/internal/analytics"
 	"github.com/avinash/clubmitra/backend/internal/attendance"
 	"github.com/avinash/clubmitra/backend/internal/auth"
@@ -152,6 +153,16 @@ func main() {
 	// a new follow pings the followee.
 	socialHandler := social.NewHandler(social.NewRepository(pool), gamSvc, notifier)
 
+	// Activity Sync (P0): pull Strava runs into the SAME run pipeline so they
+	// credit challenges/boards/badges. Dormant unless STRAVA_CLIENT_ID/SECRET are
+	// set; OAuth tokens are encrypted with a key derived from the JWT secret.
+	syncRepo, err := activitysync.NewRepository(pool, cfg.JWTSecret)
+	if err != nil {
+		log.Fatalf("activitysync: %v", err)
+	}
+	syncSvc := activitysync.NewService(syncRepo, activitiesSvc, cfg.StravaClientID, cfg.StravaClientSecret, cfg.JWTSecret)
+	syncHandler := activitysync.NewHandler(syncSvc)
+
 	// Realtime: the websocket hub delivers new messages + typing instantly;
 	// clients keep a slow poll as fallback. Auth = the same access token, passed
 	// as ?token= (websockets can't carry our Authorization header reliably).
@@ -173,7 +184,7 @@ func main() {
 	// 4. Build the HTTP server around the router.
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, runlogHandler, analyticsHandler, inventoryHandler, messagingHandler, racesHandler, gamHandler, socialHandler, hub, tokenMgr),
+		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, runlogHandler, analyticsHandler, inventoryHandler, messagingHandler, racesHandler, gamHandler, socialHandler, syncHandler, hub, tokenMgr),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -203,7 +214,7 @@ func main() {
 }
 
 // newRouter builds the middleware stack and mounts all routes.
-func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, runlogHandler *runlog.Handler, analyticsHandler *analytics.Handler, inventoryHandler *inventory.Handler, messagingHandler *messaging.Handler, racesHandler *races.Handler, gamHandler *gamification.Handler, socialHandler *social.Handler, hub *realtime.Hub, tokenMgr *auth.TokenManager) http.Handler {
+func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, runlogHandler *runlog.Handler, analyticsHandler *analytics.Handler, inventoryHandler *inventory.Handler, messagingHandler *messaging.Handler, racesHandler *races.Handler, gamHandler *gamification.Handler, socialHandler *social.Handler, syncHandler *activitysync.Handler, hub *realtime.Hub, tokenMgr *auth.TokenManager) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID) // tag each request with a unique id
@@ -225,7 +236,8 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 		// public challenges) so a new user sees value before creating a profile.
 		r.Route("/public", func(r chi.Router) {
 			r.Mount("/challenges", challengesHandler.PublicRoutes())
-			r.Mount("/", orgHandler.PublicRoutes()) // /chapters, /cities
+			r.Mount("/integrations", syncHandler.PublicRoutes()) // Strava OAuth callback
+			r.Mount("/", orgHandler.PublicRoutes())              // /chapters, /cities
 		})
 
 		// Protected routes: this Group applies RequireAuth to everything mounted
@@ -248,6 +260,7 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 			r.Mount("/races", racesHandler.Routes())
 			r.Mount("/gamification", gamHandler.Routes())
 			r.Mount("/social", socialHandler.Routes())
+			r.Mount("/integrations", syncHandler.Routes()) // Strava connect/sync/status
 			// Club core declares its own /organisations and /chapters subtrees,
 			// so it mounts at the group root rather than under a single prefix.
 			r.Mount("/", orgHandler.Routes())
