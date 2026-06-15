@@ -21,9 +21,11 @@ import {
   KeyboardAvoidingView,
   Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   Text,
   TextInput,
   View,
@@ -32,11 +34,11 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useRouter } from "expo-router";
-// ScrollView from gesture-handler (not react-native) so the message list plays
-// nicely with the app's gesture system. Swipe-to-reply per bubble was removed:
-// its pan gesture fought the vertical scroll on Android (the list wouldn't
-// scroll up) and was redundant with long-press → Reply.
-import { ScrollView } from "react-native-gesture-handler";
+// Core RN ScrollView for the message list — its vertical scroll + onScroll are
+// rock-solid. Swipe-to-reply lives in <SwipeToReply> below: a PanResponder that
+// only claims clearly-horizontal drags, so every vertical drag falls through to
+// this ScrollView and the list always scrolls. (The earlier gesture-handler
+// ScrollView + Swipeable combo fought each other on Android — neither worked.)
 import * as Haptics from "expo-haptics";
 import {
   AudioModule,
@@ -77,6 +79,67 @@ function dayLabel(iso: string): string {
   if (d.toDateString() === now.toDateString()) return "Today";
   if (d.toDateString() === yest.toDateString()) return "Yesterday";
   return d.toLocaleDateString([], { day: "numeric", month: "short", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+}
+
+// SwipeToReply: WhatsApp-style swipe-right on a message to reply. Built on a
+// PanResponder that ONLY claims clearly-horizontal rightward drags — any
+// vertical or diagonal movement is left to the parent ScrollView, so scrolling
+// the chat is never blocked. Taps/long-press pass straight through to the
+// bubble (we never claim the start of a gesture, only a horizontal move).
+function SwipeToReply({ onReply, children }: { onReply: () => void; children: React.ReactNode }) {
+  const tx = useRef(new Animated.Value(0)).current;
+  const fired = useRef(false);
+  const THRESHOLD = 52;
+  const MAX = 64;
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, g) => g.dx > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.8,
+      onPanResponderGrant: () => {
+        fired.current = false;
+      },
+      onPanResponderMove: (_, g) => {
+        const x = Math.max(0, Math.min(g.dx, MAX));
+        tx.setValue(x);
+        if (!fired.current && x >= THRESHOLD) {
+          fired.current = true;
+          Haptics.selectionAsync().catch(() => {});
+        }
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dx >= THRESHOLD) onReply();
+        Animated.spring(tx, { toValue: 0, useNativeDriver: true, speed: 22, bounciness: 6 }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(tx, { toValue: 0, useNativeDriver: true, speed: 22, bounciness: 6 }).start();
+      },
+    })
+  ).current;
+
+  return (
+    <View>
+      {/* Reply arrow revealed from the left as the bubble slides right. */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          left: 12,
+          top: 0,
+          bottom: 0,
+          justifyContent: "center",
+          opacity: tx.interpolate({ inputRange: [0, THRESHOLD], outputRange: [0, 1], extrapolate: "clamp" }),
+        }}
+      >
+        <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="arrow-undo" size={15} color={colors.muted} />
+        </View>
+      </Animated.View>
+      <Animated.View {...pan.panHandlers} style={{ transform: [{ translateX: tx }] }}>
+        {children}
+      </Animated.View>
+    </View>
+  );
 }
 
 type Props = {
@@ -748,6 +811,7 @@ export function ChatThread({
                         <Text style={{ color: colors.muted, fontSize: 10, marginTop: 4 }}>{timeOf(m.created_at)}</Text>
                       </View>
                     ) : (
+                      <SwipeToReply onReply={() => setReplyTo(m)}>
                       <View style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "80%", marginTop: showName ? 8 : 2, marginBottom: hasReactions ? 12 : 0 }}>
                         {showName && (
                           <Pressable onPress={() => onSenderPress?.(m.sender_id, m.sender_name)} disabled={!onSenderPress}>
@@ -795,6 +859,7 @@ export function ChatThread({
                           </View>
                         )}
                       </View>
+                      </SwipeToReply>
                     )}
                   </View>
                 );
