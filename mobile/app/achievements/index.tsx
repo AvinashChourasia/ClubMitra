@@ -26,6 +26,7 @@ import {
 import { BadgeMedal } from "../../components/BadgeMedal";
 import { BadgeUnlockModal } from "../../components/BadgeUnlockModal";
 import { GradientCard } from "../../components/GradientCard";
+import { LevelRoadmap } from "../../components/LevelRoadmap";
 import { Tap } from "../../components/Tap";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 
@@ -139,6 +140,11 @@ export default function Achievements() {
                 </Text>
               </View>
             </GradientCard>
+
+            {/* ── The level journey: Rookie → … → Club Legend ─────── */}
+            <View style={[styles.card, { paddingVertical: 18 }]}>
+              <LevelRoadmap xp={profile.xp} />
+            </View>
 
             {/* ── Next up: the goal-gradient hook ─────────────────── */}
             {nextUp.length > 0 && (

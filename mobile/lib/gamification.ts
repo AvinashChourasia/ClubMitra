@@ -30,6 +30,20 @@ export type LevelInfo = {
   progress: number; // 0..1 toward next level (1 at max level)
 };
 
+// The level ladder — mirrors the backend (internal/gamification/catalog.go).
+// The server stays the source of truth for xp / level.index / progress; these
+// thresholds + emojis just drive the roadmap UI. Keep in sync with the backend
+// if the ladder ever changes.
+export type LevelStep = { title: string; at: number; emoji: string };
+export const LEVELS: LevelStep[] = [
+  { title: "Rookie", at: 0, emoji: "🌱" },
+  { title: "Jogger", at: 500, emoji: "👟" },
+  { title: "Pacer", at: 1500, emoji: "⚡" },
+  { title: "Front Runner", at: 4000, emoji: "🏃" },
+  { title: "Podium Hunter", at: 8000, emoji: "🎯" },
+  { title: "Club Legend", at: 16000, emoji: "👑" },
+];
+
 export type GamificationProfile = {
   xp: number;
   level: LevelInfo;
