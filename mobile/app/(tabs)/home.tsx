@@ -24,6 +24,7 @@ import { GradientCard } from "../../components/GradientCard";
 import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { formatDistance, formatDuration, formatPace, formatRunWhen, isPast } from "../../lib/format";
 import { GuestHome } from "../../components/GuestScreens";
+import { activeStats, liveElapsedS } from "../../lib/locationTask";
 
 function SectionHeader({ title, action }: { title: string; action?: { label: string; onPress: () => void } }) {
   return (
@@ -52,6 +53,9 @@ export default function Home() {
   const [lastTimes, setLastTimes] = useState<number[] | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // A run recording in the background (started then minimised) — surfaced as a
+  // "resume" banner so it's never silently lost behind the home screen.
+  const [activeRun, setActiveRun] = useState<{ distanceM: number; elapsedS: number } | null>(null);
   const { joinClub, joiningId } = useJoinGate();
 
   const load = useCallback(async () => {
@@ -102,6 +106,29 @@ export default function Home() {
         active = false;
       };
     }, [load])
+  );
+
+  // Keep the "resume run" banner live while Home is focused — a run minimised
+  // here is still recording, so its distance/time should keep ticking.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const tick = async () => {
+        const s = await activeStats();
+        if (!active) return;
+        if (!s) {
+          setActiveRun(null);
+          return;
+        }
+        setActiveRun({ distanceM: s.distanceM, elapsedS: liveElapsedS(s, Date.now()) });
+      };
+      void tick();
+      const id = setInterval(() => void tick(), 1000);
+      return () => {
+        active = false;
+        clearInterval(id);
+      };
+    }, [])
   );
 
   async function onRefresh() {
@@ -156,12 +183,41 @@ export default function Home() {
           </View>
         </GradientCard>
 
-        {/* Start a run — the GPS track card IS the record button. */}
-        <TrackRunCard
-          onPress={() => router.push("/activity/record")}
-          title="Record your run"
-          subtitle="GPS route, pace, splits — counts for your clubs & challenges."
-        />
+        {/* A run is recording in the background — resume it instead of offering
+            to start a new one (which would discard the one in progress). */}
+        {activeRun ? (
+          <Tap
+            onPress={() => router.push("/activity/record")}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 14,
+              backgroundColor: colors.primarySoft,
+              borderRadius: 18,
+              borderWidth: 1,
+              borderColor: colors.primary,
+              padding: 16,
+            }}
+          >
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="pulse" size={22} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 16 }}>Run in progress · tap to resume</Text>
+              <Text style={{ color: colors.muted, fontSize: 13, fontWeight: "600" }}>
+                {formatDistance(activeRun.distanceM)} · {formatDuration(activeRun.elapsedS)}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.primary} />
+          </Tap>
+        ) : (
+          /* Start a run — the GPS track card IS the record button. */
+          <TrackRunCard
+            onPress={() => router.push("/activity/record")}
+            title="Record your run"
+            subtitle="GPS route, pace, splits — counts for your clubs & challenges."
+          />
+        )}
 
         {/* Your last run — real route thumbnail + the headline numbers. */}
         {lastRun && (

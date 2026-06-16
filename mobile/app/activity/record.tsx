@@ -47,7 +47,7 @@ const RunMap: React.ComponentType<{ coords: LatLng[]; times?: number[]; height?:
 export default function RecordRun() {
   const { getAccessToken } = useAuth();
   const router = useRouter();
-  const { status, elapsedS, distanceM, livePaceSPerKm, route, times, paused, start, stop, resume } = useRunRecorder();
+  const { status, checking, elapsedS, distanceM, livePaceSPerKm, route, times, paused, start, stop, discard, resume, retry } = useRunRecorder();
   const [uploading, setUploading] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const countScale = useRef(new Animated.Value(1)).current;
@@ -178,12 +178,48 @@ export default function RecordRun() {
     }
   }
 
+  // Discard the in-progress run — confirm first, since it's unrecoverable.
+  function onDiscard() {
+    Alert.alert(
+      "Discard this run?",
+      "Your recorded route and distance will be deleted. This can't be undone.",
+      [
+        { text: "Keep running", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: async () => {
+            await discard();
+            router.replace("/home");
+          },
+        },
+      ]
+    );
+  }
+
+  // While resolving whether a run is already in progress, hold the screen on a
+  // spinner so we never flash "START RUN" over a run that's actually recording.
+  if (checking) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: BG, alignItems: "center", justifyContent: "center", gap: 14 }}>
+        <ActivityIndicator size="large" color={ACCENT} />
+        <Text style={{ color: MUTED, fontSize: 14, fontWeight: "700" }}>Checking for a run in progress…</Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BG }}>
       <View style={{ flex: 1, paddingHorizontal: 24, paddingVertical: 18, justifyContent: "space-between" }}>
         {/* Top bar: close + status pill */}
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          {!recording && !uploading ? (
+          {recording ? (
+            // Minimize: leave the screen, but the engine keeps recording in the
+            // background. The run is resumed automatically when you come back.
+            <Pressable onPress={() => router.replace("/home")} hitSlop={10} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: CARD, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="chevron-down" size={22} color={TEXT} />
+            </Pressable>
+          ) : !uploading ? (
             <Pressable onPress={() => router.replace("/home")} hitSlop={10} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: CARD, alignItems: "center", justifyContent: "center" }}>
               <Ionicons name="close" size={20} color={TEXT} />
             </Pressable>
@@ -247,12 +283,29 @@ export default function RecordRun() {
         {/* Controls */}
         <View style={{ gap: 12 }}>
           {status === "denied" && (
-            <Text style={{ color: "#FDA4AF", fontSize: 14, textAlign: "center" }}>
-              Location permission denied. Enable it in Settings to record runs.
-            </Text>
+            <>
+              <Text style={{ color: "#FDA4AF", fontSize: 14, textAlign: "center" }}>
+                {distanceM > 0
+                  ? "Location is off, so your run is paused. Re-enable it to keep recording."
+                  : "Location permission denied. Enable it to record runs."}
+              </Text>
+              <Pressable
+                onPress={() => void retry()}
+                style={{ backgroundColor: ACCENT, borderRadius: 999, paddingVertical: 18, alignItems: "center" }}
+              >
+                <Text style={{ color: "#fff", fontSize: 17, fontWeight: "800", letterSpacing: 1 }}>
+                  {distanceM > 0 ? "ENABLE & RESUME" : "ENABLE LOCATION"}
+                </Text>
+              </Pressable>
+              {distanceM > 0 && (
+                <Pressable onPress={onDiscard} hitSlop={8} style={{ alignSelf: "center", paddingVertical: 6 }}>
+                  <Text style={{ color: MUTED, fontSize: 13, fontWeight: "700", textDecorationLine: "underline" }}>Discard run</Text>
+                </Pressable>
+              )}
+            </>
           )}
 
-          {!recording && !uploading && (
+          {!recording && !uploading && status !== "denied" && (
             <Pressable
               onPress={onStartPress}
               style={{ backgroundColor: ACCENT, borderRadius: 999, paddingVertical: 18, alignItems: "center", shadowColor: ACCENT, shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } }}
@@ -291,6 +344,9 @@ export default function RecordRun() {
               <Text style={{ color: MUTED, fontSize: 12, textAlign: "center", marginTop: -4 }}>
                 press and hold so a stray tap can't end your run
               </Text>
+              <Pressable onPress={onDiscard} hitSlop={8} style={{ alignSelf: "center", paddingVertical: 6 }}>
+                <Text style={{ color: MUTED, fontSize: 13, fontWeight: "700", textDecorationLine: "underline" }}>Discard run</Text>
+              </Pressable>
             </>
           )}
 

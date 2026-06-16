@@ -21,17 +21,24 @@ export type GpsSample = {
   timestamp: number; // ms since epoch
 };
 
-// Drop fixes less accurate than this. A reading that says "I'm within 50m" is
-// useless for measuring a 200m walk, so we throw it away entirely.
-export const ACCURACY_GATE_M = 20;
+// Drop fixes less accurate than this. Truly bad fixes (signal recovery, indoors)
+// are useless, but the gate must NOT be so tight it starves the track — phones
+// routinely report 15–25m accuracy outdoors, and dropping all of those makes the
+// map look frozen ("GPS stopped"). 30m keeps the garbage out while letting a
+// normal run through.
+export const ACCURACY_GATE_M = 30;
 
 // Reject physically impossible jumps (GPS "teleports" when signal recovers).
 // 12.5 m/s ≈ 45 km/h — faster than any runner, so anything above is an artifact.
 export const MAX_SPEED_MPS = 12.5;
 
-// Never count a move smaller than this, even with a good fix. Sets a hard floor
-// under the noise for the strongest signals.
-export const MIN_MOVE_FLOOR_M = 4;
+// Noise-floor bounds for accepting a vertex. The floor scales with fix accuracy
+// (jitter ≈ the fixes' error) but is CLAMPED: a hard 5m minimum suppresses
+// standing-still jitter, and a 15m ceiling stops the floor from ballooning to
+// 25–30m on a so-so fix — which is what used to corner-cut the route into a
+// coarse, wrong-looking path. Vertices every 5–15m draw a faithful trace.
+export const MIN_MOVE_FLOOR_M = 5;
+export const MAX_MOVE_FLOOR_M = 15;
 
 // haversineMeters: great-circle distance between two lat/lng points. Used for
 // the live on-device estimate; the server (PostGIS) recomputes authoritatively.
@@ -85,13 +92,13 @@ export function evaluateSample(prev: GpsSample | null, next: GpsSample): Decisio
     return { accept: false, distanceM: 0 };
   }
 
-  // 3. Noise floor: a move is only "real" if it exceeds the combined
-  //    uncertainty of the two fixes. Each fix can be off by ~its own accuracy in
-  //    any direction, so the error in the DISTANCE between them is roughly the
-  //    SUM of the two accuracies — which is why standing-still jitter (two fixes
-  //    that swing to opposite edges of the error circle) can look like ~2x the
-  //    radius. Summing here suppresses that; a hard floor covers great fixes.
-  const noiseFloor = Math.max(MIN_MOVE_FLOOR_M, prev.accuracy + next.accuracy);
+  // 3. Noise floor: a move counts only if it exceeds the fixes' uncertainty —
+  //    but CLAMPED to [5m, 15m]. Half the summed accuracy approximates the real
+  //    jitter while the ceiling keeps the floor from corner-cutting the path on
+  //    a mediocre fix. Below the floor the move is jitter: don't add distance.
+  //    We still keep the vertex if it's a real (clamped-floor) step so the route
+  //    stays faithful; sub-floor jitter is simply dropped entirely.
+  const noiseFloor = Math.min(MAX_MOVE_FLOOR_M, Math.max(MIN_MOVE_FLOOR_M, (prev.accuracy + next.accuracy) / 2));
   if (d < noiseFloor) {
     return { accept: false, distanceM: 0 };
   }
