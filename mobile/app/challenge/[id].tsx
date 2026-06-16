@@ -40,6 +40,7 @@ import {
   type LeaderboardEntry,
   type ChapterEntry,
 } from "../../lib/challenges";
+import { pay } from "../../lib/payments";
 import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -127,10 +128,31 @@ export default function ChallengeDetail() {
     if (!challenge) return;
     const fee = challenge.join_fee ?? 0;
     if (fee > 0) {
-      Alert.alert("Join challenge", `This challenge has a ₹${fee} join fee. Pay and join? (mock payment)`, [
-        { text: "Cancel", style: "cancel" },
-        { text: `Pay ₹${fee} & join`, onPress: () => run((t) => joinChallenge(t, id, { paid: true })) },
-      ]);
+      // Fee challenge: pay via Razorpay hosted checkout, then the backend enrols
+      // on capture. Dormant until the backend has keys (the order call 503s).
+      void (async () => {
+        setBusy(true);
+        try {
+          const token = await getAccessToken();
+          const outcome = await pay(token!, {
+            purpose: "challenge",
+            targetId: id,
+            desc: `${challenge.title} · join fee`,
+          });
+          if (outcome === "paid") {
+            await load();
+            Alert.alert("You're in! 🎉", "Payment received — you've joined the challenge.");
+          } else if (outcome === "failed") {
+            // Verify hiccup: the webhook still settles it. Don't refresh now (it'd
+            // show stale "not joined"); it'll reflect on next open / pull-to-refresh.
+            Alert.alert("Almost there", "If your payment went through, it'll reflect in a moment.");
+          }
+        } catch (e) {
+          Alert.alert("Couldn't start payment", e instanceof ApiError ? e.message : "Something went wrong");
+        } finally {
+          setBusy(false);
+        }
+      })();
     } else {
       run((t) => joinChallenge(t, id));
     }

@@ -36,6 +36,7 @@ import (
 	"github.com/avinash/clubmitra/backend/internal/messaging"
 	"github.com/avinash/clubmitra/backend/internal/notifications"
 	"github.com/avinash/clubmitra/backend/internal/organisations"
+	"github.com/avinash/clubmitra/backend/internal/payments"
 	"github.com/avinash/clubmitra/backend/internal/permissions"
 	"github.com/avinash/clubmitra/backend/internal/races"
 	"github.com/avinash/clubmitra/backend/internal/realtime"
@@ -133,8 +134,9 @@ func main() {
 	// Chapter analytics: drop-off, engagement, volume (admin-only).
 	analyticsHandler := analytics.NewHandler(analytics.NewRepository(pool), permChecker)
 
-	// Inventory: club gear with stock movements (issue/return/restock).
-	inventoryHandler := inventory.NewHandler(inventory.NewService(inventory.NewRepository(pool)), permChecker)
+	// Inventory: club gear with stock movements (issue/return/restock + paid purchases).
+	inventorySvc := inventory.NewService(inventory.NewRepository(pool))
+	inventoryHandler := inventory.NewHandler(inventorySvc, permChecker)
 
 	// Messaging: club + event chat, admin announcements (also pushed).
 	messagingSvc := messaging.NewService(messaging.NewRepository(pool), permChecker, notifier)
@@ -163,6 +165,21 @@ func main() {
 	syncSvc := activitysync.NewService(syncRepo, activitiesSvc, cfg.StravaClientID, cfg.StravaClientSecret, cfg.JWTSecret)
 	syncHandler := activitysync.NewHandler(syncSvc)
 
+	// Payments (Phase 3): the one money-collection engine behind every paid
+	// surface (membership / challenge / inventory / subscription). Dormant unless
+	// RAZORPAY_KEY_ID/SECRET are set. Per-purpose pricing + entitlement are
+	// registered below as each surface comes online.
+	paymentsSvc := payments.NewService(
+		payments.NewRepository(pool),
+		payments.NewRazorpay(cfg.RazorpayKeyID, cfg.RazorpayKeySecret, cfg.RazorpayWebhookSecret),
+		cfg.PlatformCutPct,
+	)
+	paymentsHandler := payments.NewHandler(paymentsSvc)
+	paymentsSvc.Register(payments.PurposeMembership, orgSvc.PaymentHandler())
+	paymentsSvc.Register(payments.PurposeChallenge, challengesSvc.PaymentHandler())
+	paymentsSvc.Register(payments.PurposeInventory, inventorySvc.PaymentHandler())
+	paymentsSvc.Register(payments.PurposeSubscription, orgSvc.SubscriptionPaymentHandler(permChecker))
+
 	// Realtime: the websocket hub delivers new messages + typing instantly;
 	// clients keep a slow poll as fallback. Auth = the same access token, passed
 	// as ?token= (websockets can't carry our Authorization header reliably).
@@ -184,7 +201,7 @@ func main() {
 	// 4. Build the HTTP server around the router.
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, runlogHandler, analyticsHandler, inventoryHandler, messagingHandler, racesHandler, gamHandler, socialHandler, syncHandler, hub, tokenMgr),
+		Handler:      newRouter(authHandler, usersHandler, orgHandler, attendanceHandler, activitiesHandler, challengesHandler, notificationsHandler, uploadsHandler, runlogHandler, analyticsHandler, inventoryHandler, messagingHandler, racesHandler, gamHandler, socialHandler, syncHandler, paymentsHandler, hub, tokenMgr),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -214,7 +231,7 @@ func main() {
 }
 
 // newRouter builds the middleware stack and mounts all routes.
-func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, runlogHandler *runlog.Handler, analyticsHandler *analytics.Handler, inventoryHandler *inventory.Handler, messagingHandler *messaging.Handler, racesHandler *races.Handler, gamHandler *gamification.Handler, socialHandler *social.Handler, syncHandler *activitysync.Handler, hub *realtime.Hub, tokenMgr *auth.TokenManager) http.Handler {
+func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandler *organisations.Handler, attendanceHandler *attendance.Handler, activitiesHandler *activities.Handler, challengesHandler *challenges.Handler, notificationsHandler *notifications.Handler, uploadsHandler *uploads.Handler, runlogHandler *runlog.Handler, analyticsHandler *analytics.Handler, inventoryHandler *inventory.Handler, messagingHandler *messaging.Handler, racesHandler *races.Handler, gamHandler *gamification.Handler, socialHandler *social.Handler, syncHandler *activitysync.Handler, paymentsHandler *payments.Handler, hub *realtime.Hub, tokenMgr *auth.TokenManager) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID) // tag each request with a unique id
@@ -237,6 +254,7 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 		r.Route("/public", func(r chi.Router) {
 			r.Mount("/challenges", challengesHandler.PublicRoutes())
 			r.Mount("/integrations", syncHandler.PublicRoutes()) // Strava OAuth callback
+			r.Mount("/payments", paymentsHandler.PublicRoutes()) // Razorpay webhook
 			r.Mount("/", orgHandler.PublicRoutes())              // /chapters, /cities
 		})
 
@@ -261,6 +279,7 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 			r.Mount("/gamification", gamHandler.Routes())
 			r.Mount("/social", socialHandler.Routes())
 			r.Mount("/integrations", syncHandler.Routes()) // Strava connect/sync/status
+			r.Mount("/payments", paymentsHandler.Routes()) // order/verify/history/config
 			// Club core declares its own /organisations and /chapters subtrees,
 			// so it mounts at the group root rather than under a single prefix.
 			r.Mount("/", orgHandler.Routes())

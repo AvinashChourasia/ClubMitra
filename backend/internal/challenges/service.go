@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/avinash/clubmitra/backend/internal/leaderboard"
+	"github.com/avinash/clubmitra/backend/internal/payments"
 )
 
 // ValidationError carries a client-safe 400 message.
@@ -156,9 +157,11 @@ func (s *Service) PublicList(ctx context.Context, city, search, ctype string) ([
 var ErrPaymentRequired = errors.New("payment required to join this challenge")
 
 // Join adds the user as an individual participant and registers them on the
-// leaderboard at their current score. If the challenge has a join fee, `paid`
-// must be true (the client completes the mock payment first).
-func (s *Service) Join(ctx context.Context, userID string, challengeID uuid.UUID, paid bool) (*Challenge, error) {
+// leaderboard at their current score. A FREE challenge enrols immediately; a
+// fee challenge returns ErrPaymentRequired (the client then pays through the
+// payments engine, and ConfirmJoinPayment enrols them). There is no client-
+// trusted "paid" flag — that was the mock and a free-join bypass.
+func (s *Service) Join(ctx context.Context, userID string, challengeID uuid.UUID) (*Challenge, error) {
 	// You can only join a challenge you're allowed to see (membership/city/public).
 	if err := s.requireVisible(ctx, userID, challengeID); err != nil {
 		return nil, err
@@ -167,24 +170,73 @@ func (s *Service) Join(ctx context.Context, userID string, challengeID uuid.UUID
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
-	if !ch.Joined { // joining is only open before the challenge starts
-		if !now.Before(ch.EndDate) {
-			return nil, ValidationError{Msg: "this challenge has ended"}
-		}
-		if !now.Before(ch.StartDate) {
-			return nil, ValidationError{Msg: "joining has closed — the challenge has already started"}
-		}
+	if err := joinWindowOpen(ch); err != nil {
+		return nil, err
 	}
-	hasFee := ch.JoinFee != nil && *ch.JoinFee > 0
-	if hasFee && !paid && !ch.Joined {
+	if ch.JoinFee != nil && *ch.JoinFee > 0 && !ch.Joined {
 		return nil, ErrPaymentRequired
 	}
-	if _, err := s.repo.JoinAsUser(ctx, challengeID, userID, hasFee); err != nil {
+	if _, err := s.repo.JoinAsUser(ctx, challengeID, userID, false); err != nil {
 		return nil, err
 	}
 	if err := s.board.SetScore(ctx, challengeID, userID, scoreOf(ch)); err != nil {
 		log.Printf("challenges: leaderboard SetScore on join failed: %v", err)
+	}
+	return s.repo.Get(ctx, userID, challengeID)
+}
+
+// joinWindowOpen enforces that joining is only allowed before the challenge
+// starts (already-joined members are exempt — a re-join is a no-op).
+func joinWindowOpen(ch *Challenge) error {
+	if ch.Joined {
+		return nil
+	}
+	now := time.Now()
+	if !now.Before(ch.EndDate) {
+		return ValidationError{Msg: "this challenge has ended"}
+	}
+	if !now.Before(ch.StartDate) {
+		return ValidationError{Msg: "joining has closed — the challenge has already started"}
+	}
+	return nil
+}
+
+// QuoteJoin validates that the user may pay to join and returns the join fee in
+// integer PAISE plus the owning chapter (for revenue attribution).
+func (s *Service) QuoteJoin(ctx context.Context, userID string, challengeID uuid.UUID) (int64, *uuid.UUID, error) {
+	if err := s.requireVisible(ctx, userID, challengeID); err != nil {
+		return 0, nil, err
+	}
+	ch, err := s.repo.Get(ctx, userID, challengeID)
+	if err != nil {
+		return 0, nil, err
+	}
+	if ch.Joined {
+		return 0, nil, ValidationError{Msg: "you've already joined this challenge"}
+	}
+	if err := joinWindowOpen(ch); err != nil {
+		return 0, nil, err
+	}
+	amount := payments.RupeesToPaise(ch.JoinFee)
+	if amount <= 0 {
+		return 0, nil, ValidationError{Msg: "this challenge is free to join"}
+	}
+	return amount, ch.ChapterID, nil
+}
+
+// ConfirmJoinPayment enrols the user as a paid participant AFTER a verified
+// payment (fee_paid = true) and seeds their leaderboard score. Idempotent: the
+// insert is a no-op if they already joined, so a webhook retry is safe.
+func (s *Service) ConfirmJoinPayment(ctx context.Context, userID string, challengeID uuid.UUID) (*Challenge, error) {
+	ch, err := s.repo.Get(ctx, userID, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.JoinAsUser(ctx, challengeID, userID, true); err != nil {
+		return nil, err
+	}
+	if err := s.board.SetScore(ctx, challengeID, userID, scoreOf(ch)); err != nil {
+		log.Printf("challenges: leaderboard SetScore on paid join failed: %v", err)
 	}
 	return s.repo.Get(ctx, userID, challengeID)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/avinash/clubmitra/backend/internal/payments"
 	"github.com/avinash/clubmitra/backend/internal/permissions"
 )
 
@@ -26,6 +27,42 @@ func addPeriod(t time.Time, period *string) time.Time {
 		return t.AddDate(1, 0, 0)
 	}
 	return t.AddDate(0, 1, 0) // default monthly
+}
+
+// PlanTier is one club → platform subscription tier (the B2B billing surface).
+type PlanTier struct {
+	Name        string  `json:"name"`
+	PriceRupees float64 `json:"price_rupees"` // per month, INR
+	MemberLimit int     `json:"member_limit"`
+	Purchasable bool    `json:"purchasable"` // false for free (default) + club_plus (custom/manual)
+}
+
+// planTiers is the subscription catalog. 'free' is the default; 'club_plus' is
+// assigned manually for now (custom pricing — "contact us"), so only Team and
+// Club are self-purchasable in this build.
+var planTiers = []PlanTier{
+	{Name: "free", PriceRupees: 0, MemberLimit: 20, Purchasable: false},
+	{Name: "team", PriceRupees: 749, MemberLimit: 50, Purchasable: true},
+	{Name: "club", PriceRupees: 2499, MemberLimit: 300, Purchasable: true},
+	{Name: "club_plus", PriceRupees: 0, MemberLimit: 1000000, Purchasable: false},
+}
+
+func planTier(name string) (PlanTier, bool) {
+	for _, t := range planTiers {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return PlanTier{}, false
+}
+
+// memberLimit returns a tier's active-member cap (free's cap if the tier is
+// unknown, so a bad value fails safe to the most restrictive plan).
+func memberLimit(tier string) int {
+	if t, ok := planTier(tier); ok {
+		return t.MemberLimit
+	}
+	return 20
 }
 
 // ValidationError carries a client-safe 400 message.
@@ -291,6 +328,20 @@ func (s *Service) enrol(ctx context.Context, chapter *Chapter, userID string) (*
 		return &JoinResult{Chapter: chapter, Status: existing.Status}, nil
 	}
 
+	// Enforce the club's plan member limit — the free→paid upgrade pressure.
+	// Only genuinely new joins are gated (existing members were returned above).
+	tier, _, err := s.repo.GetSubscription(ctx, chapter.ID)
+	if err != nil {
+		return nil, err
+	}
+	count, err := s.repo.CountActiveMembers(ctx, chapter.ID)
+	if err != nil {
+		return nil, err
+	}
+	if count >= memberLimit(tier) {
+		return nil, ValidationError{Msg: "this club has reached its plan's member limit — ask an admin to upgrade the club's plan"}
+	}
+
 	status := StatusActive
 	switch {
 	case chapter.RequiresApproval:
@@ -365,49 +416,161 @@ func (s *Service) ApproveMember(ctx context.Context, chapterID uuid.UUID, userID
 	return next, nil
 }
 
-// PayMembership records a (mock) fee payment for the caller's own membership and
-// activates it, extending fee_paid_until by one period. Used for the first
-// payment (pending_payment) and for renewals (active, within the renewal
-// window). Renewals extend from the current expiry, not from today.
-func (s *Service) PayMembership(ctx context.Context, chapterID uuid.UUID, userID string) (*time.Time, error) {
+// QuoteMembership validates that the caller may pay/renew their own membership
+// right now and returns the fee in integer PAISE (for the payments engine to
+// charge). Membership payment goes through the real gateway — there is no
+// "mark as paid" shortcut — so this is the price half of that flow; the
+// entitlement half is ConfirmMembershipPayment, run only after a verified capture.
+func (s *Service) QuoteMembership(ctx context.Context, chapterID uuid.UUID, userID string) (amountPaise int64, period string, err error) {
+	chapter, err := s.repo.GetChapter(ctx, chapterID)
+	if err != nil {
+		return 0, "", err
+	}
+	if !chapter.FeeEnabled {
+		return 0, "", ValidationError{Msg: "this club has no membership fee"}
+	}
+	m, err := s.repo.GetMembership(ctx, chapterID, userID)
+	if err != nil {
+		return 0, "", err
+	}
+	if err := checkPayable(chapter, m); err != nil {
+		return 0, "", err
+	}
+	amount := payments.RupeesToPaise(chapter.FeeAmount)
+	if amount <= 0 {
+		return 0, "", ValidationError{Msg: "this club's membership fee isn't set up correctly"}
+	}
+	period = "monthly"
+	if chapter.MembershipPeriod != nil {
+		period = *chapter.MembershipPeriod
+	}
+	return amount, period, nil
+}
+
+// checkPayable enforces the pay/renew rules: a first payment is allowed when
+// pending_payment; a renewal (active/lapsed) is allowed once lapsed/expired or
+// within the club's renewal window before expiry.
+func checkPayable(chapter *Chapter, m *Membership) error {
+	switch m.Status {
+	case StatusPendingPayment:
+		return nil
+	case StatusActive, "lapsed":
+		now := time.Now()
+		if m.FeePaidUntil != nil && m.FeePaidUntil.After(now) {
+			window := m.FeePaidUntil.AddDate(0, 0, -chapter.RenewalWindowDays)
+			if now.Before(window) {
+				return ValidationError{Msg: "renewal opens closer to your expiry date"}
+			}
+		}
+		return nil
+	default:
+		return ValidationError{Msg: "this membership can't be paid for in its current state"}
+	}
+}
+
+// ConfirmMembershipPayment grants/renews membership AFTER a verified payment:
+// it extends fee_paid_until by one period (stacking on a still-future expiry so
+// early renewals add up) and activates the membership. The period is the one
+// QUOTED (captured in the payment notes), not the chapter's current setting, so
+// an admin flipping monthly/annual between order and capture can't change what
+// the runner paid for. Idempotency is guaranteed by the payment-engine claim.
+func (s *Service) ConfirmMembershipPayment(ctx context.Context, chapterID uuid.UUID, userID, quotedPeriod string) (*time.Time, error) {
 	chapter, err := s.repo.GetChapter(ctx, chapterID)
 	if err != nil {
 		return nil, err
 	}
-	if !chapter.FeeEnabled {
-		return nil, ValidationError{Msg: "this club has no membership fee"}
+	// Prefer the quoted period; fall back to the chapter's current one (older
+	// payments without a stored period).
+	period := chapter.MembershipPeriod
+	if quotedPeriod != "" {
+		period = &quotedPeriod
 	}
-	m, err := s.repo.GetMembership(ctx, chapterID, userID)
-	if err != nil {
-		return nil, err
-	}
-
 	now := time.Now()
-	switch m.Status {
-	case StatusPendingPayment:
-		// first payment — fine
-	case StatusActive, "lapsed":
-		// renewal: only within the window before expiry (or any time once lapsed/expired)
+	base := now
+	switch m, err := s.repo.GetMembership(ctx, chapterID, userID); {
+	case err == nil:
 		if m.FeePaidUntil != nil && m.FeePaidUntil.After(now) {
-			window := m.FeePaidUntil.AddDate(0, 0, -chapter.RenewalWindowDays)
-			if now.Before(window) {
-				return nil, ValidationError{Msg: "renewal opens closer to your expiry date"}
-			}
+			base = *m.FeePaidUntil // stack on the unused remainder
+		}
+	case errors.Is(err, ErrNotFound):
+		// Membership was removed between order and capture — re-add it; the runner
+		// paid, so they get their spot.
+		if aerr := s.repo.AddMember(ctx, chapterID, userID, userID, StatusActive); aerr != nil {
+			return nil, aerr
 		}
 	default:
-		return nil, ValidationError{Msg: "this membership can't be paid for in its current state"}
+		return nil, err
 	}
-
-	// Extend from the later of (current expiry, now) so early renewals stack.
-	base := now
-	if m.FeePaidUntil != nil && m.FeePaidUntil.After(now) {
-		base = *m.FeePaidUntil
-	}
-	until := addPeriod(base, chapter.MembershipPeriod)
+	until := addPeriod(base, period)
 	if err := s.repo.ActivateMembership(ctx, chapterID, userID, &until); err != nil {
 		return nil, err
 	}
+	if s.notify != nil {
+		s.notify.NotifyUsers(ctx, []string{userID}, "Membership active",
+			"Your membership in "+chapter.Name+" is now active.",
+			map[string]string{"type": "membership_paid", "chapter_id": chapterID.String()})
+	}
 	return &until, nil
+}
+
+// QuoteSubscription validates that tierName is a self-purchasable plan and
+// returns its monthly price in integer PAISE. Authorization (caller is a club
+// admin) is enforced by the payment handler, not here.
+func (s *Service) QuoteSubscription(ctx context.Context, chapterID uuid.UUID, tierName string) (int64, error) {
+	if _, err := s.repo.GetChapter(ctx, chapterID); err != nil {
+		return 0, err
+	}
+	t, ok := planTier(tierName)
+	if !ok || !t.Purchasable {
+		return 0, ValidationError{Msg: "pick a paid plan (Team or Club)"}
+	}
+	amount := payments.RupeesToPaise(&t.PriceRupees)
+	if amount <= 0 {
+		return 0, ValidationError{Msg: "that plan isn't available to buy"}
+	}
+	return amount, nil
+}
+
+// ConfirmSubscription sets a chapter's plan tier AFTER a verified payment and
+// extends subscription_until by one month (stacking on a still-future expiry).
+// Idempotency is guaranteed by the payment-engine claim.
+func (s *Service) ConfirmSubscription(ctx context.Context, chapterID uuid.UUID, tierName string) (*time.Time, error) {
+	t, ok := planTier(tierName)
+	if !ok {
+		return nil, ValidationError{Msg: "unknown plan"}
+	}
+	now := time.Now()
+	base := now
+	if _, until, err := s.repo.GetSubscription(ctx, chapterID); err == nil && until != nil && until.After(now) {
+		base = *until
+	}
+	newUntil := base.AddDate(0, 1, 0) // monthly billing, manual renewal
+	if err := s.repo.SetSubscription(ctx, chapterID, t.Name, &newUntil); err != nil {
+		return nil, err
+	}
+	return &newUntil, nil
+}
+
+// PlanStatus is the admin billing view: current plan, usage, and the catalog.
+type PlanStatus struct {
+	Tier        string     `json:"tier"`
+	Until       *time.Time `json:"subscription_until,omitempty"`
+	MemberCount int        `json:"member_count"`
+	MemberLimit int        `json:"member_limit"`
+	Tiers       []PlanTier `json:"tiers"`
+}
+
+// GetPlan returns a chapter's subscription status for the admin billing screen.
+func (s *Service) GetPlan(ctx context.Context, chapterID uuid.UUID) (*PlanStatus, error) {
+	tier, until, err := s.repo.GetSubscription(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+	count, err := s.repo.CountActiveMembers(ctx, chapterID)
+	if err != nil {
+		return nil, err
+	}
+	return &PlanStatus{Tier: tier, Until: until, MemberCount: count, MemberLimit: memberLimit(tier), Tiers: planTiers}, nil
 }
 
 // ListMembers returns a chapter's members.

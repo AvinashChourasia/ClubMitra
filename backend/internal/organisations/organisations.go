@@ -530,6 +530,44 @@ func (r *Repository) ActivateMembership(ctx context.Context, chapterID uuid.UUID
 	return nil
 }
 
+// CountActiveMembers returns how many active (non-deleted) members a chapter has
+// — the figure the plan's member limit is enforced against.
+func (r *Repository) CountActiveMembers(ctx context.Context, chapterID uuid.UUID) (int, error) {
+	var n int
+	err := r.db.QueryRow(ctx,
+		`SELECT count(*) FROM chapter_members WHERE chapter_id = $1 AND status = 'active' AND deleted_at IS NULL`,
+		chapterID).Scan(&n)
+	return n, err
+}
+
+// GetSubscription returns a chapter's current plan tier and paid-until.
+func (r *Repository) GetSubscription(ctx context.Context, chapterID uuid.UUID) (string, *time.Time, error) {
+	var tier string
+	var until *time.Time
+	err := r.db.QueryRow(ctx,
+		`SELECT subscription_tier, subscription_until FROM chapters WHERE id = $1 AND deleted_at IS NULL`,
+		chapterID).Scan(&tier, &until)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, ErrNotFound
+	}
+	return tier, until, err
+}
+
+// SetSubscription sets a chapter's plan tier and paid-until (after a verified
+// subscription payment).
+func (r *Repository) SetSubscription(ctx context.Context, chapterID uuid.UUID, tier string, until *time.Time) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE chapters SET subscription_tier = $2, subscription_until = $3 WHERE id = $1 AND deleted_at IS NULL`,
+		chapterID, tier, until)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ListMembers returns a chapter's active members with their names.
 func (r *Repository) ListMembers(ctx context.Context, chapterID uuid.UUID) ([]Member, error) {
 	const q = `

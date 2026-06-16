@@ -1,7 +1,7 @@
 // Club inventory manager (admin-only). List club gear, add items, and move
 // stock (issue / return / restock). Reached from the club detail screen.
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -22,6 +22,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../../lib/auth";
 import { ApiError } from "../../../lib/api";
 import { listItems, createItem, deleteItem, move, type InventoryItem, type MoveType } from "../../../lib/inventory";
+import { pay } from "../../../lib/payments";
 import { colors, styles } from "../../../lib/theme";
 
 export default function ClubInventory() {
@@ -32,6 +33,7 @@ export default function ClubInventory() {
   const [items, setItems] = useState<InventoryItem[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [adding, setAdding] = useState(false);
+  const buyingRef = useRef(false); // a purchase is in flight (double-tap guard)
 
   // Add-item form
   const [name, setName] = useState("");
@@ -136,6 +138,38 @@ export default function ClubInventory() {
     }
   }
 
+  // Buy one unit via Razorpay hosted checkout. The backend records the sale +
+  // decrements stock on capture. (A member-facing storefront is a follow-up; for
+  // now Buy lives alongside stock management.)
+  function buy(item: InventoryItem) {
+    if (item.unit_price == null || item.unit_price <= 0) return;
+    Alert.alert(`Buy ${item.name}`, `Pay ₹${item.unit_price} for 1?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: `Pay ₹${item.unit_price}`,
+        onPress: () =>
+          void (async () => {
+            if (buyingRef.current) return; // guard against a double-tap creating two orders
+            buyingRef.current = true;
+            try {
+              const token = await getAccessToken();
+              const outcome = await pay(token!, { purpose: "inventory", targetId: item.id, quantity: 1, desc: item.name });
+              if (outcome === "paid") {
+                await load();
+                Alert.alert("Purchased ✓", `You bought ${item.name}.`);
+              } else if (outcome === "failed") {
+                Alert.alert("Almost there", "If your payment went through, it'll reflect in a moment.");
+              }
+            } catch (e) {
+              Alert.alert("Couldn't buy", e instanceof ApiError ? e.message : "Something went wrong");
+            } finally {
+              buyingRef.current = false;
+            }
+          })(),
+      },
+    ]);
+  }
+
   function confirmDelete(item: InventoryItem) {
     Alert.alert(item.name, "Remove this item? (soft delete — history is kept)", [
       { text: "Cancel", style: "cancel" },
@@ -221,6 +255,17 @@ export default function ClubInventory() {
                       </Pressable>
                     ))}
                   </View>
+                  {it.unit_price != null && it.unit_price > 0 && (
+                    <Pressable
+                      onPress={() => buy(it)}
+                      disabled={low}
+                      style={{ backgroundColor: low ? colors.border : colors.primary, borderRadius: 10, paddingVertical: 10, alignItems: "center" }}
+                    >
+                      <Text style={{ color: low ? colors.muted : "#fff", fontWeight: "800", fontSize: 13 }}>
+                        {low ? "Sold out" : `Buy · ₹${it.unit_price}`}
+                      </Text>
+                    </Pressable>
+                  )}
                 </View>
               );
             })

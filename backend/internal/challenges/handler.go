@@ -90,7 +90,7 @@ type createRequest struct {
 
 type joinRequest struct {
 	ChapterID *string `json:"chapter_id"` // present = join as this club
-	Paid      bool    `json:"paid"`       // mock-payment confirmation for a fee challenge
+	Paid      bool    `json:"paid"`       // deprecated + ignored: fee joins now go through the payments engine
 }
 
 // updateRequest is the organiser's partial edit; absent fields keep their
@@ -250,8 +250,9 @@ func (h *Handler) join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Individual join (paid=true is the mock-payment confirmation for fee ones).
-	ch, err := h.svc.Join(r.Context(), userID, id, req.Paid)
+	// Individual join. A fee challenge returns 402 (ErrPaymentRequired); the
+	// client then pays via the payments engine, which enrols them on capture.
+	ch, err := h.svc.Join(r.Context(), userID, id)
 	if err != nil {
 		writeErr(w, err)
 		return

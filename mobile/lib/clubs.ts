@@ -100,10 +100,28 @@ export function approveMember(token: string, chapterId: string, userId: string) 
   return request<{ status: string }>(`/chapters/${chapterId}/members/${userId}/approve`, { method: "POST", token });
 }
 
-// payMembership: mock-pay the fee for the caller's own membership (first payment
-// or renewal). Returns the new fee_paid_until.
-export function payMembership(token: string, chapterId: string) {
-  return request<{ status: string; fee_paid_until: string }>(`/chapters/${chapterId}/pay`, { method: "POST", token });
+// Membership fees are paid through the payments engine (lib/payments → pay()),
+// not a mock endpoint — see app/club/[id].tsx payOrRenew.
+
+// --- club → platform subscription plan (admin billing) ---
+export type PlanTier = {
+  name: string;
+  price_rupees: number; // per month, INR
+  member_limit: number;
+  purchasable: boolean;
+};
+
+export type PlanStatus = {
+  tier: string;
+  subscription_until?: string | null;
+  member_count: number;
+  member_limit: number;
+  tiers: PlanTier[];
+};
+
+// getPlan returns a club's subscription status + the tier catalog (admin-only).
+export function getPlan(token: string, chapterId: string) {
+  return request<PlanStatus>(`/chapters/${chapterId}/plan`, { token });
 }
 
 export function createOrg(token: string, name: string, description: string) {

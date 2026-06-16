@@ -91,6 +91,53 @@ func (r *Repository) ListItems(ctx context.Context, chapterID uuid.UUID) ([]Item
 	return out, rows.Err()
 }
 
+// GetItem loads one item by id (across chapters), or ErrNotFound. Used by the
+// purchase flow, where the buyer supplies only the item id.
+func (r *Repository) GetItem(ctx context.Context, itemID uuid.UUID) (*Item, error) {
+	const q = `SELECT ` + itemColumns + ` FROM inventory_items WHERE id = $1 AND deleted_at IS NULL`
+	it, err := scanItem(r.db.QueryRow(ctx, q, itemID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return it, err
+}
+
+// RecordPurchase fulfils a PAID purchase: decrement available stock and log a
+// 'purchase' movement (with the amount), atomically. The money is already
+// captured, so the buyer MUST be fulfilled — we clamp available_qty at 0 with
+// GREATEST (the table has a CHECK available_qty >= 0, so a raw subtraction would
+// reject a paid order under a concurrent oversell). The recorded 'purchase' txn
+// is the source of truth for what was sold; the admin reconciles stock from it.
+func (r *Repository) RecordPurchase(ctx context.Context, chapterID, itemID uuid.UUID, userID string, qty int, amountRupees float64, currency string) (*Item, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	const upd = `UPDATE inventory_items SET available_qty = GREATEST(available_qty - $3, 0)
+		WHERE id = $2 AND chapter_id = $1 AND deleted_at IS NULL
+		RETURNING ` + itemColumns
+	it, err := scanItem(tx.QueryRow(ctx, upd, chapterID, itemID, qty))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO inventory_transactions (item_id, chapter_id, user_id, type, quantity, amount, currency)
+		 VALUES ($1, $2, $3, 'purchase', $4, $5, $6)`,
+		itemID, chapterID, userID, qty, amountRupees, currency,
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return it, nil
+}
+
 // CreateItem inserts a new item. Initial available stock equals total_quantity.
 func (r *Repository) CreateItem(ctx context.Context, chapterID uuid.UUID, name string, category *string, qty int, sizeBreakdown json.RawMessage, unitPrice *float64, currency string, imageURL *string) (*Item, error) {
 	const q = `INSERT INTO inventory_items

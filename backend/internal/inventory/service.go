@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/avinash/clubmitra/backend/internal/payments"
 )
 
 // ValidationError carries a client-safe 400 message.
@@ -78,4 +80,37 @@ func (s *Service) Move(ctx context.Context, chapterID, itemID uuid.UUID, txType 
 // Transactions returns an item's movement history.
 func (s *Service) Transactions(ctx context.Context, chapterID, itemID uuid.UUID) ([]Txn, error) {
 	return s.repo.ListTxns(ctx, chapterID, itemID)
+}
+
+// QuotePurchase validates that itemID is for sale with enough stock and returns
+// the line total (unit_price × qty) in integer PAISE plus the owning chapter.
+func (s *Service) QuotePurchase(ctx context.Context, itemID uuid.UUID, qty int) (int64, uuid.UUID, error) {
+	if qty <= 0 {
+		return 0, uuid.Nil, ValidationError{Msg: "quantity must be at least 1"}
+	}
+	item, err := s.repo.GetItem(ctx, itemID)
+	if err != nil {
+		return 0, uuid.Nil, err
+	}
+	if item.UnitPrice == nil || *item.UnitPrice <= 0 {
+		return 0, uuid.Nil, ValidationError{Msg: "this item isn't for sale"}
+	}
+	if item.AvailableQty < qty {
+		return 0, uuid.Nil, ValidationError{Msg: "not enough stock available"}
+	}
+	line := *item.UnitPrice * float64(qty)
+	return payments.RupeesToPaise(&line), item.ChapterID, nil
+}
+
+// ConfirmPurchase fulfils a purchase AFTER a verified payment: it records the
+// 'purchase' stock movement with the captured amount. Idempotency is guaranteed
+// by the payment-engine claim (it runs at most once per captured payment).
+func (s *Service) ConfirmPurchase(ctx context.Context, itemID uuid.UUID, userID string, qty int, amountPaise int64) error {
+	item, err := s.repo.GetItem(ctx, itemID)
+	if err != nil {
+		return err
+	}
+	amountRupees := float64(amountPaise) / 100.0
+	_, err = s.repo.RecordPurchase(ctx, item.ChapterID, itemID, userID, qty, amountRupees, item.Currency)
+	return err
 }

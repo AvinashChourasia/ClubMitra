@@ -55,10 +55,10 @@ func (h *Handler) Routes() http.Handler {
 		r.Get("/mine", h.myChapters)    // the caller's chapters (static before {chapterID})
 		r.Route("/{chapterID}", func(r chi.Router) {
 			r.Get("/", h.getChapter)
-			r.Post("/join", h.joinOpen) // join a discovered open club (no invite code)
-			r.Post("/pay", h.payMembership)             // self-service: pay/renew own membership
+			r.Post("/join", h.joinOpen)                 // join a discovered open club (no invite code)
 			r.Put("/members/me/status", h.setOwnStatus) // self-service: on_leave / active
 			r.With(chapterAdmin).Put("/", h.updateChapter)
+			r.With(chapterAdmin).Get("/plan", h.getPlan) // admin billing: tier, usage, catalog
 			r.With(chapterOrgAdmin).Delete("/", h.deleteChapter)
 			r.With(chapterAdmin).Post("/members", h.addMember)
 			r.With(chapterAdmin).Get("/members", h.listMembers)
@@ -289,22 +289,17 @@ func (h *Handler) approveMember(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
-func (h *Handler) payMembership(w http.ResponseWriter, r *http.Request) {
-	userID, ok := httpx.UserIDFromContext(r.Context())
-	if !ok {
-		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
-		return
-	}
+func (h *Handler) getPlan(w http.ResponseWriter, r *http.Request) {
 	chapterID, ok := h.chapterID(w, r)
 	if !ok {
 		return
 	}
-	until, err := h.svc.PayMembership(r.Context(), chapterID, userID)
+	plan, err := h.svc.GetPlan(r.Context(), chapterID)
 	if err != nil {
 		h.writeError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"status": "active", "fee_paid_until": until})
+	httpx.JSON(w, http.StatusOK, plan)
 }
 
 func (h *Handler) deleteChapter(w http.ResponseWriter, r *http.Request) {

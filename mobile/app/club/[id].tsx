@@ -20,12 +20,12 @@ import {
   removeMember,
   assignRole,
   approveMember,
-  payMembership,
   setOwnStatus,
   MEMBER_STATUSES,
   type Chapter,
   type Member,
 } from "../../lib/clubs";
+import { pay } from "../../lib/payments";
 import { listRuns, type Run } from "../../lib/attendance";
 import {
   listChallenges,
@@ -311,6 +311,7 @@ export default function ClubDetail() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [paying, setPaying] = useState(false); // membership payment in flight
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
@@ -429,18 +430,34 @@ export default function ClubDetail() {
     }
   }
 
-  // Mock payment: confirm, then call the pay endpoint (Razorpay is Phase 2).
+  // Real payment via Razorpay's hosted checkout (dormant until the backend has
+  // keys, in which case the order call surfaces "payments aren't enabled yet").
   function payOrRenew() {
-    if (!chapter) return;
-    const amount = chapter.membership_fee_amount ?? 0;
-    Alert.alert(
-      myStatus === "active" ? "Renew membership" : "Pay membership fee",
-      `Pay ₹${amount} (${chapter.membership_period ?? "monthly"})?  (mock payment)`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: `Pay ₹${amount}`, onPress: () => withToken((t) => payMembership(t, id)) },
-      ]
-    );
+    if (!chapter || paying) return; // guard against a double-tap creating two orders
+    void (async () => {
+      setPaying(true);
+      try {
+        const token = await getAccessToken();
+        const outcome = await pay(token!, {
+          purpose: "membership",
+          targetId: id,
+          desc: `${chapter.name} membership`,
+        });
+        if (outcome === "paid") {
+          await load();
+          Alert.alert("Membership active 🎉", "You're all set — your membership is active.");
+        } else if (outcome === "failed") {
+          // Verify hiccup: the webhook still settles it. Don't refresh now (it'd
+          // show stale state); it'll reflect on next open / pull-to-refresh.
+          Alert.alert("Almost there", "If your payment went through, it'll reflect in a moment.");
+        }
+        // "cancelled" → user backed out; nothing to do.
+      } catch (e) {
+        Alert.alert("Couldn't start payment", e instanceof ApiError ? e.message : "Something went wrong");
+      } finally {
+        setPaying(false);
+      }
+    })();
   }
 
   function manageMember(m: Member) {

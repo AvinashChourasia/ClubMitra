@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -41,6 +42,17 @@ type Config struct {
 	StravaClientID     string
 	StravaClientSecret string
 
+	// Razorpay payments (optional): keys from the Razorpay dashboard. Unset = the
+	// payment system is dormant (order endpoints return 503), so the app ships
+	// safely without keys and goes live the moment test/live keys are injected.
+	// WebhookSecret verifies the authenticity of incoming payment webhooks.
+	RazorpayKeyID         string
+	RazorpayKeySecret     string
+	RazorpayWebhookSecret string
+	// PlatformCutPct is the platform's cut of each payment, recorded per
+	// transaction (for a future Razorpay Route payout split). Default 10%.
+	PlatformCutPct int
+
 	// How long tokens stay valid. Access tokens are deliberately short
 	// (small damage window if stolen); refresh tokens are long (so users
 	// rarely have to log in again).
@@ -68,8 +80,14 @@ func Load() (*Config, error) {
 		MarathonMitraURL:   os.Getenv("MARATHONMITRA_API_URL"),
 		StravaClientID:     os.Getenv("STRAVA_CLIENT_ID"),
 		StravaClientSecret: os.Getenv("STRAVA_CLIENT_SECRET"),
-		AccessTokenTTL:     15 * time.Minute,
-		RefreshTokenTTL:    30 * 24 * time.Hour, // 30 days
+
+		RazorpayKeyID:         os.Getenv("RAZORPAY_KEY_ID"),
+		RazorpayKeySecret:     os.Getenv("RAZORPAY_KEY_SECRET"),
+		RazorpayWebhookSecret: os.Getenv("RAZORPAY_WEBHOOK_SECRET"),
+		PlatformCutPct:        intEnv("PLATFORM_CUT_PCT", 10),
+
+		AccessTokenTTL:  15 * time.Minute,
+		RefreshTokenTTL: 30 * 24 * time.Hour, // 30 days
 	}
 
 	// Fail fast: it's far better to crash on startup with a clear message than
@@ -128,6 +146,16 @@ var weakSecrets = map[string]bool{
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// intEnv parses an integer env var, falling back if unset or unparseable.
+func intEnv(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return fallback
 }
