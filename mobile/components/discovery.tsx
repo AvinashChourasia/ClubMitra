@@ -122,10 +122,13 @@ function JoinButton({ joining, onPress }: { joining: boolean; onPress: () => voi
   );
 }
 
-// DiscoverClubCard: one public club row — logo, name, city, size, Join/invite.
+// DiscoverClubCard: one public club row — tap anywhere to open the club's public
+// profile (banner, about, members → decide to join); the Join button is a quick
+// path for open clubs.
 export function DiscoverClubCard({ club, joiningId, onJoin }: { club: DiscoverClub; joiningId: string | null; onJoin: (c: DiscoverClub) => void }) {
+  const router = useRouter();
   return (
-    <View style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12 }]}>
+    <Tap onPress={() => router.push(`/club/public/${club.id}`)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12 }]}>
       <Avatar name={club.name} uri={club.logo} size={48} bg={colors.accent} />
       <View style={{ flex: 1 }}>
         <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }} numberOfLines={1}>{club.name}</Text>
@@ -136,11 +139,12 @@ export function DiscoverClubCard({ club, joiningId, onJoin }: { club: DiscoverCl
       {club.join_policy === "open" ? (
         <JoinButton joining={joiningId === club.id} onPress={() => onJoin(club)} />
       ) : (
-        <View style={{ backgroundColor: colors.bgSecondary, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
           <Text style={{ color: colors.muted, fontWeight: "700", fontSize: 12 }}>Invite only</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.subtle} />
         </View>
       )}
-    </View>
+    </Tap>
   );
 }
 
@@ -242,10 +246,11 @@ export function SearchBar({ value, onChange, placeholder }: { value: string; onC
 // ClubCarousel: horizontally-scrolling compact club tiles with Join buttons —
 // the "popular clubs in your city" strip used on both guest and member homes.
 export function ClubCarousel({ clubs, joiningId, onJoin }: { clubs: DiscoverClub[]; joiningId: string | null; onJoin: (c: DiscoverClub) => void }) {
+  const router = useRouter();
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 4 }}>
       {clubs.map((c) => (
-        <View key={c.id} style={[styles.card, { width: 200, gap: 10, alignItems: "center", paddingVertical: 18 }]}>
+        <Tap key={c.id} onPress={() => router.push(`/club/public/${c.id}`)} style={[styles.card, { width: 200, gap: 10, alignItems: "center", paddingVertical: 18 }]}>
           <Avatar name={c.name} uri={c.logo} size={56} bg={colors.accent} />
           <View style={{ alignItems: "center" }}>
             <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15, textAlign: "center" }} numberOfLines={1}>{c.name}</Text>
@@ -262,7 +267,7 @@ export function ClubCarousel({ clubs, joiningId, onJoin }: { clubs: DiscoverClub
           ) : (
             <Text style={{ color: colors.muted, fontWeight: "700", fontSize: 12 }}>Invite only</Text>
           )}
-        </View>
+        </Tap>
       ))}
     </ScrollView>
   );

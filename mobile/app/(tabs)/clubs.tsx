@@ -2,16 +2,17 @@
 // invite code, or create your own.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Image, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
 import { myChapters, isChapterAdmin, roleLabel, type MyChapter } from "../../lib/clubs";
 import { swr } from "../../lib/cache";
-import { colors, styles, useThemeMode } from "../../lib/theme";
+import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
 import { Avatar } from "../../components/Avatar";
 import { Tap } from "../../components/Tap";
 import { Button } from "../../components/Button";
@@ -23,16 +24,6 @@ function CountPill({ icon, value, label }: { icon: keyof typeof Ionicons.glyphMa
       <Ionicons name={icon} size={16} color={colors.primary} />
       <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>{value}</Text>
       <Text style={{ color: colors.muted, fontSize: 12 }}>{label}</Text>
-    </View>
-  );
-}
-
-function Badge({ text, tone }: { text: string; tone: "admin" | "member" }) {
-  const bg = tone === "admin" ? colors.primary : colors.bgSecondary;
-  const fg = tone === "admin" ? "#fff" : colors.muted;
-  return (
-    <View style={{ backgroundColor: bg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 }}>
-      <Text style={{ color: fg, fontSize: 11, fontWeight: "700", textTransform: "capitalize" }}>{text}</Text>
     </View>
   );
 }
@@ -102,26 +93,44 @@ export default function Clubs() {
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
         ) : clubs && clubs.length > 0 ? (
-          clubs.map((c) => (
-            <Tap key={c.id} onPress={() => router.push(`/club/${c.id}`)} style={[styles.card, { gap: 12, padding: 16 }]}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-                <Avatar name={c.name} uri={c.logo} size={52} bg={colors.accent} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 17, fontWeight: "800", color: colors.text }}>{c.name}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 13 }}>📍 {c.city}</Text>
+          clubs.map((c) => {
+            const badge = isChapterAdmin(c.role) ? roleLabel(c.role) : c.status ? c.status : null;
+            return (
+              <Tap key={c.id} onPress={() => router.push(`/club/${c.id}`)} style={[styles.card, { padding: 0, gap: 0, overflow: "hidden" }]}>
+                {/* Banner hero — the club's image if set, else the brand gradient */}
+                <View style={{ height: 120, justifyContent: "flex-end" }}>
+                  {c.banner ? (
+                    <Image source={{ uri: c.banner }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  ) : (
+                    <LinearGradient colors={gradients.red} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+                  )}
+                  {/* bottom scrim so the name stays legible over any image */}
+                  <LinearGradient colors={["transparent", "rgba(2,6,23,0.62)"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+                  {/* role / status pill */}
+                  {badge && (
+                    <View style={{ position: "absolute", top: 10, right: 10, backgroundColor: "rgba(2,6,23,0.55)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+                      <Text style={{ color: "#fff", fontSize: 11, fontWeight: "800", textTransform: "capitalize" }}>{badge}</Text>
+                    </View>
+                  )}
+                  {/* logo + name overlaid bottom-left */}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 12, paddingBottom: 11 }}>
+                    <View style={{ borderWidth: 2, borderColor: "rgba(255,255,255,0.85)", borderRadius: 23 }}>
+                      <Avatar name={c.name} uri={c.logo} size={42} bg={colors.accent} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: "#fff", fontWeight: "800", fontSize: 17, letterSpacing: -0.2 }} numberOfLines={1}>{c.name}</Text>
+                      <Text style={{ color: "rgba(255,255,255,0.88)", fontSize: 12.5, fontWeight: "600" }} numberOfLines={1}>📍 {c.city}</Text>
+                    </View>
+                  </View>
                 </View>
-                {isChapterAdmin(c.role) ? (
-                  <Badge text={roleLabel(c.role)} tone="admin" />
-                ) : c.status ? (
-                  <Badge text={c.status} tone="member" />
-                ) : null}
-              </View>
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <CountPill icon="people" value={c.member_count} label={c.member_count === 1 ? "member" : "members"} />
-                <CountPill icon="trophy" value={c.active_challenge_count} label={c.active_challenge_count === 1 ? "challenge" : "challenges"} />
-              </View>
-            </Tap>
-          ))
+                {/* stats */}
+                <View style={{ flexDirection: "row", gap: 10, padding: 14 }}>
+                  <CountPill icon="people" value={c.member_count} label={c.member_count === 1 ? "member" : "members"} />
+                  <CountPill icon="trophy" value={c.active_challenge_count} label={c.active_challenge_count === 1 ? "challenge" : "challenges"} />
+                </View>
+              </Tap>
+            );
+          })
         ) : (
           <View style={[styles.card, { alignItems: "center", paddingVertical: 32, marginTop: 8 }]}>
             <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
