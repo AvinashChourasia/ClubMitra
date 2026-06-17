@@ -29,7 +29,7 @@ two-thirds of runners. **This is the #1 gap and the top build priority.**
 | **P0** | Frictionless GPX path (Strava/Garmin export guide + share-sheet intake) | 🟡 import exists, UX missing | Bridges sync gap until OAuth ships |
 | **P1** | Run a live pilot challenge (MarathonMitra 100K) with the 130+ runner leads | ❌ not started | Convert survey takers → active users now |
 | **P1** | Reposition pitch: "keep members running together" (not "save 10–15 hrs") | ❌ copy/deck | 14/20 admins spend <5 hrs/wk — time-saving pitch is false |
-| **P1** | Real payments (Razorpay Route) — Phase 3 | 🟡 MOCK | Needed for revenue, but see fee note below |
+| **P1** | Real payments (Razorpay) — membership, challenge, inventory, subscription | ✅ BUILT (dormant — needs Razorpay keys + webhook) | Real collection replaced the MOCK; revenue-ready once keyed |
 | **P1** | RunMitra → ClubMitra rename + store readiness (icon/splash/listing) | ❌ pending | Blocks soft launch |
 | **P2** | Inactive-member alerts surfaced prominently to admins | 🟡 analytics built | Admins named it unprompted (12/20) |
 | **P2** | Event-registration fees (real money flow vs membership) | ❌ not built | Events have money; memberships mostly don't |
@@ -40,6 +40,7 @@ two-thirds of runners. **This is the #1 gap and the top build priority.**
 | **DONE ✅** | Streaks + badges + XP | ✅ | Streak = #3 runner motivator — validated |
 | **DONE ✅** | Attendance + self check-in | ✅ | Admin top-5 — validated |
 | **DONE ✅** | Inventory CRUD | ✅ | Admin top-6, a differentiator — keep |
+| **DONE ✅** | Follow runners + discovery (profile counts, global name search, "runners you may know") | ✅ | Social graph + Find-runners shipped |
 
 **Revenue correction:** the membership-fee transaction-cut model is weak — 75%
 of clubs charge no fee and admins rank fee-collection last. Lead revenue with
@@ -85,9 +86,9 @@ replaces that stack with:
 
 **Estimated monthly infrastructure cost: $0–$7 at launch**
 
-> **Naming note:** the product is now **ClubMitra**, but the current codebase still
-> ships under the old `RunMitra` / `virtual-run-tracker` names (Go module, DB
-> `virtualrun`, ports 8090/5433/6380). The rename is a tracked Phase 2 cleanup.
+> **Naming note:** the codebase ships as **ClubMitra** (Go module
+> `github.com/avinash/clubmitra/backend`, DB `clubmitra`, ports 8090/5433/6380).
+> A further rebrand to **RunMitra** is planned but currently deferred.
 
 ---
 
@@ -335,7 +336,7 @@ clubmitra/
 - [x] Attachments: photo library, camera, document; staged preview + caption
 
 #### Cleanup
-- [ ] ClubMitra rename (Go module, DB name, env vars, ports) — see naming note
+- [x] virtual-run-tracker → ClubMitra rename (Go module, DB, env, ports) ✅ — a further RunMitra rebrand is deferred
 
 ---
 
@@ -350,7 +351,7 @@ clubmitra/
 > end to end and **dormant until Strava API keys are set on Render** (migration
 > 00038, `internal/activitysync`). Set `STRAVA_CLIENT_ID`/`STRAVA_CLIENT_SECRET`
 > (callback domain `clubmitra-api.onrender.com`) to activate.
-- [x] **Strava OAuth (read-only, `activity:read`)** — connect from Settings; tokens AES-GCM-encrypted at rest (key from JWT secret)
+- [x] **Strava OAuth (read-only, `activity:read_all`)** — connect from Settings; tokens AES-GCM-encrypted at rest (key from JWT secret)
 - [x] Poll-on-demand import (connect / "Sync now") through `svc.Record` — accurate distance/pace/elevation from Strava streams; webhooks deferred (robust on a sleeping free tier)
 - [x] De-dupe synced vs in-app-recorded runs (ledger by external id + ±2-min start match) — one credit
 - [x] Imported runs credit challenges + rolling boards + badges + streaks (the existing run pipeline, unchanged)
@@ -359,22 +360,24 @@ clubmitra/
 - [ ] Strava webhook subscription (push) — optional upgrade over polling
 - [ ] In-app GPX export guide for Strava/Garmin + share-sheet intake (UX polish on the existing import)
 
-#### Payments — Real money (provider-agnostic, replaces MOCK)
-- [ ] `pkg/payments/` — provider-agnostic interface (Provider)
-- [ ] Razorpay Route (India): KYC flow, order creation, webhook, auto-split
-- [ ] Stripe Connect (Global): Express onboarding, payment intent, webhook, auto-split
-- [ ] Currency detection: INR → Razorpay, EUR/USD → Stripe (set on chapter)
-- [ ] Platform cut calculated and stored at transaction time — never derived later
-- [x] 🟡 Membership fee toggle per chapter (on/off, amount, monthly/annual) — MOCK
-- [x] 🟡 In-app payment: runner pays chapter membership fee — MOCK
-- [x] 🟡 Challenge join fee — MOCK payment to join, date-gated
-- [ ] Replace MOCK membership fee with real Razorpay/Stripe flow
-- [ ] Replace MOCK challenge join fee with real flow
-- [ ] Subscription tier enforcement (Free/Team/Club/Club+/Enterprise) — gate features + member count
-- [ ] Transaction history: per runner, per chapter, per org
-- [ ] Finance dashboard for chapter admin: collected, pending, platform cut
-- [ ] Discount codes: fixed or % off, single-use or multi-use
-- [ ] Paid inventory purchases + platform cut (builds on Phase 2 inventory)
+#### Payments — Real money (Razorpay) ✅ BUILT June 2026 (dormant until keys)
+> One engine collects for every paid surface — `internal/payments` (migration
+> 00039). Money is integer **paise**; the **server** is the sole source of the
+> amount (never the client); capture is **verified** (Checkout signature + HMAC
+> webhook) and credited **idempotently** (a single atomic claim, so verify +
+> webhook can't double-grant). Single platform account for now (Razorpay Route
+> per-club split is a later add; `chapters.razorpay_account_id` is reserved).
+> Dormant until `RAZORPAY_KEY_ID/SECRET/WEBHOOK_SECRET` are set on Render.
+- [x] Razorpay Orders + hosted Checkout (in-app browser, Expo-Go-friendly) + verified webhook at `/public/payments/razorpay/webhook`
+- [x] Membership fee + renewal — **real** (MOCK `/pay` bypass removed; period bound at quote time so an admin can't change duration mid-flight)
+- [x] Challenge join fee — **real** (client `paid` flag bypass removed; 402 → pay → enrol)
+- [x] Inventory purchase — **real** (unblocked from the Phase-3 stub; stock decremented on capture)
+- [x] Club → platform subscription tiers (Free/Team/Club) + **member-count enforcement at join** + admin **Plan & billing** screen
+- [x] Platform cut recorded at transaction time (`PLATFORM_CUT_PCT`, never derived)
+- [ ] Stripe Connect (Global, EUR/USD) — deferred (India-first)
+- [ ] Razorpay Route per-club split + payout (KYC) — deferred (single account today)
+- [ ] Finance dashboard (collected / pending / cut) — partial (billing screen shows tier + usage); full transaction history + discount codes pending
+- [ ] **Event-registration fees** — paid events (the survey's real revenue lever); now unblocked by the payments engine
 
 #### GPX + Navigation
 - [ ] GPX file upload on any run / community event (attaches to `runs`)
@@ -462,7 +465,7 @@ clubmitra/
 - [x] Public explore: discover clubs and challenges by city and sport — `app/explore.tsx` + `lib/discover.ts` + backend `/public` routes (guest-browsable, auth gate fires only on join)
 - [x] Club public profile page (discoverability for non-members) — public `GET /public/chapters/{id}` + `app/club/public/[id]` (banner, members, About, Join), no auth gate
 - [x] Global club directory (searchable) — Explore browses all cities + name search; every club card taps into its public profile
-- [x] Follow individual runners — public runner profile (identity, gamification level, run + social stats), Follow/Following with optimistic toggle + follow push, followers/following lists; reached from chat sender taps (`internal/social`, `app/u/[id]`) *(needs migration 00034 applied)*
+- [x] Follow individual runners — public runner profile (identity, gamification level, run + social stats), **Follow + Message**, follower/following counts + lists with follow-back. **Find-runners discovery** (June 2026): global name search + "runners you may know" clubmate suggestions (`/social/search`, `/social/suggestions`), inline follow, and follower/following surfaced on the **Profile tab** (`internal/social`, `app/u/[id]`, `app/runners.tsx`, migration 00034)
 - [x] Club XP + club levels + Member of the Week — chapter-level XP/level from all-time logged distance (6-tier ladder) + this week's top runner, on the club Leaderboard tab; ranked rows + MoW tap through to runner profiles (`runlog.ClubStanding`)
 - [x] Org-wide challenge leaderboard (all chapters compete) — a Runners/Clubs toggle on the challenge board; clubs ranked by their members' combined progress, restricted to the org for org-scoped challenges (`challenges.ChapterScores`)
 - [x] Push notifications full suite — rank changes + re-engagement: background jobs push a weekly club recap (your weekly rank) and a re-engagement nudge to lapsed runners (throttled, race-safe, IST-scheduled); distance milestones already push via badges (`notifications.Engagement`, migration 00035)
@@ -662,7 +665,7 @@ A full authentication + authorization + injection + client/infra audit was run a
 - Tokens stored in SecureStore (not AsyncStorage); no secrets in the mobile bundle; HTTPS in prod; deep-link/push-tap navigation only uses client-constructed routes (no open-redirect). CORS intentionally absent (native-only client).
 
 ### Known / accepted for now
-- **Mock payments** (challenge join fee, membership fee) trust a client `paid` flag — by design until Phase 3 wires Razorpay/Stripe; must become server-verified then.
+- **Payments are now real Razorpay** — server-authoritative amounts, signature-verified Checkout + HMAC webhook, idempotent crediting; the old client `paid`/MOCK bypasses are removed. Dormant until keys are set; exercise with test keys before going live.
 - **WebSocket token in query string** can appear in access logs — low practical risk (needs log access); move it to a header before scaling log access.
 - **`POST /races`** (user-submitted races) isn't admin-gated; unused by the app today, gate or moderate before exposing it.
 - Free-text fields lack per-field length caps (bounded only by the 1 MB body limit); add `CHECK (char_length…)` limits when convenient.
@@ -733,8 +736,8 @@ STRIPE_CONNECT_CLIENT_ID=ca_xxxxx
 PLATFORM_CUT_PCT=10
 ```
 
-> The current dev setup still uses the `virtualrun` DB / ports 5433 + 6380 and
-> module `virtual-run-tracker` until the ClubMitra rename lands.
+> Dev DB `clubmitra` on ports 5433 (Postgres) + 6380 (Redis); Go module
+> `github.com/avinash/clubmitra/backend`. (A RunMitra rebrand is planned but deferred.)
 
 ---
 
@@ -759,16 +762,20 @@ PLATFORM_CUT_PCT=10
 |---|---|---|
 | 1 | Club core — members, attendance, challenges | Month 1 ✅ |
 | 2 | Rolling leaderboards, analytics, inventory, messaging | Month 2 ✅ |
-| 3 | **P0 Strava/Garmin sync**, payments (Razorpay + Stripe), GPX, desktop admin | Month 3 |
+| 3 | Strava sync ✅ + Razorpay payments ✅ (both dormant until keyed) · GPX UX, event fees, desktop admin remain | Month 3 (partial) |
 | 4 | GPS tracking, interactive maps, race calendar, city leaderboard | Month 4 ✅ |
 | 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 ✅ |
 | 6+ | Europe launch, leagues, coaches, physical events, white-label | Month 7+ |
 
-> **Survey-driven reorder (June 2026):** the next build is **activity sync
-> (Strava/Garmin)** — the #1 runner requirement and currently missing — then a
-> live pilot challenge, then real payments. Messaging depth is frozen ("keep it
-> simple"); membership-fee work is de-prioritised (75% of clubs charge no fee).
-> See the Priority Board at the top and `ClubMitra_Survey_Analysis_v2.md`.
+> **Status (June 2026):** Strava sync and real Razorpay payments are both **built
+> and dormant** — they light up the moment their keys are set on Render. With
+> those done, the next builds are the **frictionless GPX path** (P0 — share-sheet
+> intake + export guide, bridges Garmin & un-keyed Strava), then **event-
+> registration fees** (the survey's real revenue lever, now unblocked) and
+> **inactive-member alerts surfaced to admins** (P2, analytics already built).
+> Ops in parallel: a live pilot challenge + the repositioned pitch. Messaging
+> depth stays frozen; membership-fee polish stays de-prioritised. See the
+> Priority Board and `ClubMitra_Survey_Analysis_v2.md`.
 
 **Target:** India soft launch end of Month 2. Europe expansion Month 7+.
 
