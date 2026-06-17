@@ -25,7 +25,7 @@ import {
 } from "../../lib/activities";
 import { getGamification, tierColor, type GamificationProfile, type BadgeStatus } from "../../lib/gamification";
 import { swr, readCache, writeCache } from "../../lib/cache";
-import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
+import { colors, styles, useThemeMode } from "../../lib/theme";
 import { runningLevelLabel } from "../../lib/profile";
 import { formatDistance, formatDuration, formatPace } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
@@ -220,7 +220,7 @@ export default function Profile() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {/* Hero — identity */}
-        <GradientCard colors={gradients.red} glowColor={colors.primary} style={{ padding: 24, alignItems: "center", gap: 10 }}>
+        <GradientCard glowColor={colors.primary} style={{ padding: 24, alignItems: "center", gap: 10 }}>
           <View style={{ position: "absolute", top: 16, right: 16, flexDirection: "row", gap: 16, zIndex: 1 }}>
             <Pressable onPress={() => router.push("/profile/edit")} hitSlop={10}>
               <Ionicons name="create-outline" size={22} color="#fff" />

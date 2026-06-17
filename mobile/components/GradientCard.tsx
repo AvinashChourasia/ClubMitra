@@ -5,17 +5,19 @@
 import { View, type StyleProp, type ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { gradients, glow, radius as r } from "../lib/theme";
+import { colors as palette, gradients, glow, radius as r } from "../lib/theme";
 
 type Props = {
   children: React.ReactNode;
-  colors?: readonly [string, string, ...string[]]; // gradient stops (default brand red)
+  colors?: readonly [string, string, ...string[]]; // gradient stops (default = the theme's brand hero gradient)
   glowColor?: string; // colored glow under the card (default = last gradient stop)
   radius?: number;
   style?: StyleProp<ViewStyle>; // inner padding/layout
 };
 
-export function GradientCard({ children, colors = gradients.red, glowColor, radius = r.xl, style }: Props) {
+// Default the gradient to the active theme's heroGradient (read at call time, so
+// it tracks light/dark). palette is the LIVE `colors` binding from the theme.
+export function GradientCard({ children, colors = palette.heroGradient, glowColor, radius = r.xl, style }: Props) {
   const glowC = glowColor ?? colors[colors.length - 1];
   return (
     // Outer view carries the colored glow (no overflow clip, so the shadow shows).

@@ -13,7 +13,7 @@ import { resumePendingIntent } from "../../lib/discover";
 import { Tap } from "../../components/Tap";
 import { Button } from "../../components/Button";
 import { GradientCard } from "../../components/GradientCard";
-import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
+import { colors, styles, useThemeMode } from "../../lib/theme";
 
 export default function Login() {
   const { login, getAccessToken } = useAuth();
@@ -52,7 +52,7 @@ export default function Login() {
       <View style={styles.screen}>
         {/* Brand */}
         <View style={{ alignItems: "center", gap: 12, marginBottom: 12 }}>
-          <GradientCard colors={gradients.red} glowColor={colors.primary} radius={26} style={{ width: 80, height: 80, alignItems: "center", justifyContent: "center" }}>
+          <GradientCard glowColor={colors.primary} radius={26} style={{ width: 80, height: 80, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="walk" size={38} color="#fff" />
           </GradientCard>
           <Text style={{ fontSize: 30, fontWeight: "800", color: colors.text, letterSpacing: -0.6 }}>ClubMitra</Text>

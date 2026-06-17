@@ -21,7 +21,7 @@ import { ProgressBar } from "../../components/ProgressBar";
 import { RouteTrace } from "../../components/RouteTrace";
 import { Tap } from "../../components/Tap";
 import { GradientCard } from "../../components/GradientCard";
-import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
+import { colors, styles, useThemeMode } from "../../lib/theme";
 import { formatDistance, formatDuration, formatPace, formatRunWhen, isPast } from "../../lib/format";
 import { GuestHome } from "../../components/GuestScreens";
 import { activeStats, liveElapsedS } from "../../lib/locationTask";
@@ -168,7 +168,7 @@ export default function Home() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {/* Greeting */}
-        <GradientCard colors={gradients.red} glowColor={colors.primary} style={{ padding: 22, gap: 16 }}>
+        <GradientCard glowColor={colors.primary} style={{ padding: 22, gap: 16 }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
             <View>
               <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 14, fontWeight: "600" }}>Welcome back</Text>

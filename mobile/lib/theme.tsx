@@ -33,6 +33,10 @@ export type Palette = {
   bubbleMine: string;     // own chat bubble background
   bubbleMineText: string; // text/foreground on your own bubble
   chatBg: string;         // the conversation "wallpaper" behind bubbles
+  // The brand hero gradient (diagonal, to bottom-right). Theme-aware so it can
+  // deepen toward black in dark mode (the MarathonMitra look). Used by every
+  // GradientCard hero by default.
+  heroGradient: readonly [string, string, ...string[]];
 };
 
 const light: Palette = {
@@ -56,6 +60,8 @@ const light: Palette = {
   bubbleMine: "#D9FDD3",
   bubbleMineText: "#0B1220",
   chatBg: "#EFEAE2",
+  // MarathonMitra red, light: red-600 → red-700 → red-800.
+  heroGradient: ["#DC2626", "#B91C1C", "#991B1B"],
 };
 
 const dark: Palette = {
@@ -79,6 +85,8 @@ const dark: Palette = {
   bubbleMine: "#005C4B",
   bubbleMineText: "#FFFFFF",
   chatBg: "#0B141A",
+  // MarathonMitra red, dark: red-900 → red-950 → black (fades to black).
+  heroGradient: ["#7F1D1D", "#450A0A", "#000000"],
 };
 
 // Theme-independent tokens.

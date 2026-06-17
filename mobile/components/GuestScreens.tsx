@@ -26,7 +26,7 @@ import { Avatar } from "./Avatar";
 import { Tap } from "./Tap";
 import { Button } from "./Button";
 import { GradientCard } from "./GradientCard";
-import { colors, styles, gradients, useThemeMode } from "../lib/theme";
+import { colors, styles, useThemeMode } from "../lib/theme";
 
 // --- shared scaffolding ---
 
@@ -134,7 +134,7 @@ export function GuestHome() {
         <GuestHeader title="ClubMitra" city={city} onCity={setCity} />
 
         {/* Hero: the city's pulse */}
-        <GradientCard colors={gradients.red} glowColor={colors.primary} style={{ padding: 22, gap: 14 }}>
+        <GradientCard glowColor={colors.primary} style={{ padding: 22, gap: 14 }}>
           <Text style={{ color: "#fff", fontSize: 26, fontWeight: "800", letterSpacing: -0.4 }}>
             {cityLabel} runs together
           </Text>
@@ -356,7 +356,7 @@ export function GuestProfile() {
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
         <GuestHeader title="Profile" showCity={false} />
 
-        <GradientCard colors={gradients.red} glowColor={colors.primary} style={{ padding: 22, alignItems: "center", gap: 10 }}>
+        <GradientCard glowColor={colors.primary} style={{ padding: 22, alignItems: "center", gap: 10 }}>
           <View style={{ width: 84, height: 84, borderRadius: 42, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "rgba(255,255,255,0.5)" }}>
             <Ionicons name="person" size={40} color="#fff" />
           </View>

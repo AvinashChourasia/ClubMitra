@@ -13,7 +13,7 @@ import { CityAutocomplete } from "../components/CityAutocomplete";
 import { Tap } from "../components/Tap";
 import { Button } from "../components/Button";
 import { GradientCard } from "../components/GradientCard";
-import { colors, styles, gradients, useThemeMode } from "../lib/theme";
+import { colors, styles, useThemeMode } from "../lib/theme";
 
 export default function Welcome() {
   const router = useRouter();
@@ -64,7 +64,7 @@ export default function Welcome() {
       <ScrollView contentContainerStyle={[styles.screen, { flexGrow: 1, justifyContent: "center" }]} keyboardShouldPersistTaps="handled">
         {/* Brand */}
         <View style={{ alignItems: "center", gap: 12, marginBottom: 18 }}>
-          <GradientCard colors={gradients.red} glowColor={colors.primary} radius={26} style={{ width: 84, height: 84, alignItems: "center", justifyContent: "center" }}>
+          <GradientCard glowColor={colors.primary} radius={26} style={{ width: 84, height: 84, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="walk" size={40} color="#fff" />
           </GradientCard>
           <Text style={{ fontSize: 32, fontWeight: "800", color: colors.text, letterSpacing: -0.6 }}>ClubMitra</Text>

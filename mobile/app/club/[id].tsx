@@ -37,7 +37,7 @@ import { leaderboard, clubStanding, type BoardEntry, type ClubStanding, type Per
 import { chapterAnnouncements, type Message as MsgType } from "../../lib/messaging";
 import { chapterFeed, type FeedItem } from "../../lib/activities";
 import { formatDistance, formatPace } from "../../lib/format";
-import { colors, styles, gradients, useThemeMode } from "../../lib/theme";
+import { colors, styles, useThemeMode } from "../../lib/theme";
 import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
 import { Avatar } from "../../components/Avatar";
@@ -546,7 +546,7 @@ export default function ClubDetail() {
                 </View>
               </ImageBackground>
             ) : (
-              <GradientCard colors={gradients.red} glowColor={colors.primary} radius={22} style={{ padding: 20, flexDirection: "row", alignItems: "center", gap: 14 }}>
+              <GradientCard glowColor={colors.primary} radius={22} style={{ padding: 20, flexDirection: "row", alignItems: "center", gap: 14 }}>
                 {headerInner}
               </GradientCard>
             )}
