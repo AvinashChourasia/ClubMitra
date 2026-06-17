@@ -29,6 +29,22 @@ services:
       # from Upstash. Marked secret.
       - key: REDIS_URL
         sync: false
+      # --- Optional integrations (leave unset to keep DORMANT) ---
+      # Add these in the dashboard when you're ready to turn them on; until set,
+      # the relevant endpoints return 503 and the features stay hidden. See
+      # DEPLOY.md "Optional integrations" and backend/.env.example for details.
+      #   Strava activity sync:
+      # - key: STRAVA_CLIENT_ID
+      #   sync: false
+      # - key: STRAVA_CLIENT_SECRET
+      #   sync: false
+      #   Razorpay payments (webhook → /api/v1/public/payments/razorpay/webhook):
+      # - key: RAZORPAY_KEY_ID
+      #   sync: false
+      # - key: RAZORPAY_KEY_SECRET
+      #   sync: false
+      # - key: RAZORPAY_WEBHOOK_SECRET
+      #   sync: false
 
 # Render's managed Redis (Key Value). Free tier is fine for the leaderboard.
 # After it's created, copy its internal connection URL into REDIS_URL above.

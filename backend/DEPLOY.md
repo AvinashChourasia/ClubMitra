@@ -110,6 +110,36 @@ and generates the JWT secrets; you still paste `DATABASE_URL` and `REDIS_URL`.
 
 ---
 
+## Step 4b — Optional integrations (Strava, Razorpay)
+
+Both are **dormant** until their env vars are set — the app deploys and runs fine
+without them. Add the variables in the Render dashboard (Environment) whenever
+you're ready; no code change or redeploy of anything else is needed.
+
+### Strava activity sync (read-only)
+1. Create an app at https://www.strava.com/settings/api.
+2. Set **Authorization Callback Domain** to your API host **only** (no scheme,
+   no path) — e.g. `clubmitra-api.onrender.com`. (Strava validates just the
+   domain; our callback path is `…/api/v1/public/integrations/strava/callback`.)
+3. Add env vars: `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`.
+4. Verify: `GET /api/v1/integrations/strava/status` (authed) returns
+   `"configured": true`, and the Strava card appears in the app's Settings.
+
+### Razorpay payments
+1. Dashboard → Settings → API Keys. Use **test** keys (`rzp_test_…`) first.
+2. Create a **Webhook** → URL `https://<api-host>/api/v1/public/payments/razorpay/webhook`,
+   events `payment.captured` and `payment.failed`, and a webhook secret.
+3. Add env vars: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`,
+   and optionally `PLATFORM_CUT_PCT` (default `10`).
+4. Verify: `GET /api/v1/payments/config` returns `"configured": true`, then run a
+   real test payment through each surface (membership / challenge / gear / plan).
+
+> The checkout page is served by this same API over HTTPS, so it works only on
+> the deployed host (Razorpay's checkout.js requires HTTPS) — test on the Render
+> URL, not `http://localhost`.
+
+---
+
 ## Step 5 — Verify
 
 When the deploy finishes, Render gives you a URL like

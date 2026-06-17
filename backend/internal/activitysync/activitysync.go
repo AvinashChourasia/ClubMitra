@@ -62,7 +62,7 @@ func (r *Repository) upsertConnection(ctx context.Context, c connection) error {
 	}
 	const q = `
 		INSERT INTO oauth_connections (user_id, provider, athlete_id, access_token, refresh_token, expires_at, scope)
-		VALUES ($1, $2, $3, $4, $5, $6, 'activity:read')
+		VALUES ($1, $2, $3, $4, $5, $6, 'activity:read_all')
 		ON CONFLICT (user_id, provider) DO UPDATE SET
 			athlete_id = EXCLUDED.athlete_id, access_token = EXCLUDED.access_token,
 			refresh_token = EXCLUDED.refresh_token, expires_at = EXCLUDED.expires_at`
