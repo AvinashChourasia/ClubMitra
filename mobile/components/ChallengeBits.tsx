@@ -13,7 +13,7 @@ export const TYPE_THEME: Record<
   ChallengeType,
   { label: string; icon: keyof typeof Ionicons.glyphMap; tint: string; ring: readonly [string, string]; hero: readonly [string, string] }
 > = {
-  distance: { label: "Distance", icon: "speedometer", tint: "#E11D2E", ring: ["#FF8A9B", "#E11D2E"], hero: gradients.red },
+  distance: { label: "Distance", icon: "speedometer", tint: "#DC2626", ring: ["#F87171", "#DC2626"], hero: gradients.red },
   days: { label: "Run days", icon: "calendar", tint: "#4F46E5", ring: ["#818CF8", "#4F46E5"], hero: gradients.cool },
   streak: { label: "Streak", icon: "flame", tint: "#F59E0B", ring: ["#FCD34D", "#F59E0B"], hero: gradients.sunset },
 };

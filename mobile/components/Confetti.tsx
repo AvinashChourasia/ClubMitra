@@ -6,7 +6,7 @@
 import { useEffect, useRef } from "react";
 import { Animated, Dimensions, Easing, View } from "react-native";
 
-const PALETTE = ["#F43F5E", "#F59E0B", "#10B981", "#3B82F6", "#A855F7", "#FACC15"];
+const PALETTE = ["#EF4444", "#F59E0B", "#10B981", "#3B82F6", "#A855F7", "#FACC15"];
 const COUNT = 26;
 
 type Piece = {

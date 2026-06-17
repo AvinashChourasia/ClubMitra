@@ -48,7 +48,7 @@ export function RunShareCard({ runnerName, startedAt, distanceM, durationS, avgP
       {/* Header: brand left, date right */}
       <View style={{ flexDirection: "row", alignItems: "center" }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
-          <View style={{ width: 22, height: 22, borderRadius: 7, backgroundColor: "#E11D2E", alignItems: "center", justifyContent: "center" }}>
+          <View style={{ width: 22, height: 22, borderRadius: 7, backgroundColor: "#DC2626", alignItems: "center", justifyContent: "center" }}>
             <Text style={{ fontSize: 12 }}>🏃</Text>
           </View>
           <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 13, letterSpacing: 0.3 }}>ClubMitra</Text>

@@ -78,7 +78,7 @@ function RaceTile({ race: r, index, onPress }: { race: Race; index: number; onPr
         {/* Glassy date badge, top-left */}
         <View style={{ position: "absolute", top: 12, left: 12, backgroundColor: "rgba(255,255,255,0.96)", borderRadius: 13, paddingHorizontal: 11, paddingVertical: 7, alignItems: "center", ...shadow.sm }}>
           <Text style={{ color: "#0F172A", fontSize: 17, fontWeight: "900", letterSpacing: -0.5, lineHeight: 19 }}>{d.day}</Text>
-          <Text style={{ color: "#E11D2E", fontSize: 9.5, fontWeight: "800", letterSpacing: 1 }}>{d.month}</Text>
+          <Text style={{ color: colors.primary, fontSize: 9.5, fontWeight: "800", letterSpacing: 1 }}>{d.month}</Text>
         </View>
 
         {/* Top-right cluster: saved heart + countdown */}

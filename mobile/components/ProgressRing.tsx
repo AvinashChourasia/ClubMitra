@@ -22,7 +22,7 @@ export function ProgressRing({
   size = 140,
   stroke = 13,
   fraction,
-  colors = ["#FF8A9B", "#E11D2E"],
+  colors = ["#F87171", "#DC2626"],
   track = "rgba(127,127,127,0.18)",
   children,
 }: Props) {

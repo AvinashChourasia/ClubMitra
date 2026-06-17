@@ -35,7 +35,7 @@ const BG = "#0B1220";
 const CARD = "rgba(255,255,255,0.07)";
 const TEXT = "#FFFFFF";
 const MUTED = "#94A3B8";
-const ACCENT = "#F43F5E";
+const ACCENT = "#EF4444";
 
 // Native map only on iOS builds (Apple Maps — free, no key); Expo Go and
 // Android use the SVG trace (Google Maps would need an API key + billing).
@@ -235,14 +235,14 @@ export default function RecordRun() {
               flexDirection: "row",
               alignItems: "center",
               gap: 8,
-              backgroundColor: paused ? "rgba(245,158,11,0.18)" : recording ? "rgba(244,63,94,0.18)" : CARD,
+              backgroundColor: paused ? "rgba(245,158,11,0.18)" : recording ? "rgba(239,68,68,0.18)" : CARD,
               paddingHorizontal: 14,
               paddingVertical: 7,
               borderRadius: 999,
             }}
           >
             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: paused ? "#F59E0B" : recording ? ACCENT : MUTED }} />
-            <Text style={{ color: paused ? "#FCD34D" : recording ? "#FDA4AF" : MUTED, fontWeight: "700", fontSize: 13 }}>
+            <Text style={{ color: paused ? "#FCD34D" : recording ? "#FCA5A5" : MUTED, fontWeight: "700", fontSize: 13 }}>
               {paused ? "Auto-paused · tap to resume" : recording ? "Recording" : "Ready to run"}
             </Text>
           </Pressable>
@@ -284,7 +284,7 @@ export default function RecordRun() {
         <View style={{ gap: 12 }}>
           {status === "denied" && (
             <>
-              <Text style={{ color: "#FDA4AF", fontSize: 14, textAlign: "center" }}>
+              <Text style={{ color: "#FCA5A5", fontSize: 14, textAlign: "center" }}>
                 {distanceM > 0
                   ? "Location is off, so your run is paused. Re-enable it to keep recording."
                   : "Location permission denied. Enable it to record runs."}

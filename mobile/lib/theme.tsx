@@ -40,9 +40,9 @@ export type Palette = {
 };
 
 const light: Palette = {
-  primary: "#E11D2E",
-  primaryDark: "#B3121F",
-  primarySoft: "#FFE4E6",
+  primary: "#DC2626",
+  primaryDark: "#B91C1C",
+  primarySoft: "#FEE2E2",
   accent: "#2563EB",
   accentDark: "#1E3A8A",
   success: "#12B76A",
@@ -56,7 +56,7 @@ const light: Palette = {
   bg: "#FFFFFF",
   bgSecondary: "#F4F5F7",
   fieldBg: "#F1F5F9",
-  danger: "#E11D2E",
+  danger: "#DC2626",
   bubbleMine: "#D9FDD3",
   bubbleMineText: "#0B1220",
   chatBg: "#EFEAE2",
@@ -65,9 +65,9 @@ const light: Palette = {
 };
 
 const dark: Palette = {
-  primary: "#F43F5E",
-  primaryDark: "#E11D2E",
-  primarySoft: "#2A1620",
+  primary: "#EF4444",
+  primaryDark: "#DC2626",
+  primarySoft: "#3A1414",
   accent: "#60A5FA",
   accentDark: "#93C5FD",
   success: "#34D399",
@@ -81,7 +81,7 @@ const dark: Palette = {
   bg: "#151C29", // elevated card surface
   bgSecondary: "#0B1018", // app background
   fieldBg: "#1B2433",
-  danger: "#F43F5E",
+  danger: "#EF4444",
   bubbleMine: "#005C4B",
   bubbleMineText: "#FFFFFF",
   chatBg: "#0B141A",
@@ -96,7 +96,7 @@ export const radius = { sm: 10, md: 14, lg: 20, xl: 26, x2: 32, pill: 999 };
 // Gradients. `red`/`ink` kept for back-compat; `gloss` is the white top-highlight
 // overlay that gives heroes a lit, glassy look; `cool`/`sunset` add variety.
 export const gradients = {
-  red: ["#FF4D67", "#E11D2E"] as const,
+  red: ["#EF4444", "#B91C1C"] as const,
   ink: ["#1E293B", "#0B1220"] as const,
   cool: ["#6366F1", "#4F46E5"] as const,
   sunset: ["#FB7185", "#F59E0B"] as const,
