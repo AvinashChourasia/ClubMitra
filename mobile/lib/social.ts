@@ -51,3 +51,15 @@ export async function listFollowers(token: string, id: string): Promise<RunnerCa
 export async function listFollowing(token: string, id: string): Promise<RunnerCard[]> {
   return (await request<RunnerCard[] | null>(`/social/users/${id}/following`, { token })) ?? [];
 }
+
+// searchRunners finds runners by name (min 2 chars) to follow — the backbone of
+// the Find-runners screen. Each card carries the viewer's follow state.
+export async function searchRunners(token: string, q: string): Promise<RunnerCard[]> {
+  if (q.trim().length < 2) return [];
+  return (await request<RunnerCard[] | null>(`/social/search?q=${encodeURIComponent(q.trim())}`, { token })) ?? [];
+}
+
+// suggestedRunners are clubmates you don't follow yet ("runners you may know").
+export async function suggestedRunners(token: string): Promise<RunnerCard[]> {
+  return (await request<RunnerCard[] | null>(`/social/suggestions`, { token })) ?? [];
+}

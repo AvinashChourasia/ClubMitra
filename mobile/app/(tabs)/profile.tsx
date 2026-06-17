@@ -29,6 +29,7 @@ import { colors, styles, useThemeMode } from "../../lib/theme";
 import { runningLevelLabel } from "../../lib/profile";
 import { formatDistance, formatDuration, formatPace } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
+import { getRunnerProfile, type RunnerProfile } from "../../lib/social";
 import { BadgeMedal } from "../../components/BadgeMedal";
 import { GradientCard } from "../../components/GradientCard";
 import { RouteTrace } from "../../components/RouteTrace";
@@ -128,6 +129,7 @@ export default function Profile() {
   const [lastTimes, setLastTimes] = useState<number[] | undefined>(undefined);
   const [cityRank, setCityRank] = useState<number | null>(null);
   const [gam, setGam] = useState<GamificationProfile | null>(null);
+  const [social, setSocial] = useState<RunnerProfile | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -140,6 +142,7 @@ export default function Profile() {
     void swr(`${uid}:clubs`, () => myChapters(token), setClubs).catch(() => setClubs((p) => p ?? []));
     void swr(`${uid}:stats`, () => getStats(token), setStats).catch(() => {});
     void swr(`${uid}:gamification`, () => getGamification(token), setGam).catch(() => {});
+    if (uid) void swr(`${uid}:social`, () => getRunnerProfile(token, uid), setSocial).catch(() => {});
 
     // Runs: hydrate cache, then fetch fresh — captured locally so the route
     // thumbnail uses the latest run id.
@@ -245,6 +248,22 @@ export default function Profile() {
             {user.age ? <Pill icon="hourglass" text={`${user.age} yrs`} /> : null}
           </View>
         </GradientCard>
+
+        {/* Social — followers / following + discover runners to follow */}
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Tap haptic={false} onPress={() => router.push(`/u/${user.id}/connections?tab=followers` as Href)} style={[styles.statCard]}>
+            <Text style={styles.statValue}>{social?.followers ?? 0}</Text>
+            <Text style={styles.statLabel}>Followers</Text>
+          </Tap>
+          <Tap haptic={false} onPress={() => router.push(`/u/${user.id}/connections?tab=following` as Href)} style={[styles.statCard]}>
+            <Text style={styles.statValue}>{social?.following ?? 0}</Text>
+            <Text style={styles.statLabel}>Following</Text>
+          </Tap>
+          <Tap onPress={() => router.push("/runners" as Href)} style={[styles.statCard, { backgroundColor: colors.primarySoft }]}>
+            <Ionicons name="person-add" size={20} color={colors.primary} />
+            <Text style={[styles.statLabel, { color: colors.primary, marginTop: 4 }]}>FIND RUNNERS</Text>
+          </Tap>
+        </View>
 
         {/* Achievements — level runway + the medal strip */}
         {gam && (

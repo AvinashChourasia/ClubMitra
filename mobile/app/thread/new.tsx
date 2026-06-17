@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/auth";
 import { searchUsers, type UserHit } from "../../lib/messaging";
 import { Avatar } from "../../components/Avatar";
+import { FollowButton } from "../../components/FollowButton";
 import { colors, styles } from "../../lib/theme";
 
 export default function NewChat() {
@@ -90,7 +91,8 @@ export default function NewChat() {
               style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: i === results.length - 1 ? 0 : 1, borderBottomColor: colors.border }}
             >
               <Avatar name={u.name} uri={u.profile_photo} size={44} bg={colors.accent} />
-              <Text style={{ color: colors.text, fontWeight: "600", fontSize: 16 }}>{u.name}</Text>
+              <Text style={{ flex: 1, color: colors.text, fontWeight: "600", fontSize: 16 }} numberOfLines={1}>{u.name}</Text>
+              <FollowButton userId={u.id} size="sm" />
             </Pressable>
           ))
         )}

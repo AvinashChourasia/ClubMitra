@@ -20,6 +20,7 @@ import {
 import "../lib/applyFont"; // patch Text -> Inter (by weight), before any render
 import "../lib/locationTask"; // register the background run-tracking task at launch
 import { AuthProvider } from "../lib/auth";
+import { FollowProvider } from "../lib/follow";
 import { MessageToast } from "../components/MessageToast";
 import { ThemeProvider, useThemeMode, colors } from "../lib/theme";
 
@@ -120,9 +121,11 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ThemeProvider>
           <AuthProvider>
-            <ThemedStatusBar />
-            <ThemedStack />
-            <MessageToast />
+            <FollowProvider>
+              <ThemedStatusBar />
+              <ThemedStack />
+              <MessageToast />
+            </FollowProvider>
           </AuthProvider>
         </ThemeProvider>
       </SafeAreaProvider>

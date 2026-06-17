@@ -121,7 +121,7 @@ func (r *Repository) Followers(ctx context.Context, viewerID, targetID string) (
 		WHERE f.followee_id = $1
 		ORDER BY f.created_at DESC
 		LIMIT 300`
-	return r.cards(ctx, q, targetID, viewerID)
+	return r.cardsQuery(ctx, q, targetID, viewerID)
 }
 
 func (r *Repository) Following(ctx context.Context, viewerID, targetID string) ([]Card, error) {
@@ -133,11 +133,44 @@ func (r *Repository) Following(ctx context.Context, viewerID, targetID string) (
 		WHERE f.follower_id = $1
 		ORDER BY f.created_at DESC
 		LIMIT 300`
-	return r.cards(ctx, q, targetID, viewerID)
+	return r.cardsQuery(ctx, q, targetID, viewerID)
 }
 
-func (r *Repository) cards(ctx context.Context, q, p1, p2 string) ([]Card, error) {
-	rows, err := r.db.Query(ctx, q, p1, p2)
+// Search finds runners by name (case-insensitive substring), excluding the
+// viewer, each flagged with whether the viewer already follows them — so a
+// search result can show Follow/Following inline.
+func (r *Repository) Search(ctx context.Context, viewerID, query string, limit int) ([]Card, error) {
+	const q = `
+		SELECT u.id, u.name, u.city, u.profile_photo,
+		       EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $2 AND f.followee_id = u.id)
+		FROM users u
+		WHERE u.deleted_at IS NULL AND u.id <> $2 AND u.name ILIKE $1
+		ORDER BY u.name
+		LIMIT $3`
+	return r.cardsQuery(ctx, q, "%"+query+"%", viewerID, limit)
+}
+
+// Suggestions are "runners you may know": members of the viewer's clubs that the
+// viewer doesn't follow yet, ranked by how many clubs they share. is_following is
+// always false here (by construction).
+func (r *Repository) Suggestions(ctx context.Context, viewerID string, limit int) ([]Card, error) {
+	const q = `
+		SELECT u.id, u.name, u.city, u.profile_photo, false
+		FROM chapter_members me
+		JOIN chapter_members other ON other.chapter_id = me.chapter_id AND other.deleted_at IS NULL
+		JOIN users u ON u.id = other.user_id AND u.deleted_at IS NULL
+		WHERE me.user_id = $1 AND me.deleted_at IS NULL AND other.user_id <> $1
+		  AND NOT EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followee_id = u.id)
+		GROUP BY u.id, u.name, u.city, u.profile_photo
+		ORDER BY count(*) DESC, u.name
+		LIMIT $2`
+	return r.cardsQuery(ctx, q, viewerID, limit)
+}
+
+// cardsQuery runs any query that selects the 5 Card columns (id, name, city,
+// profile_photo, is_following) and scans the rows.
+func (r *Repository) cardsQuery(ctx context.Context, q string, args ...any) ([]Card, error) {
+	rows, err := r.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

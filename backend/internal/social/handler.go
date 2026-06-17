@@ -3,6 +3,7 @@ package social
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -32,6 +33,8 @@ func NewHandler(repo *Repository, gam *gamification.Service, notify Notifier) *H
 // Routes are mounted at /social behind the auth middleware.
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
+	r.Get("/search", h.search)           // find runners by name to follow
+	r.Get("/suggestions", h.suggestions) // "runners you may know" (clubmates)
 	r.Route("/users/{id}", func(r chi.Router) {
 		r.Get("/", h.profile)
 		r.Post("/follow", h.follow)
@@ -40,6 +43,42 @@ func (h *Handler) Routes() http.Handler {
 		r.Get("/following", h.following)
 	})
 	return r
+}
+
+// search returns runners whose name matches ?q= (min 2 chars), with the viewer's
+// follow state on each, for the Find-runners screen.
+func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
+	viewerID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		httpx.JSON(w, http.StatusOK, []Card{}) // too short — empty, no error
+		return
+	}
+	cards, err := h.repo.Search(r.Context(), viewerID, q, 30)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, cards)
+}
+
+// suggestions returns clubmates the viewer doesn't follow yet (ranked by shared clubs).
+func (h *Handler) suggestions(w http.ResponseWriter, r *http.Request) {
+	viewerID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	cards, err := h.repo.Suggestions(r.Context(), viewerID, 20)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, cards)
 }
 
 // profileResponse is the SQL profile plus the viewer flag and gamification bits.
