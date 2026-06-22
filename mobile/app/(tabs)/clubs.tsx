@@ -112,6 +112,15 @@ export default function Clubs() {
                       <Text style={{ color: "#fff", fontSize: 11, fontWeight: "800", textTransform: "capitalize" }}>{badge}</Text>
                     </View>
                   )}
+                  {/* No banner yet + you can edit → nudge to add one (admins only) */}
+                  {!c.banner && isChapterAdmin(c.role) && (
+                    <View style={{ position: "absolute", top: 12, left: 0, right: 0, alignItems: "center" }} pointerEvents="box-none">
+                      <Tap onPress={() => router.push(`/club/edit/${c.id}`)} style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 }}>
+                        <Ionicons name="image-outline" size={14} color="#fff" />
+                        <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Add a banner</Text>
+                      </Tap>
+                    </View>
+                  )}
                   {/* logo + name overlaid bottom-left */}
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 12, paddingBottom: 11 }}>
                     <View style={{ borderWidth: 2, borderColor: "rgba(255,255,255,0.85)", borderRadius: 23 }}>
