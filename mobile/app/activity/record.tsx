@@ -316,6 +316,15 @@ export default function RecordRun() {
             </Pressable>
           )}
 
+          {/* For the runners who record on Strava/Garmin and won't switch apps.
+              Idle-only so it doesn't flash during the start countdown / "STARTING…". */}
+          {status === "idle" && (
+            <Pressable onPress={() => router.push("/activity/import")} hitSlop={8} style={{ alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6 }}>
+              <Ionicons name="cloud-upload-outline" size={15} color={MUTED} />
+              <Text style={{ color: MUTED, fontSize: 13.5, fontWeight: "700" }}>Ran with Strava or Garmin? Import it</Text>
+            </Pressable>
+          )}
+
           {recording && (
             <>
               {/* Opt-out: exclude this run from challenge progress. */}

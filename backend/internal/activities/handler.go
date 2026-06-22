@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -224,7 +225,21 @@ func (h *Handler) importGPX(w http.ResponseWriter, r *http.Request) {
 					missingTime++
 					continue
 				}
-				points = append(points, geo.Point{Lat: pt.Lat, Lng: pt.Lon, Altitude: pt.Ele, Timestamp: pt.Time.UTC()})
+				// Drop points with NaN/out-of-range coordinates: a hostile or
+				// broken export ("NaN"/"400") would otherwise produce invalid
+				// PostGIS geometry (500) or corrupt distance/leaderboards. A few
+				// bad points are skipped; an all-bad file falls to the <2 check.
+				if math.IsNaN(pt.Lat) || math.IsNaN(pt.Lon) ||
+					pt.Lat < -90 || pt.Lat > 90 || pt.Lon < -180 || pt.Lon > 180 {
+					continue
+				}
+				// Altitude is optional context — clamp a bad value to 0 rather
+				// than reject the run, so Inf/NaN can't poison elevation totals.
+				ele := pt.Ele
+				if math.IsNaN(ele) || math.IsInf(ele, 0) {
+					ele = 0
+				}
+				points = append(points, geo.Point{Lat: pt.Lat, Lng: pt.Lon, Altitude: ele, Timestamp: pt.Time.UTC()})
 			}
 		}
 	}

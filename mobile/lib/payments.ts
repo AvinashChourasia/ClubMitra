@@ -85,7 +85,12 @@ function parseReturn(url: string): Record<string, string> {
   if (!qs) return out;
   for (const pair of qs.split("&")) {
     const [k, v] = pair.split("=");
-    if (k) out[decodeURIComponent(k)] = decodeURIComponent(v ?? "");
+    if (!k) continue;
+    try {
+      out[decodeURIComponent(k)] = decodeURIComponent(v ?? "");
+    } catch {
+      /* skip a malformed percent-encoded pair rather than throw */
+    }
   }
   return out;
 }

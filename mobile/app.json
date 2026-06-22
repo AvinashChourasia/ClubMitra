@@ -15,7 +15,27 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "in.clubmitra.app"
+      "bundleIdentifier": "in.clubmitra.app",
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "GPX Track",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": ["com.topografix.gpx"]
+          }
+        ],
+        "UTImportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "com.topografix.gpx",
+            "UTTypeDescription": "GPX Track",
+            "UTTypeConformsTo": ["public.xml"],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": ["gpx"],
+              "public.mime-type": ["application/gpx+xml"]
+            }
+          }
+        ]
+      }
     },
     "android": {
       "package": "in.clubmitra.app",
@@ -29,6 +49,16 @@
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT", "BROWSABLE"],
+          "data": [
+            { "scheme": "content", "mimeType": "application/gpx+xml" },
+            { "scheme": "file", "mimeType": "application/gpx+xml" }
+          ]
+        }
       ]
     },
     "plugins": [

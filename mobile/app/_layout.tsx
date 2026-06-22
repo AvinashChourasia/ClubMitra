@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import * as Notifications from "expo-notifications";
 import * as SplashScreen from "expo-splash-screen";
+import * as Linking from "expo-linking";
 import {
   useFonts,
   Inter_400Regular,
@@ -53,6 +54,9 @@ export default function RootLayout() {
   // mount — without this guard the same tap re-navigates (and used to re-crash)
   // on each reopen. Handle each physical tap exactly once.
   const handledTap = useRef<string | null>(null);
+  // getInitialURL replays the launching URL on every reopen — handle a given
+  // shared .gpx exactly once (else it re-imports and errors on each reopen).
+  const handledFile = useRef<string | null>(null);
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -111,6 +115,33 @@ export default function RootLayout() {
         pendingHref.current = href as Href; // cold start — queue until mounted
       }
     });
+    return () => sub.remove();
+  }, [router]);
+
+  // Open-in / share-to-app: a .gpx handed to us by the OS (Strava export, Files,
+  // Garmin) arrives as a file:// or content:// URL — route it to the import
+  // screen. Queued like push taps so it never navigates before the navigator is
+  // ready. App deep links (clubmitra://, https) are left to the router/OAuth.
+  useEffect(() => {
+    function route(url: string | null) {
+      if (!url) return;
+      const low = url.toLowerCase();
+      if (!low.startsWith("file://") && !low.startsWith("content://")) return;
+      if (handledFile.current === url) return; // already routed this file (reopen replay)
+      handledFile.current = url;
+      const href = `/activity/import?src=${encodeURIComponent(url)}` as Href;
+      if (navReadyRef.current) {
+        try {
+          router.push(href);
+        } catch {
+          pendingHref.current = href;
+        }
+      } else {
+        pendingHref.current = href;
+      }
+    }
+    Linking.getInitialURL().then(route).catch(() => {});
+    const sub = Linking.addEventListener("url", (e) => route(e.url));
     return () => sub.remove();
   }, [router]);
 
