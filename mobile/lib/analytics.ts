@@ -23,8 +23,22 @@ export type VolumePoint = {
   runs: number;
 };
 
+// One quiet member, for the admin's "reach out" list. last_active_at/days_quiet
+// are null for someone who has never logged a run or checked in.
+export type InactiveMember = {
+  user_id: string;
+  name: string;
+  profile_photo?: string | null;
+  last_active_at: string | null;
+  days_quiet: number | null;
+};
+
 export function getDropoff(token: string, chapterId: string) {
   return request<Dropoff>(`/analytics/${chapterId}/dropoff`, { token });
+}
+
+export async function getInactiveMembers(token: string, chapterId: string, days = 14) {
+  return (await request<InactiveMember[] | null>(`/analytics/${chapterId}/inactive?days=${days}`, { token })) ?? [];
 }
 
 export function getEngagement(token: string, chapterId: string) {

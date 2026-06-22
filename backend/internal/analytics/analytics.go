@@ -9,6 +9,7 @@ package analytics
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,6 +23,17 @@ type Dropoff struct {
 	Inactive30d  int `json:"inactive_30d"`
 	Inactive60d  int `json:"inactive_60d"`
 	TotalMembers int `json:"total_members"`
+}
+
+// InactiveMember is one active member who has gone quiet — for the admin's
+// "reach out" list. LastActiveAt/DaysQuiet are null for someone who has never
+// logged a run or checked in.
+type InactiveMember struct {
+	UserID       string     `json:"user_id"`
+	Name         string     `json:"name"`
+	ProfilePhoto *string    `json:"profile_photo,omitempty"`
+	LastActiveAt *time.Time `json:"last_active_at"`
+	DaysQuiet    *int       `json:"days_quiet"`
 }
 
 // Engagement is the share of active members who logged activity in the last 7 days.
@@ -79,6 +91,36 @@ func (r *Repository) Dropoff(ctx context.Context, chapterID uuid.UUID) (Dropoff,
 		&d.Inactive7d, &d.Inactive14d, &d.Inactive30d, &d.Inactive60d, &d.TotalMembers,
 	)
 	return d, err
+}
+
+// InactiveMembers lists active members whose last activity (run or check-in) is
+// older than `days` ago — quietest first — so an admin can reach out. Members who
+// have never logged activity sort to the top with a null last_active_at.
+func (r *Repository) InactiveMembers(ctx context.Context, chapterID uuid.UUID, days int) ([]InactiveMember, error) {
+	const q = lastActivityCTE + `
+		SELECT u.id, u.name, u.profile_photo,
+		       CASE WHEN la.last_at <= 'epoch'::timestamptz THEN NULL ELSE la.last_at END,
+		       CASE WHEN la.last_at <= 'epoch'::timestamptz THEN NULL
+		            ELSE FLOOR(EXTRACT(EPOCH FROM (now() - la.last_at)) / 86400)::int END
+		FROM last_act la
+		JOIN users u ON u.id = la.user_id AND u.deleted_at IS NULL
+		WHERE la.last_at < now() - ($2 * interval '1 day')
+		ORDER BY la.last_at ASC
+		LIMIT 200`
+	rows, err := r.db.Query(ctx, q, chapterID, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]InactiveMember, 0)
+	for rows.Next() {
+		var m InactiveMember
+		if err := rows.Scan(&m.UserID, &m.Name, &m.ProfilePhoto, &m.LastActiveAt, &m.DaysQuiet); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // Engagement returns the weekly engagement rate for a chapter.

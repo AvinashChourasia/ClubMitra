@@ -110,6 +110,47 @@ function Insights({ chapterId, getToken }: { chapterId: string; getToken: () => 
   );
 }
 
+// InactiveAlert — the prominent, actionable nudge: how many members have gone
+// quiet (14+ days), tapping through to the list so an admin can reach out.
+function InactiveAlert({ chapterId, getToken }: { chapterId: string; getToken: () => Promise<string | null> }) {
+  const router = useRouter();
+  const [n, setN] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        try {
+          const token = await getToken();
+          if (!token) return;
+          const d = await getDropoff(token, chapterId);
+          if (active) setN(d.inactive_14d);
+        } catch {
+          /* silent — the alert just won't show */
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }, [getToken, chapterId])
+  );
+  if (n <= 0) return null;
+  return (
+    <Pressable
+      onPress={() => router.push(`/club/inactive/${chapterId}`)}
+      style={{ flexDirection: "row", alignItems: "center", gap: 11, backgroundColor: "rgba(245,158,11,0.12)", borderWidth: 1, borderColor: "rgba(245,158,11,0.45)", borderRadius: 14, padding: 14 }}
+    >
+      <Ionicons name="pulse-outline" size={20} color={colors.warning} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: colors.text, fontWeight: "800", fontSize: 14.5 }}>
+          {n} {n === 1 ? "member has" : "members have"} gone quiet
+        </Text>
+        <Text style={{ color: colors.muted, fontSize: 12.5 }}>No run or check-in in 14+ days — reach out before they drift.</Text>
+      </View>
+      <Text style={{ color: colors.warning, fontWeight: "800", fontSize: 13 }}>Review ›</Text>
+    </Pressable>
+  );
+}
+
 export default function ManageClub() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user, getAccessToken } = useAuth();
@@ -239,6 +280,8 @@ export default function ManageClub() {
                 <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 13 }}>Review ›</Text>
               </Pressable>
             )}
+
+            {canViewInsights && <InactiveAlert chapterId={id} getToken={getAccessToken} />}
 
             <View style={styles.card}>
               <Text style={[styles.sectionTitle, { marginBottom: 2 }]}>Club tools</Text>

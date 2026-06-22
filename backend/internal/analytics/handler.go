@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -30,6 +31,7 @@ func (h *Handler) Routes() http.Handler {
 	r.Route("/{chapterID}", func(r chi.Router) {
 		r.Use(admin)
 		r.Get("/dropoff", h.dropoff)
+		r.Get("/inactive", h.inactive)
 		r.Get("/engagement", h.engagement)
 		r.Get("/volume", h.volume)
 	})
@@ -47,6 +49,26 @@ func (h *Handler) dropoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, d)
+}
+
+// inactive returns the list of members quiet for ≥ ?days (default 14, max 365).
+func (h *Handler) inactive(w http.ResponseWriter, r *http.Request) {
+	id, ok := chapterID(w, r)
+	if !ok {
+		return
+	}
+	days := 14
+	if v := r.URL.Query().Get("days"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 365 {
+			days = n
+		}
+	}
+	list, err := h.repo.InactiveMembers(r.Context(), id, days)
+	if err != nil {
+		httpx.InternalError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, list)
 }
 
 func (h *Handler) engagement(w http.ResponseWriter, r *http.Request) {
