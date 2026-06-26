@@ -38,6 +38,7 @@ import { chapterAnnouncements, type Message as MsgType } from "../../lib/messagi
 import { chapterFeed, type FeedItem } from "../../lib/activities";
 import { formatDistance, formatPace } from "../../lib/format";
 import { colors, styles, useThemeMode } from "../../lib/theme";
+import { PAYMENTS_ENABLED } from "../../lib/flags";
 import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
 import { Avatar } from "../../components/Avatar";
@@ -427,6 +428,7 @@ export default function ClubDetail() {
       await load();
     } catch (e) {
       Alert.alert("Couldn't do that", e instanceof ApiError ? e.message : "Something went wrong");
+      await load().catch(() => {}); // re-sync the list even on error (e.g. member already removed)
     }
   }
 
@@ -576,7 +578,7 @@ export default function ClubDetail() {
                 <Text style={{ color: colors.text, fontWeight: "700", flex: 1 }}>Awaiting admin approval</Text>
               </View>
             )}
-            {myStatus === "pending_payment" && (
+            {myStatus === "pending_payment" && PAYMENTS_ENABLED && (
               <View style={[styles.card, { gap: 10 }]}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                   <Ionicons name="card-outline" size={20} color={colors.primary} />
@@ -587,7 +589,7 @@ export default function ClubDetail() {
                 </Pressable>
               </View>
             )}
-            {myStatus === "active" && chapter.membership_fee_enabled && (
+            {myStatus === "active" && chapter.membership_fee_enabled && PAYMENTS_ENABLED && (
               <Pressable onPress={payOrRenew} style={[styles.card, { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }]}>
                 <Ionicons name="refresh" size={18} color={colors.accent} />
                 <Text style={{ color: colors.accent, fontWeight: "700" }}>Renew membership (₹{chapter.membership_fee_amount ?? 0})</Text>

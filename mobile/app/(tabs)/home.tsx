@@ -303,8 +303,8 @@ export default function Home() {
                 />
               ) : (
                 <Tap onPress={() => router.push("/races" as Href)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
-                  <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: "#FEF3C7", alignItems: "center", justifyContent: "center" }}>
-                    <Ionicons name="flag" size={22} color="#F59E0B" />
+                  <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
+                    <Ionicons name="flag" size={22} color={colors.warning} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Race calendar</Text>

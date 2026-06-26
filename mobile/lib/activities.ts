@@ -83,6 +83,7 @@ export async function importGPX(token: string, uri: string, name: string): Promi
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(res.status, data?.error ?? `Import failed (${res.status})`);
+  if (!data) throw new ApiError(502, "The server returned an unexpected response. Please try again.");
   return data as Activity;
 }
 

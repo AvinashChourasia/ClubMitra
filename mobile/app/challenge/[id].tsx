@@ -18,6 +18,7 @@ import {
   View,
 } from "react-native";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
+import { PAYMENTS_ENABLED } from "../../lib/flags";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../lib/auth";
@@ -110,6 +111,7 @@ export default function ChallengeDetail() {
   );
 
   if (!user) return <Redirect href="/login" />;
+  if (!id) return <Redirect href="/challenges" />; // malformed deep link → back to the list
 
   async function run(fn: (token: string) => Promise<unknown>) {
     setBusy(true);
@@ -127,7 +129,7 @@ export default function ChallengeDetail() {
   function confirmJoin() {
     if (!challenge) return;
     const fee = challenge.join_fee ?? 0;
-    if (fee > 0) {
+    if (fee > 0 && PAYMENTS_ENABLED) {
       // Fee challenge: pay via Razorpay hosted checkout, then the backend enrols
       // on capture. Dormant until the backend has keys (the order call 503s).
       void (async () => {
@@ -254,7 +256,7 @@ export default function ChallengeDetail() {
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>
-                    {challenge.join_fee ? `Join · ₹${challenge.join_fee}` : "Join challenge"}
+                    {challenge.join_fee && PAYMENTS_ENABLED ? `Join · ₹${challenge.join_fee}` : "Join challenge"}
                   </Text>
                 )}
               </Pressable>
@@ -401,7 +403,7 @@ export default function ChallengeDetail() {
             {/* ── Leave / locked-in note ───────────────────────────── */}
             {challenge.joined &&
               (canLeave ? (
-                <Pressable onPress={confirmLeave} disabled={busy} style={{ alignItems: "center", paddingVertical: 6 }}>
+                <Pressable onPress={confirmLeave} disabled={busy} hitSlop={8} style={{ alignItems: "center", justifyContent: "center", paddingVertical: 12, minHeight: 44 }}>
                   <Text style={{ color: colors.danger, fontWeight: "700" }}>Leave challenge</Text>
                 </Pressable>
               ) : phase !== "ended" ? (

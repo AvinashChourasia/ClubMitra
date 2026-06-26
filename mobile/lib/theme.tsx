@@ -75,7 +75,7 @@ const dark: Palette = {
   ink: "#06080F",
   text: "#F1F5F9",
   muted: "#94A3B8",
-  subtle: "#64748B",
+  subtle: "#8A98AB", // brightened from #64748B — the old value failed WCAG AA (~3.3:1) on dark cards
   border: "#242C3A",
   divider: "#1B2230",
   bg: "#151C29", // elevated card surface

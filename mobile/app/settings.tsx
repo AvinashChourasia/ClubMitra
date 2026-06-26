@@ -159,6 +159,8 @@ function StravaCard({ getToken }: { getToken: () => Promise<string | null> }) {
         Alert.alert("Strava connected 🟠", imported > 0 ? `Imported ${imported} recent run${imported === 1 ? "" : "s"} — they now count toward your challenges.` : "We'll import your runs automatically from here.");
       } else if (outcome === "failed") {
         Alert.alert("Couldn't connect", "Strava didn't complete the link. Please try again.");
+      } else {
+        Alert.alert("Cancelled", "No problem — connect Strava whenever you're ready.");
       }
     } catch (e) {
       Alert.alert("Couldn't connect", e instanceof ApiError ? e.message : "Something went wrong");

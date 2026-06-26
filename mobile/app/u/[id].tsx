@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
 import { getRunnerProfile, followRunner, unfollowRunner, type RunnerProfile } from "../../lib/social";
+import { useFollow } from "../../lib/follow";
 import { runningLevelLabel } from "../../lib/profile";
 import { formatDistance } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
@@ -28,6 +29,7 @@ export default function RunnerProfileScreen() {
   const { user, getAccessToken } = useAuth();
   const router = useRouter();
   useThemeMode();
+  const { setKnown } = useFollow();
   const [profile, setProfile] = useState<RunnerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -73,6 +75,7 @@ export default function RunnerProfileScreen() {
       if (!token) throw new Error("no token");
       const res = wasFollowing ? await unfollowRunner(token, profile.id) : await followRunner(token, profile.id);
       setProfile((p) => (p ? { ...p, is_following: res.following, followers: res.followers } : p));
+      setKnown(profile.id, res.following); // keep the shared FollowContext in sync
     } catch {
       setProfile((p) => (p ? { ...p, is_following: wasFollowing, followers: p.followers + (wasFollowing ? 1 : -1) } : p));
     } finally {

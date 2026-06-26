@@ -66,8 +66,11 @@ export function FollowProvider({ children }: { children: ReactNode }) {
 
   const toggle = useCallback(
     async (id: string) => {
+      const startUser = user?.id;
       const token = await getAccessToken();
-      if (!token) return;
+      // Bail if the session ended (logout/switch) while we awaited the token —
+      // otherwise a late success would write follow state for a signed-out user.
+      if (!token || user?.id !== startUser) return;
       const wasFollowing = ids.has(id);
       setKnown(id, !wasFollowing); // optimistic
       try {
@@ -77,7 +80,7 @@ export function FollowProvider({ children }: { children: ReactNode }) {
         setKnown(id, wasFollowing); // revert on failure
       }
     },
-    [ids, getAccessToken, setKnown]
+    [ids, getAccessToken, setKnown, user]
   );
 
   return <Ctx.Provider value={{ isFollowing, toggle, setKnown, refresh }}>{children}</Ctx.Provider>;

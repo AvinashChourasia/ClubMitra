@@ -349,8 +349,8 @@ export default function Profile() {
             <Text style={{ color: colors.muted, fontSize: 11 }}>{stats?.total_runs ?? 0} recorded</Text>
           </Tap>
           <Tap onPress={() => router.push("/leaderboard/city")} style={[styles.card, { flex: 1, alignItems: "center", gap: 8, paddingVertical: 16 }]}>
-            <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: "#FEF3C7", alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name="trophy" size={20} color="#F59E0B" />
+            <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="trophy" size={20} color={colors.warning} />
             </View>
             <Text style={{ color: colors.text, fontWeight: "800", fontSize: 13 }}>City rank</Text>
             <Text style={{ color: colors.muted, fontSize: 11 }}>

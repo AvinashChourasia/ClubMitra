@@ -106,11 +106,20 @@ export default function RecordRun() {
       return;
     }
     setUploading(true);
+    // 1. Persist locally FIRST — from here the run can never be lost. If THIS
+    //    fails (e.g. storage full), the run is genuinely not saved, so tell the
+    //    truth rather than the comforting "saved on phone" lie below.
     try {
-      // 1. Persist locally FIRST — from here the run can never be lost, even if
-      //    the upload fails or the app is killed.
       await enqueue(points, countToward, pausedS);
-
+    } catch {
+      setUploading(false);
+      Alert.alert(
+        "Couldn't save your run",
+        "Your phone may be out of storage. Free up some space, then finish again."
+      );
+      return;
+    }
+    try {
       // 2. Try to upload now — but NEVER hold the runner hostage to a cold or
       //    slow backend: after 15s we declare "saved on phone" and move on
       //    (the queue uploads it in the background / on next app focus).

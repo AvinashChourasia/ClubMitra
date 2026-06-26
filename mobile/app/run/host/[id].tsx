@@ -92,6 +92,23 @@ export default function CheckinHost() {
     };
   }, [open, pollCode, refreshRoster]);
 
+  // If the organiser leaves the screen with check-in still open, close it
+  // server-side so the window doesn't linger with no host present. Refs (not deps)
+  // so an unrelated re-render can't trigger a spurious close — only a real unmount.
+  const openRef = useRef(open);
+  openRef.current = open;
+  const tokenRef = useRef(getAccessToken);
+  tokenRef.current = getAccessToken;
+  useEffect(() => {
+    return () => {
+      if (openRef.current) {
+        tokenRef.current()
+          .then((t) => (t ? closeCheckin(t, id) : null))
+          .catch(() => {});
+      }
+    };
+  }, [id]);
+
   if (!user) return <Redirect href="/login" />;
 
   async function toggle(next: boolean) {

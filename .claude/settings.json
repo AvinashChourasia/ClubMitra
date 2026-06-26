@@ -26,7 +26,12 @@
       "Bash(grep -niB1 -A12 \"type createRequest\\\\|type scheduleRequest\\\\|func \\(h \\\\*Handler\\) schedule\\\\b\" internal/attendance/handler.go)",
       "Bash(grep -niA10 \"Request struct\" internal/attendance/handler.go)",
       "Bash(cd /Users/avinash.chourasia/Documents/Practice/Strava/mobile *)",
-      "Read(//Users/avinash.chourasia/Documents/Practice/backend/internal/organisations/**)"
+      "Read(//Users/avinash.chourasia/Documents/Practice/backend/internal/organisations/**)",
+      "Bash(npm run *)",
+      "Bash(awk '/Leave challenge|Leave challenge/{p=1} p && /^[[:space:]]*\\\\}[[:space:]]*$/{if\\(++count==3\\) {print; exit}} p' /Users/avinash.chourasia/Documents/Practice/Strava/mobile/app/challenge/\\\\[id\\\\].tsx)",
+      "Bash(python3)",
+      "Bash(xargs ls -la)",
+      "Bash(git log *)"
     ]
   }
 }

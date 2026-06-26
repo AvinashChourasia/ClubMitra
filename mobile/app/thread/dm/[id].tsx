@@ -40,12 +40,14 @@ export default function DirectChat() {
 
   const uploadImage = useCallback(async (uri: string) => {
     const token = await getAccessToken();
-    return uploadChatImage(token!, uri);
+    if (!token) throw new Error("Your session expired — please log in again.");
+    return uploadChatImage(token, uri);
   }, [getAccessToken]);
 
   const uploadFile = useCallback(async (uri: string, name: string, mime: string) => {
     const token = await getAccessToken();
-    return uploadChatFile(token!, uri, name, mime);
+    if (!token) throw new Error("Your session expired — please log in again.");
+    return uploadChatFile(token, uri, name, mime);
   }, [getAccessToken]);
 
   const removeMessage = useCallback(async (mid: string) => {

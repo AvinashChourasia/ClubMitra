@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
-import { useRouter, type Href } from "expo-router";
+import { Redirect, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -15,7 +15,7 @@ import { Avatar } from "../components/Avatar";
 import { FollowButton } from "../components/FollowButton";
 
 export default function FindRunners() {
-  const { getAccessToken } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const router = useRouter();
   useThemeMode();
 
@@ -74,6 +74,8 @@ export default function FindRunners() {
     ),
     [router]
   );
+
+  if (!user) return <Redirect href="/login" />;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>

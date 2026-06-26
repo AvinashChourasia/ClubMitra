@@ -127,7 +127,7 @@ func main() {
 	activitiesHandler := activities.NewHandler(activitiesSvc)
 
 	board := leaderboard.New(rdb)
-	challengesSvc := challenges.NewService(challenges.NewRepository(pool), board, userRepo, notifier)
+	challengesSvc := challenges.NewService(challenges.NewRepository(pool), board, userRepo, notifier, paymentsLive)
 	challengesHandler := challenges.NewHandler(challengesSvc, permChecker)
 
 	// Run logging + chapter rolling leaderboards (daily/weekly/monthly/all-time).

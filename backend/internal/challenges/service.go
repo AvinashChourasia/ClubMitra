@@ -45,11 +45,16 @@ type Service struct {
 	board  *leaderboard.Leaderboard
 	names  nameLookup
 	notify notifier
+	// paymentsLive is true only when the gateway is configured. While parked, a
+	// join fee can't be charged, so we don't gate joins on it (and reject creating
+	// fee challenges) — otherwise joining a fee challenge would dead-end at 402.
+	paymentsLive bool
 }
 
-// NewService wires the service together.
-func NewService(repo *Repository, board *leaderboard.Leaderboard, names nameLookup, notify notifier) *Service {
-	return &Service{repo: repo, board: board, names: names, notify: notify}
+// NewService wires the service together. paymentsLive should be true only when
+// the payment gateway is configured.
+func NewService(repo *Repository, board *leaderboard.Leaderboard, names nameLookup, notify notifier, paymentsLive bool) *Service {
+	return &Service{repo: repo, board: board, names: names, notify: notify, paymentsLive: paymentsLive}
 }
 
 var validTypes = map[string]bool{TypeDistance: true, TypeDays: true, TypeStreak: true}
@@ -72,6 +77,11 @@ func (s *Service) Create(ctx context.Context, c NewChallenge) (*Challenge, error
 	}
 	if !c.EndDate.After(c.StartDate) {
 		return nil, ValidationError{Msg: "end date must be after start date"}
+	}
+	// Can't charge a join fee while payments are parked — reject it server-side so
+	// no unpayable challenge can be created (the app hides the field too).
+	if c.JoinFee != nil && *c.JoinFee > 0 && !s.paymentsLive {
+		return nil, ValidationError{Msg: "join fees aren't available yet"}
 	}
 
 	// Goal target must match the type.
@@ -173,7 +183,7 @@ func (s *Service) Join(ctx context.Context, userID string, challengeID uuid.UUID
 	if err := joinWindowOpen(ch); err != nil {
 		return nil, err
 	}
-	if ch.JoinFee != nil && *ch.JoinFee > 0 && !ch.Joined {
+	if ch.JoinFee != nil && *ch.JoinFee > 0 && !ch.Joined && s.paymentsLive {
 		return nil, ErrPaymentRequired
 	}
 	if _, err := s.repo.JoinAsUser(ctx, challengeID, userID, false); err != nil {

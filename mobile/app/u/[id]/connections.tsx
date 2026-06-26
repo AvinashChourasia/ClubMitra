@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../../lib/auth";
 import { listFollowers, listFollowing, followRunner, unfollowRunner, type RunnerCard } from "../../../lib/social";
+import { useFollow } from "../../../lib/follow";
 import { Avatar } from "../../../components/Avatar";
 import { Tap } from "../../../components/Tap";
 import { colors, useThemeMode } from "../../../lib/theme";
@@ -21,6 +22,7 @@ export default function ConnectionsScreen() {
   const { user, getAccessToken } = useAuth();
   const router = useRouter();
   useThemeMode();
+  const { setKnown } = useFollow();
   const [active, setActive] = useState<Tab>(tab === "following" ? "following" : "followers");
   const [cards, setCards] = useState<RunnerCard[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -67,6 +69,7 @@ export default function ConnectionsScreen() {
       if (!token) throw new Error("no token");
       const res = was ? await unfollowRunner(token, card.id) : await followRunner(token, card.id);
       setCards((cs) => (cs ?? []).map((c) => (c.id === card.id ? { ...c, is_following: res.following } : c)));
+      setKnown(card.id, res.following); // keep the shared FollowContext in sync
     } catch {
       setCards((cs) => (cs ?? []).map((c) => (c.id === card.id ? { ...c, is_following: was } : c)));
     } finally {

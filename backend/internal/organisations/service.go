@@ -89,17 +89,17 @@ type notifier interface {
 type Service struct {
 	repo   *Repository
 	notify notifier
-	// enforcePlanLimits gates the per-tier member cap. It's only on when payments
-	// are configured — a cap with no way to upgrade (payments parked) would just
-	// dead-end joins, so we don't enforce it until upgrading is actually possible.
-	enforcePlanLimits bool
+	// paymentsLive is true only when the payment gateway is configured. It gates
+	// everything that would otherwise dead-end while payments are parked: the
+	// per-tier member cap (no way to upgrade) AND routing fee-club joins into
+	// pending_payment (no way to pay). Off → joins are free and uncapped.
+	paymentsLive bool
 }
 
 // NewService wires the service to its repository and (optional) notifier.
-// enforcePlanLimits should be true only when payments are live (a club can pay
-// to upgrade); otherwise the free-tier member cap is not enforced.
-func NewService(repo *Repository, notify notifier, enforcePlanLimits bool) *Service {
-	return &Service{repo: repo, notify: notify, enforcePlanLimits: enforcePlanLimits}
+// paymentsLive should be true only when the payment gateway is configured.
+func NewService(repo *Repository, notify notifier, paymentsLive bool) *Service {
+	return &Service{repo: repo, notify: notify, paymentsLive: paymentsLive}
 }
 
 // CreateOrg validates and creates an organisation owned by its creator.
@@ -337,7 +337,7 @@ func (s *Service) enrol(ctx context.Context, chapter *Chapter, userID string) (*
 	// Enforce the club's plan member limit — the free→paid upgrade pressure.
 	// Only genuinely new joins are gated (existing members were returned above).
 	// Skipped entirely while payments are parked (no way to upgrade → no cap).
-	if s.enforcePlanLimits {
+	if s.paymentsLive {
 		tier, _, err := s.repo.GetSubscription(ctx, chapter.ID)
 		if err != nil {
 			return nil, err
@@ -355,7 +355,9 @@ func (s *Service) enrol(ctx context.Context, chapter *Chapter, userID string) (*
 	switch {
 	case chapter.RequiresApproval:
 		status = StatusPending
-	case chapter.FeeEnabled:
+	case chapter.FeeEnabled && s.paymentsLive:
+		// Only require payment when there's a way to pay — else parked payments
+		// would trap the new member in pending_payment with a dead "Pay" button.
 		status = StatusPendingPayment
 	}
 	if err := s.repo.AddMember(ctx, chapter.ID, userID, userID, status); err != nil {
