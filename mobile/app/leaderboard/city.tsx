@@ -13,6 +13,7 @@ import { cityLeaderboard, type CityBoardView, type CityPeriod } from "../../lib/
 import { formatDistance } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
 import { Tap } from "../../components/Tap";
+import { ErrorState } from "../../components/ErrorState";
 import { colors, styles } from "../../lib/theme";
 
 const PERIODS: { key: CityPeriod; label: string }[] = [
@@ -34,6 +35,7 @@ export default function CityLeaderboard() {
   const [board, setBoard] = useState<CityBoardView | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(
     async (p: CityPeriod) => {
@@ -41,6 +43,7 @@ export default function CityLeaderboard() {
       if (!token) return;
       const view = await cityLeaderboard(token, p, user?.city ?? undefined);
       setBoard(view);
+      setFailed(false);
     },
     [getAccessToken, user?.city]
   );
@@ -53,7 +56,9 @@ export default function CityLeaderboard() {
         try {
           await load(period);
         } catch {
-          if (active) setBoard(null);
+          // A load failure must not read as "no runners" — flag it so the retry
+          // card shows instead of the empty state.
+          if (active) setFailed(true);
         } finally {
           if (active) setLoading(false);
         }
@@ -127,6 +132,8 @@ export default function CityLeaderboard() {
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+        ) : failed && entries.length === 0 ? (
+          <ErrorState message="We couldn't load the city ranking." onRetry={() => { setLoading(true); load(period).catch(() => setFailed(true)).finally(() => setLoading(false)); }} />
         ) : entries.length === 0 ? (
           <View style={[styles.card, { alignItems: "center", paddingVertical: 32 }]}>
             <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>

@@ -186,11 +186,13 @@ export default function Explore() {
             style={{ flex: 1, paddingVertical: 12, color: colors.text, fontSize: 15 }}
             placeholder={segment === "clubs" ? "Search clubs" : "Search challenges"}
             placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
             value={search}
             onChangeText={setSearch}
           />
           {search !== "" && (
-            <Tap haptic={false} onPress={() => setSearch("")} hitSlop={8}>
+            <Tap haptic={false} onPress={() => setSearch("")} accessibilityLabel="Clear search" hitSlop={8}>
               <Ionicons name="close-circle" size={18} color={colors.muted} />
             </Tap>
           )}

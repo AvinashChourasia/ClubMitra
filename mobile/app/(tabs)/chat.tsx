@@ -274,7 +274,7 @@ export default function Chat() {
       {/* Header */}
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 }}>
         <Text style={{ fontSize: 28, fontWeight: "800", color: colors.text }}>Chats</Text>
-        <Tap onPress={() => router.push("/thread/new")} hitSlop={8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
+        <Tap onPress={() => router.push("/thread/new")} accessibilityLabel="New chat" hitSlop={8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="create-outline" size={20} color="#fff" />
         </Tap>
       </View>
@@ -290,7 +290,7 @@ export default function Chat() {
           onChangeText={setSearch}
         />
         {search !== "" && (
-          <Tap haptic={false} onPress={() => setSearch("")} hitSlop={8}>
+          <Tap haptic={false} onPress={() => setSearch("")} accessibilityLabel="Clear search" hitSlop={8}>
             <Ionicons name="close-circle" size={17} color={colors.muted} />
           </Tap>
         )}

@@ -178,6 +178,7 @@ export default function ActivityDetail() {
         onPress={() => (router.canGoBack() ? router.back() : router.replace("/activity"))}
         hitSlop={10}
         haptic={false}
+        accessibilityLabel="Back"
         style={{
           position: "absolute",
           top: 58,
@@ -198,6 +199,7 @@ export default function ActivityDetail() {
           onPress={() => setShowShare(true)}
           hitSlop={10}
           haptic={false}
+          accessibilityLabel="Share run"
           style={{
             position: "absolute",
             top: 58,

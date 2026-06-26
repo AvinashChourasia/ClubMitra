@@ -305,7 +305,7 @@ export default function Home() {
                     <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>{c.title}</Text>
                     <ProgressBar fraction={challengeFraction(c)} />
                     <Text style={{ color: colors.muted, fontSize: 12 }}>
-                      {challengeProgress(c)} / {challengeTarget(c)} {challengeUnit(c)} ({Math.round(challengeFraction(c) * 100)}%)
+                      {challengeProgress(c).toFixed(challengeUnit(c) === "km" ? 1 : 0)} / {challengeTarget(c)} {challengeUnit(c)} ({Math.round(challengeFraction(c) * 100)}%)
                     </Text>
                   </Tap>
                 ))

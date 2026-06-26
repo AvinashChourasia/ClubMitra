@@ -1015,7 +1015,7 @@ export function ChatThread({
           ) : (
           <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
             {(uploadImage || uploadFile) && !announceMode && !staged && !editing && (
-              <Pressable onPress={() => setAttachMenu(true)} hitSlop={6} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}>
+              <Pressable onPress={() => setAttachMenu(true)} accessibilityLabel="Attach photo or file" hitSlop={6} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}>
                 <Ionicons name="add" size={24} color={colors.text} />
               </Pressable>
             )}
@@ -1028,11 +1028,11 @@ export function ChatThread({
               multiline
             />
             {text.trim() || staged || editing ? (
-              <Pressable onPress={onSend} style={{ backgroundColor: colors.primary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+              <Pressable onPress={onSend} accessibilityLabel={editing ? "Save edit" : "Send message"} style={{ backgroundColor: colors.primary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
                 <Ionicons name={editing ? "checkmark" : "send"} size={18} color="#fff" />
               </Pressable>
             ) : uploadFile && !announceMode ? (
-              <Pressable onPress={() => void startVoice()} style={{ backgroundColor: colors.primary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+              <Pressable onPress={() => void startVoice()} accessibilityLabel="Record voice note" style={{ backgroundColor: colors.primary, borderRadius: 22, width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
                 <Ionicons name="mic" size={19} color="#fff" />
               </Pressable>
             ) : (

@@ -23,6 +23,7 @@ import {
   type BadgeStatus,
   type Badge,
 } from "../../lib/gamification";
+import { ErrorState } from "../../components/ErrorState";
 import { BadgeMedal } from "../../components/BadgeMedal";
 import { BadgeUnlockModal } from "../../components/BadgeUnlockModal";
 import { GradientCard } from "../../components/GradientCard";
@@ -95,16 +96,7 @@ export default function Achievements() {
         </View>
 
         {failed && profile === null ? (
-          <View style={[styles.card, { alignItems: "center", paddingVertical: 32, gap: 8 }]}>
-            <Ionicons name="cloud-offline-outline" size={30} color={colors.subtle} />
-            <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Couldn't load your achievements</Text>
-            <Text style={{ color: colors.muted, fontSize: 13, textAlign: "center" }}>
-              The server may be waking up — give it another try.
-            </Text>
-            <Tap onPress={() => void load()} style={{ backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 24, paddingVertical: 10, marginTop: 6 }}>
-              <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Retry</Text>
-            </Tap>
-          </View>
+          <ErrorState message="The server may be waking up — give it another try." onRetry={() => void load()} />
         ) : profile === null ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
         ) : (

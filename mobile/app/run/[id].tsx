@@ -1,7 +1,7 @@
 // Run detail: when/where, who's checked in, and a one-tap self check-in.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,6 +13,7 @@ import { myChapters, isChapterAdmin } from "../../lib/clubs";
 import { colors, styles } from "../../lib/theme";
 import { formatRunWhen } from "../../lib/format";
 import { Avatar } from "../../components/Avatar";
+import { ErrorState } from "../../components/ErrorState";
 
 export default function RunDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -55,6 +56,18 @@ export default function RunDetail() {
     }, [load])
   );
 
+  async function retry() {
+    setError(null);
+    setLoading(true);
+    try {
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   if (!user) return <Redirect href="/login" />;
 
   const alreadyIn = attendees.some((a) => a.user_id === user.id);
@@ -68,8 +81,9 @@ export default function RunDetail() {
       setReason("");
       await load();
     } catch (e) {
+      // A failed check-out shouldn't wipe the run detail — alert and stay put.
       setShowCheckout(false);
-      setError(e instanceof ApiError ? e.message : "Something went wrong");
+      Alert.alert("Couldn't check out", e instanceof ApiError ? e.message : "Something went wrong");
     } finally {
       setChecking(false);
     }
@@ -84,8 +98,8 @@ export default function RunDetail() {
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
-        ) : error ? (
-          <Text style={{ color: colors.danger }}>{error}</Text>
+        ) : error && !run ? (
+          <ErrorState message={error} onRetry={retry} retrying={loading} />
         ) : run ? (
           <>
             <View style={styles.card}>

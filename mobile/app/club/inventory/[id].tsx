@@ -24,6 +24,7 @@ import { ApiError } from "../../../lib/api";
 import { listItems, createItem, deleteItem, move, type InventoryItem, type MoveType } from "../../../lib/inventory";
 import { pay } from "../../../lib/payments";
 import { colors, styles } from "../../../lib/theme";
+import { ErrorState } from "../../../components/ErrorState";
 
 export default function ClubInventory() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -31,6 +32,7 @@ export default function ClubInventory() {
   const router = useRouter();
 
   const [items, setItems] = useState<InventoryItem[] | null>(null);
+  const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [adding, setAdding] = useState(false);
   const buyingRef = useRef(false); // a purchase is in flight (double-tap guard)
@@ -50,7 +52,10 @@ export default function ClubInventory() {
 
   const load = useCallback(async () => {
     const token = await getAccessToken();
-    if (token) setItems(await listItems(token, id));
+    if (token) {
+      setItems(await listItems(token, id));
+      setFailed(false);
+    }
   }, [getAccessToken, id]);
 
   useFocusEffect(
@@ -60,7 +65,8 @@ export default function ClubInventory() {
         try {
           await load();
         } catch {
-          if (active) setItems([]);
+          // A fetch failure must not read as "no gear" — flag it for the retry card.
+          if (active) setFailed(true);
         }
       })();
       return () => {
@@ -212,12 +218,15 @@ export default function ClubInventory() {
             </View>
           )}
 
-          {items === null ? (
+          {items === null && failed ? (
+            <ErrorState message="We couldn't load the club's gear." onRetry={() => { setFailed(false); load().catch(() => setFailed(true)); }} />
+          ) : items === null ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
           ) : items.length === 0 ? (
-            <View style={[styles.card, { alignItems: "center", paddingVertical: 28 }]}>
+            <View style={[styles.card, { alignItems: "center", paddingVertical: 28, gap: 6 }]}>
               <Ionicons name="cube-outline" size={30} color={colors.subtle} />
-              <Text style={{ color: colors.muted, marginTop: 8 }}>No items yet.</Text>
+              <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>No gear yet</Text>
+              <Text style={{ color: colors.muted, fontSize: 13, textAlign: "center" }}>Club kit, medals, and tees will show up here.</Text>
             </View>
           ) : (
             items.map((it) => {
@@ -232,7 +241,7 @@ export default function ClubInventory() {
                         {it.unit_price != null ? `₹${it.unit_price}` : "no price"}
                       </Text>
                     </View>
-                    <Pressable onPress={() => confirmDelete(it)} hitSlop={8}>
+                    <Pressable onPress={() => confirmDelete(it)} accessibilityLabel={`Delete ${it.name}`} hitSlop={8}>
                       <Ionicons name="trash-outline" size={18} color={colors.muted} />
                     </Pressable>
                   </View>

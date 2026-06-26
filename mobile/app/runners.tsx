@@ -99,7 +99,7 @@ export default function FindRunners() {
           style={{ flex: 1, paddingVertical: 12, fontSize: 16, color: colors.text }}
         />
         {q !== "" && (
-          <Pressable onPress={() => setQ("")} hitSlop={8}>
+          <Pressable onPress={() => setQ("")} accessibilityLabel="Clear search" hitSlop={8}>
             <Ionicons name="close-circle" size={18} color={colors.subtle} />
           </Pressable>
         )}

@@ -225,10 +225,10 @@ export default function Profile() {
         {/* Hero — identity */}
         <GradientCard glowColor={colors.primary} style={{ padding: 24, alignItems: "center", gap: 10 }}>
           <View style={{ position: "absolute", top: 16, right: 16, flexDirection: "row", gap: 16, zIndex: 1 }}>
-            <Pressable onPress={() => router.push("/profile/edit")} hitSlop={10}>
+            <Pressable onPress={() => router.push("/profile/edit")} accessibilityLabel="Edit profile" hitSlop={10}>
               <Ionicons name="create-outline" size={22} color="#fff" />
             </Pressable>
-            <Pressable onPress={() => router.push("/settings")} hitSlop={10}>
+            <Pressable onPress={() => router.push("/settings")} accessibilityLabel="Settings" hitSlop={10}>
               <Ionicons name="settings-outline" size={22} color="#fff" />
             </Pressable>
           </View>

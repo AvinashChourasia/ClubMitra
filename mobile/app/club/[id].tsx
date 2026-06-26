@@ -43,6 +43,7 @@ import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
 import { Avatar } from "../../components/Avatar";
 import { RunScheduleView } from "../../components/RunScheduleView";
+import { ErrorState } from "../../components/ErrorState";
 
 type Tab = "feed" | "members" | "schedule" | "challenges" | "leaderboard";
 
@@ -363,6 +364,18 @@ export default function ClubDetail() {
     }, [load])
   );
 
+  async function retry() {
+    setError(null);
+    setLoading(true);
+    try {
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   if (!user) return <Redirect href="/login" />;
 
   const isAdmin = isChapterAdmin(role);
@@ -392,7 +405,7 @@ export default function ClubDetail() {
         ) : null}
       </View>
       {isAdmin && (
-        <Pressable onPress={() => router.push(`/club/manage/${id}`)} hitSlop={10}>
+        <Pressable onPress={() => router.push(`/club/manage/${id}`)} accessibilityLabel="Manage club" hitSlop={10}>
           <Ionicons name="settings-outline" size={22} color="#fff" />
         </Pressable>
       )}
@@ -512,8 +525,8 @@ export default function ClubDetail() {
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
-        ) : error ? (
-          <Text style={{ color: colors.danger }}>{error}</Text>
+        ) : error && !chapter ? (
+          <ErrorState message={error} onRetry={retry} retrying={loading} />
         ) : chapter ? (
           <>
             {/* Header — banner image when set, else the brand gradient */}

@@ -66,7 +66,7 @@ export default function NewChat() {
             autoFocus
           />
           {q.length > 0 && (
-            <Pressable onPress={() => setQ("")} hitSlop={8}>
+            <Pressable onPress={() => setQ("")} accessibilityLabel="Clear search" hitSlop={8}>
               <Ionicons name="close-circle" size={18} color={colors.muted} />
             </Pressable>
           )}

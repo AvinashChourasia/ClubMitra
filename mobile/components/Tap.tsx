@@ -15,6 +15,9 @@ type Props = {
   scaleTo?: number; // default 0.96
   hitSlop?: number;
   style?: StyleProp<ViewStyle>;
+  // Screen-reader label for icon-only buttons (no visible text). When set, the
+  // element is also announced as a button.
+  accessibilityLabel?: string;
 };
 
 // The Pressable IS the animated, styled element — so layout style (flex, width,
@@ -23,7 +26,7 @@ type Props = {
 // shrink the tap target.
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-export function Tap({ children, onPress, onLongPress, disabled, haptic = true, scaleTo = 0.96, hitSlop, style }: Props) {
+export function Tap({ children, onPress, onLongPress, disabled, haptic = true, scaleTo = 0.96, hitSlop, style, accessibilityLabel }: Props) {
   const scale = useRef(new Animated.Value(1)).current;
 
   const to = (v: number, bounciness: number) =>
@@ -33,6 +36,8 @@ export function Tap({ children, onPress, onLongPress, disabled, haptic = true, s
     <AnimatedPressable
       disabled={disabled}
       hitSlop={hitSlop}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole={accessibilityLabel ? "button" : undefined}
       onPressIn={() => to(scaleTo, 0)}
       onPressOut={() => to(1, 6)}
       onPress={(e) => {

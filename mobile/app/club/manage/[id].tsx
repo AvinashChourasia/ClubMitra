@@ -158,7 +158,7 @@ export default function ManageClub() {
   const router = useRouter();
   useThemeMode();
 
-  const [name, setName] = useState("club");
+  const [name, setName] = useState(""); // real club name fills in on load; no placeholder word flashes
   const [role, setRole] = useState<string | null>(null);
   const [nextRun, setNextRun] = useState<Run | null>(null);
   const [pending, setPending] = useState(0);
