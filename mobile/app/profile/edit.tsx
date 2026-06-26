@@ -81,7 +81,7 @@ export default function EditProfile() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Edit profile</Text>
-          <Text style={styles.subtitle}>Email and password are managed separately.</Text>
+          <Text style={styles.subtitle}>To change your password, go to Settings → Change password.</Text>
 
           <PhotoPicker uri={photo} onChange={setPhoto} label="Add profile photo" />
 

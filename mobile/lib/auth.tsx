@@ -306,6 +306,16 @@ async function clearTokens() {
   await SecureStore.deleteItemAsync(USER_KEY);
 }
 
+// changePassword updates the signed-in user's password (current session stays
+// valid). Throws ApiError("your current password is incorrect") on a bad old one.
+export async function changePassword(token: string, oldPassword: string, newPassword: string): Promise<void> {
+  await request<void>("/account/change-password", {
+    method: "POST",
+    token,
+    body: { old_password: oldPassword, new_password: newPassword },
+  });
+}
+
 // useAuth is the hook screens call to read auth state and trigger actions.
 // It throws if used outside the provider — a clear error beats a silent null.
 export function useAuth(): AuthContextValue {

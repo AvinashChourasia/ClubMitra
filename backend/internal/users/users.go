@@ -121,6 +121,18 @@ func (r *Repository) UpdateProfile(ctx context.Context, id string, p ProfileUpda
 	return &u, nil
 }
 
+// UpdatePasswordHash sets a new bcrypt hash (used by change-password / reset).
+func (r *Repository) UpdatePasswordHash(ctx context.Context, id, hash string) error {
+	tag, err := r.db.Exec(ctx, `UPDATE users SET password_hash = $2 WHERE id = $1 AND deleted_at IS NULL`, id, hash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // userColumns is the shared SELECT/RETURNING list, kept in sync with scanDest.
 const userColumns = `id, name, email, COALESCE(phone, ''), password_hash,
 	age, tshirt_size, city, running_level, profile_photo, is_verified,

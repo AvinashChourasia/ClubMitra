@@ -130,6 +130,30 @@ func (s *Service) Register(ctx context.Context, p RegisterParams) (*TokenPair, *
 	return pair, user, nil
 }
 
+// ChangePassword verifies the caller's current password and sets a new one. The
+// current session stays valid (we don't revoke tokens here) — the user chose to
+// change it while authenticated. Returns ErrInvalidCredentials if old is wrong.
+func (s *Service) ChangePassword(ctx context.Context, userID, oldPassword, newPassword string) error {
+	if len(newPassword) < minPasswordLen {
+		return ValidationError{Msg: "password must be at least 8 characters"}
+	}
+	if len(newPassword) > maxPasswordLen {
+		return ValidationError{Msg: "password must be at most 72 characters"}
+	}
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)) != nil {
+		return ErrInvalidCredentials
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return s.users.UpdatePasswordHash(ctx, userID, string(hash))
+}
+
 // Login verifies an email/password against the stored bcrypt hash and, on
 // success, returns a token pair plus the user. The same vague error covers both
 // "no such email" and "wrong password" so neither is distinguishable.

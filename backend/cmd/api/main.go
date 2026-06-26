@@ -283,6 +283,7 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 			r.Mount("/social", socialHandler.Routes())
 			r.Mount("/integrations", syncHandler.Routes()) // Strava connect/sync/status
 			r.Mount("/payments", paymentsHandler.Routes()) // order/verify/history/config
+			r.Mount("/account", authHandler.ProtectedRoutes()) // change-password (authenticated)
 			// Club core declares its own /organisations and /chapters subtrees,
 			// so it mounts at the group root rather than under a single prefix.
 			r.Mount("/", orgHandler.Routes())

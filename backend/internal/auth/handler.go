@@ -33,6 +33,44 @@ func (h *Handler) Routes() http.Handler {
 	return r
 }
 
+// ProtectedRoutes are account-management endpoints that REQUIRE a logged-in user.
+// Mounted under /account (the public /auth path is already taken), behind the
+// auth middleware in the composition root.
+func (h *Handler) ProtectedRoutes() http.Handler {
+	r := chi.NewRouter()
+	r.Post("/change-password", h.changePassword)
+	return r
+}
+
+type changePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var req changePasswordRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.ChangePassword(r.Context(), userID, req.OldPassword, req.NewPassword); err != nil {
+		// A wrong CURRENT password is ErrInvalidCredentials — give a precise
+		// message here rather than the generic login one.
+		if errors.Is(err, ErrInvalidCredentials) {
+			httpx.Error(w, http.StatusBadRequest, "your current password is incorrect")
+			return
+		}
+		writeAuthError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
 // --- request/response shapes ---
 
 type registerRequest struct {
