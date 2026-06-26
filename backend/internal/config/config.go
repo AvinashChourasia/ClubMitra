@@ -53,6 +53,14 @@ type Config struct {
 	// transaction (for a future Razorpay Route payout split). Default 10%.
 	PlatformCutPct int
 
+	// Email (optional — transactional mail via SendGrid). Unset = account
+	// recovery (forgot-password, change-email) is dormant: those endpoints
+	// return 503 and no code is ever issued, so the app ships without email and
+	// the flows go live the moment a key + from-address are injected.
+	SendGridAPIKey string
+	EmailFrom      string // the verified sender address (e.g. no-reply@clubmitra.app)
+	EmailFromName  string // display name on outgoing mail; defaults to "ClubMitra"
+
 	// How long tokens stay valid. Access tokens are deliberately short
 	// (small damage window if stolen); refresh tokens are long (so users
 	// rarely have to log in again).
@@ -85,6 +93,10 @@ func Load() (*Config, error) {
 		RazorpayKeySecret:     os.Getenv("RAZORPAY_KEY_SECRET"),
 		RazorpayWebhookSecret: os.Getenv("RAZORPAY_WEBHOOK_SECRET"),
 		PlatformCutPct:        intEnv("PLATFORM_CUT_PCT", 10),
+
+		SendGridAPIKey: os.Getenv("SENDGRID_API_KEY"),
+		EmailFrom:      os.Getenv("EMAIL_FROM"),
+		EmailFromName:  getEnv("EMAIL_FROM_NAME", "ClubMitra"),
 
 		AccessTokenTTL:  15 * time.Minute,
 		RefreshTokenTTL: 30 * 24 * time.Hour, // 30 days

@@ -14,6 +14,7 @@ import (
 
 	"github.com/avinash/clubmitra/backend/internal/auth"
 	"github.com/avinash/clubmitra/backend/internal/database"
+	mailpkg "github.com/avinash/clubmitra/backend/internal/email"
 	"github.com/avinash/clubmitra/backend/internal/users"
 )
 
@@ -36,6 +37,8 @@ func TestAuthFlow(t *testing.T) {
 		auth.NewRefreshRepository(pool),
 		auth.NewTokenManager("test-access-secret", 15*time.Minute),
 		30*24*time.Hour,
+		auth.NewRecoveryRepository(pool),
+		mailpkg.New("", "", ""), // dormant: this test exercises register/login/refresh only
 	)
 
 	// Unique email per run so registration never collides with a prior run.

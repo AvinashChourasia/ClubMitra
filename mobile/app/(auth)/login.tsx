@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, Text, TextInput, View } from "react-native";
-import { useRouter, type Href } from "expo-router";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
@@ -19,6 +19,9 @@ export default function Login() {
   const { login, getAccessToken } = useAuth();
   const router = useRouter();
   useThemeMode();
+  // Arrived here after a successful password reset → confirm it so the user
+  // knows their new password is the one to use.
+  const { reset } = useLocalSearchParams<{ reset?: string }>();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -59,6 +62,13 @@ export default function Login() {
           <Text style={{ color: colors.muted, fontSize: 15 }}>Your running club, in your pocket.</Text>
         </View>
 
+        {reset ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.bgSecondary, borderRadius: 12, padding: 12, marginBottom: 4 }}>
+            <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+            <Text style={{ color: colors.text, flex: 1, fontSize: 13.5 }}>Password reset — log in with your new password.</Text>
+          </View>
+        ) : null}
+
         <TextInput
           style={styles.input}
           placeholder="Email"
@@ -81,6 +91,10 @@ export default function Login() {
         {error && <Text style={styles.error}>{error}</Text>}
 
         <Button label="Log in" onPress={onSubmit} loading={submitting} />
+
+        <Tap onPress={() => router.push("/forgot-password")} haptic={false}>
+          <Text style={[styles.link, { marginTop: 14 }]}>Forgot password?</Text>
+        </Tap>
 
         <Tap onPress={() => router.push("/register")} haptic={false}>
           <Text style={styles.link}>New here? Create an account</Text>

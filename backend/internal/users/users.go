@@ -133,6 +133,20 @@ func (r *Repository) UpdatePasswordHash(ctx context.Context, id, hash string) er
 	return nil
 }
 
+// UpdateEmail sets a new (already-verified) email. A duplicate maps to
+// ErrEmailTaken so the handler can return a clean 409. Used by the verified
+// change-email flow, never by raw profile edits.
+func (r *Repository) UpdateEmail(ctx context.Context, id, email string) error {
+	tag, err := r.db.Exec(ctx, `UPDATE users SET email = $2 WHERE id = $1 AND deleted_at IS NULL`, id, email)
+	if err != nil {
+		return mapUniqueViolation(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // userColumns is the shared SELECT/RETURNING list, kept in sync with scanDest.
 const userColumns = `id, name, email, COALESCE(phone, ''), password_hash,
 	age, tshirt_size, city, running_level, profile_photo, is_verified,

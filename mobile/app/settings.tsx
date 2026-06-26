@@ -327,8 +327,16 @@ export default function Settings() {
             </View>
           )}
           <Pressable
-            onPress={() => router.push("/profile/change-password")}
+            onPress={() => router.push("/profile/change-email")}
             style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border }}
+          >
+            <Ionicons name="mail-outline" size={18} color={colors.accent} />
+            <Text style={{ flex: 1, color: colors.text, fontWeight: "600", fontSize: 15 }}>Change email</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.subtle} />
+          </Pressable>
+          <Pressable
+            onPress={() => router.push("/profile/change-password")}
+            style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}
           >
             <Ionicons name="lock-closed-outline" size={18} color={colors.accent} />
             <Text style={{ flex: 1, color: colors.text, fontWeight: "600", fontSize: 15 }}>Change password</Text>

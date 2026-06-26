@@ -30,6 +30,7 @@ import (
 	"github.com/avinash/clubmitra/backend/internal/challenges"
 	"github.com/avinash/clubmitra/backend/internal/config"
 	"github.com/avinash/clubmitra/backend/internal/database"
+	"github.com/avinash/clubmitra/backend/internal/email"
 	"github.com/avinash/clubmitra/backend/internal/gamification"
 	"github.com/avinash/clubmitra/backend/internal/inventory"
 	"github.com/avinash/clubmitra/backend/internal/leaderboard"
@@ -89,11 +90,16 @@ func main() {
 	//    fit together; everything else just receives what it needs.
 	userRepo := users.NewRepository(pool)
 	refreshRepo := auth.NewRefreshRepository(pool)
+	recoveryRepo := auth.NewRecoveryRepository(pool)
 	tokenMgr := auth.NewTokenManager(cfg.JWTSecret, cfg.AccessTokenTTL)
+	// Transactional mail for account recovery. Dormant (Send→503) until
+	// SENDGRID_API_KEY + EMAIL_FROM are set — same ship-without-keys pattern as
+	// Strava/Razorpay.
+	mailer := email.New(cfg.SendGridAPIKey, cfg.EmailFrom, cfg.EmailFromName)
 
 	// ClubMitra owns identity now (no external platform): the auth service stores
 	// password hashes and verifies them itself.
-	authSvc := auth.NewService(userRepo, refreshRepo, tokenMgr, cfg.RefreshTokenTTL)
+	authSvc := auth.NewService(userRepo, refreshRepo, tokenMgr, cfg.RefreshTokenTTL, recoveryRepo, mailer)
 	authHandler := auth.NewHandler(authSvc)
 
 	usersHandler := users.NewHandler(userRepo)
@@ -281,8 +287,8 @@ func newRouter(authHandler *auth.Handler, usersHandler *users.Handler, orgHandle
 			r.Mount("/races", racesHandler.Routes())
 			r.Mount("/gamification", gamHandler.Routes())
 			r.Mount("/social", socialHandler.Routes())
-			r.Mount("/integrations", syncHandler.Routes()) // Strava connect/sync/status
-			r.Mount("/payments", paymentsHandler.Routes()) // order/verify/history/config
+			r.Mount("/integrations", syncHandler.Routes())     // Strava connect/sync/status
+			r.Mount("/payments", paymentsHandler.Routes())     // order/verify/history/config
 			r.Mount("/account", authHandler.ProtectedRoutes()) // change-password (authenticated)
 			// Club core declares its own /organisations and /chapters subtrees,
 			// so it mounts at the group root rather than under a single prefix.

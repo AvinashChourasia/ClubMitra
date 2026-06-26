@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/avinash/clubmitra/backend/internal/email"
 	"github.com/avinash/clubmitra/backend/internal/httpx"
 	"github.com/avinash/clubmitra/backend/internal/users"
 )
@@ -30,6 +31,10 @@ func (h *Handler) Routes() http.Handler {
 	r.Post("/login", h.login)
 	r.Post("/refresh", h.refresh)
 	r.Post("/logout", h.logout)
+	// Forgot-password: public (the user is locked out), so it sits behind the
+	// same IP rate-limit as the rest of /auth. Dormant until email is configured.
+	r.Post("/request-reset", h.requestReset)
+	r.Post("/reset-password", h.resetPassword)
 	return r
 }
 
@@ -39,6 +44,10 @@ func (h *Handler) Routes() http.Handler {
 func (h *Handler) ProtectedRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Post("/change-password", h.changePassword)
+	// Verified email change: request mails a code to the new address; confirm
+	// applies it. Both require the current session (these live under /account).
+	r.Post("/request-email-change", h.requestEmailChange)
+	r.Post("/confirm-email-change", h.confirmEmailChange)
 	return r
 }
 
@@ -69,6 +78,88 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+type requestResetRequest struct {
+	Email string `json:"email"`
+}
+
+func (h *Handler) requestReset(w http.ResponseWriter, r *http.Request) {
+	var req requestResetRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.RequestPasswordReset(r.Context(), req.Email); err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	// 204 regardless of whether the email matched an account — non-enumerating.
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+type resetPasswordRequest struct {
+	Email       string `json:"email"`
+	Code        string `json:"code"`
+	NewPassword string `json:"new_password"`
+}
+
+func (h *Handler) resetPassword(w http.ResponseWriter, r *http.Request) {
+	var req resetPasswordRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.ResetPassword(r.Context(), req.Email, req.Code, req.NewPassword); err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+type requestEmailChangeRequest struct {
+	NewEmail string `json:"new_email"`
+}
+
+func (h *Handler) requestEmailChange(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var req requestEmailChangeRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.svc.RequestEmailChange(r.Context(), userID, req.NewEmail); err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+type confirmEmailChangeRequest struct {
+	Code string `json:"code"`
+}
+
+func (h *Handler) confirmEmailChange(w http.ResponseWriter, r *http.Request) {
+	userID, ok := httpx.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var req confirmEmailChangeRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	newEmail, err := h.svc.ConfirmEmailChange(r.Context(), userID, req.Code)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"email": newEmail})
 }
 
 // --- request/response shapes ---
@@ -180,6 +271,12 @@ func writeAuthError(w http.ResponseWriter, err error) {
 		httpx.Error(w, http.StatusUnauthorized, "invalid email or password")
 	case errors.Is(err, ErrInvalidRefreshToken):
 		httpx.Error(w, http.StatusUnauthorized, "invalid or expired refresh token")
+	case errors.Is(err, ErrInvalidCode):
+		httpx.Error(w, http.StatusBadRequest, "that code is invalid or has expired")
+	case errors.Is(err, email.ErrNotConfigured):
+		// Email isn't set up yet — the recovery flows are dormant. 503 tells the
+		// client this is a temporary server-side gap, not the user's fault.
+		httpx.Error(w, http.StatusServiceUnavailable, "email isn't set up yet — please try again later")
 	default:
 		// Unexpected: log the real error, return a generic message (handled by
 		// the shared helper so every handler behaves identically).

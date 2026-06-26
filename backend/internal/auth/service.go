@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/avinash/clubmitra/backend/internal/email"
 	"github.com/avinash/clubmitra/backend/internal/users"
 )
 
@@ -50,11 +51,24 @@ type Service struct {
 	refresh    *RefreshRepository
 	tokens     *TokenManager
 	refreshTTL time.Duration
+	recovery   *RecoveryRepository
+	mailer     email.Sender
+	now        func() time.Time // injectable clock; defaults to time.Now
 }
 
-// NewService wires the service together.
-func NewService(u *users.Repository, rt *RefreshRepository, tm *TokenManager, refreshTTL time.Duration) *Service {
-	return &Service{users: u, refresh: rt, tokens: tm, refreshTTL: refreshTTL}
+// NewService wires the service together. recovery + mailer power the account-
+// recovery flows (forgot-password, change-email); when mailer is unconfigured
+// those flows return email.ErrNotConfigured (a 503), staying dormant.
+func NewService(u *users.Repository, rt *RefreshRepository, tm *TokenManager, refreshTTL time.Duration, rec *RecoveryRepository, mailer email.Sender) *Service {
+	return &Service{
+		users:      u,
+		refresh:    rt,
+		tokens:     tm,
+		refreshTTL: refreshTTL,
+		recovery:   rec,
+		mailer:     mailer,
+		now:        time.Now,
+	}
 }
 
 // RegisterParams is the full runner profile captured at sign-up. The README's
@@ -152,6 +166,116 @@ func (s *Service) ChangePassword(ctx context.Context, userID, oldPassword, newPa
 		return err
 	}
 	return s.users.UpdatePasswordHash(ctx, userID, string(hash))
+}
+
+// RequestPasswordReset mails a one-time code to the account's email so a
+// locked-out user can reset their password. It is intentionally non-enumerating:
+// an unknown email returns nil (no row written, no mail sent) so callers can't
+// probe which addresses have accounts. Returns email.ErrNotConfigured (→ 503)
+// when no mail provider is set, so the flow stays dormant until then.
+func (s *Service) RequestPasswordReset(ctx context.Context, rawEmail string) error {
+	if !s.mailer.Configured() {
+		return email.ErrNotConfigured
+	}
+	addr := normalizeEmail(rawEmail)
+	user, err := s.users.GetByEmail(ctx, addr)
+	if err != nil {
+		if errors.Is(err, users.ErrNotFound) {
+			return nil // silent: don't reveal whether the email exists
+		}
+		return err
+	}
+	code, err := s.recovery.CreatePasswordReset(ctx, user.ID, s.now())
+	if err != nil {
+		return err
+	}
+	subject := "Your ClubMitra password reset code"
+	text := "Your ClubMitra password reset code is " + code + ".\n\n" +
+		"It expires in 15 minutes. If you didn't request this, you can ignore this email — your password stays unchanged."
+	return s.mailer.Send(ctx, user.Email, subject, text, "")
+}
+
+// ResetPassword redeems a reset code and sets a new password. A successful reset
+// revokes all of the user's refresh tokens — a forced sign-out everywhere is the
+// safe assumption when control of the password changes. Wrong/expired/used codes
+// (and unknown emails) all return ErrInvalidCode, indistinguishably.
+func (s *Service) ResetPassword(ctx context.Context, rawEmail, code, newPassword string) error {
+	if len(newPassword) < minPasswordLen {
+		return ValidationError{Msg: "password must be at least 8 characters"}
+	}
+	if len(newPassword) > maxPasswordLen {
+		return ValidationError{Msg: "password must be at most 72 characters"}
+	}
+	user, err := s.users.GetByEmail(ctx, normalizeEmail(rawEmail))
+	if err != nil {
+		if errors.Is(err, users.ErrNotFound) {
+			return ErrInvalidCode
+		}
+		return err
+	}
+	if err := s.recovery.RedeemPasswordReset(ctx, user.ID, code, s.now()); err != nil {
+		return err // ErrInvalidCode or an unexpected DB error
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	if err := s.users.UpdatePasswordHash(ctx, user.ID, string(hash)); err != nil {
+		return err
+	}
+	// Best-effort: kill other sessions. A failure here doesn't undo the reset.
+	_ = s.refresh.RevokeAllForUser(ctx, user.ID)
+	return nil
+}
+
+// RequestEmailChange mails a verification code to the NEW address to prove the
+// caller controls it. The change isn't applied until the code is confirmed.
+// Returns email.ErrNotConfigured (→ 503) when mail is unconfigured, ErrEmailTaken
+// if the address already belongs to an account.
+func (s *Service) RequestEmailChange(ctx context.Context, userID, rawNewEmail string) error {
+	if !s.mailer.Configured() {
+		return email.ErrNotConfigured
+	}
+	newEmail := normalizeEmail(rawNewEmail)
+	if !looksLikeEmail(newEmail) {
+		return ValidationError{Msg: "a valid email is required"}
+	}
+	current, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if normalizeEmail(current.Email) == newEmail {
+		return ValidationError{Msg: "that's already your email"}
+	}
+	// Reject up front if the address is taken (the final UPDATE re-checks too,
+	// covering the race where someone claims it between request and confirm).
+	if _, err := s.users.GetByEmail(ctx, newEmail); err == nil {
+		return ErrEmailTaken
+	} else if !errors.Is(err, users.ErrNotFound) {
+		return err
+	}
+	code, err := s.recovery.CreateEmailChange(ctx, userID, newEmail, s.now())
+	if err != nil {
+		return err
+	}
+	subject := "Confirm your new ClubMitra email"
+	text := "Use this code to confirm your new ClubMitra email address: " + code + ".\n\n" +
+		"It expires in 15 minutes. If you didn't request this, you can ignore this email."
+	return s.mailer.Send(ctx, newEmail, subject, text, "")
+}
+
+// ConfirmEmailChange redeems an email-change code and applies the new address,
+// returning it. ErrInvalidCode for a bad/expired code; ErrEmailTaken if the
+// address was claimed by someone else in the meantime.
+func (s *Service) ConfirmEmailChange(ctx context.Context, userID, code string) (string, error) {
+	newEmail, err := s.recovery.RedeemEmailChange(ctx, userID, code, s.now())
+	if err != nil {
+		return "", err
+	}
+	if err := s.users.UpdateEmail(ctx, userID, newEmail); err != nil {
+		return "", err
+	}
+	return newEmail, nil
 }
 
 // Login verifies an email/password against the stored bcrypt hash and, on

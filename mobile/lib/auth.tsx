@@ -172,6 +172,9 @@ type AuthContextValue = {
   // Lives here because the tokens are this module's responsibility; screens
   // ask the auth layer for a token rather than touching SecureStore directly.
   getAccessToken: () => Promise<string | null>;
+  // Re-fetch /users/me and update cached state — used after a side change (e.g.
+  // a verified email change) so the UI reflects it without an app relaunch.
+  refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -290,9 +293,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return token;
   }
 
+  // refreshUser pulls the latest profile and updates state + cache. Best-effort:
+  // a transient failure leaves the existing (cached) user untouched.
+  async function refreshUser() {
+    const token = await freshAccessToken();
+    if (!token) return;
+    const me = await request<User>("/users/me", { token });
+    setUser(me);
+    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(me));
+  }
+
   return (
     <AuthContext.Provider
-      value={{ user, initializing, register, login, updateProfile, logout, getAccessToken }}
+      value={{ user, initializing, register, login, updateProfile, logout, getAccessToken, refreshUser }}
     >
       {children}
     </AuthContext.Provider>
@@ -313,6 +326,38 @@ export async function changePassword(token: string, oldPassword: string, newPass
     method: "POST",
     token,
     body: { old_password: oldPassword, new_password: newPassword },
+  });
+}
+
+// --- account recovery (forgot-password + verified email change) -------------
+// These hit the email-backed flows. When the backend has no mail provider set
+// they throw ApiError(503, "email isn't set up yet …") — screens surface that
+// message as-is. requestPasswordReset never reveals whether the email exists.
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  await request<void>("/auth/request-reset", { method: "POST", body: { email } });
+}
+
+export async function resetPassword(email: string, code: string, newPassword: string): Promise<void> {
+  await request<void>("/auth/reset-password", {
+    method: "POST",
+    body: { email, code, new_password: newPassword },
+  });
+}
+
+export async function requestEmailChange(token: string, newEmail: string): Promise<void> {
+  await request<void>("/account/request-email-change", {
+    method: "POST",
+    token,
+    body: { new_email: newEmail },
+  });
+}
+
+export async function confirmEmailChange(token: string, code: string): Promise<{ email: string }> {
+  return request<{ email: string }>("/account/confirm-email-change", {
+    method: "POST",
+    token,
+    body: { code },
   });
 }
 
