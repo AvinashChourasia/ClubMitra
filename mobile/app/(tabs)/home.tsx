@@ -21,6 +21,7 @@ import { ProgressBar } from "../../components/ProgressBar";
 import { RouteTrace } from "../../components/RouteTrace";
 import { Tap } from "../../components/Tap";
 import { GradientCard } from "../../components/GradientCard";
+import { ErrorState } from "../../components/ErrorState";
 import { colors, styles, useThemeMode } from "../../lib/theme";
 import { formatDistance, formatDuration, formatPace, formatRunWhen, isPast } from "../../lib/format";
 import { GuestHome } from "../../components/GuestScreens";
@@ -53,6 +54,10 @@ export default function Home() {
   const [lastTimes, setLastTimes] = useState<number[] | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // A hard load failure (vs. a transient refresh that we silently ride out on
+  // the last-good state). Only surfaced as a retry card when we have nothing
+  // to show — see `loadFailed && !hasData` below.
+  const [loadFailed, setLoadFailed] = useState(false);
   // A run recording in the background (started then minimised) — surfaced as a
   // "resume" banner so it's never silently lost behind the home screen.
   const [activeRun, setActiveRun] = useState<{ distanceM: number; elapsedS: number } | null>(null);
@@ -89,9 +94,13 @@ export default function Home() {
             setLastRoute([]);
           }
         }
+        setLoadFailed(false);
       }
     } catch {
-      /* keep last good state */
+      // A core fetch failed. We keep any last-good state (a refresh that blips
+      // shouldn't wipe the screen); the flag only drives the retry card when
+      // there's genuinely nothing to show.
+      setLoadFailed(true);
     }
   }, [getAccessToken, user?.city]);
 
@@ -137,6 +146,13 @@ export default function Home() {
     setRefreshing(false);
   }
 
+  // Retry from the error card: show the inline spinner while we re-fetch.
+  async function retry() {
+    setLoading(true);
+    await load();
+    setLoading(false);
+  }
+
   // Clubs in the member's city they haven't joined yet — the discovery strip.
   // (Hook, so it must run before the guest early-return.)
   const discoverClubs = useMemo(() => {
@@ -160,6 +176,10 @@ export default function Home() {
   const firstName = user.name.split(" ")[0];
   const nextRun = runs.filter((r) => !isPast(r.scheduled_at)).sort((a, b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at))[0];
   const activeChallenges = challenges.slice(0, 3);
+  // Did we manage to load anything? If a load failed but we still have content
+  // (e.g. a refresh blipped), ride it out silently; only show the retry card
+  // when there's truly nothing on screen.
+  const hasData = runs.length > 0 || challenges.length > 0 || clubs.length > 0 || races.length > 0 || lastRun !== null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>
@@ -245,6 +265,8 @@ export default function Home() {
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />
+        ) : loadFailed && !hasData ? (
+          <ErrorState message="We couldn't load your home feed. Check your connection and try again." onRetry={retry} />
         ) : (
           <>
             {/* Next run */}

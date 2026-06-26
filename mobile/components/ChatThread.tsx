@@ -57,6 +57,7 @@ import { inbox, postChapter, postDirect, getMessageInfo, type InboxItem, type Me
 import { ensureConnected, subscribe, sendTyping, isLive, type RTEvent } from "../lib/realtime";
 import { setActiveThread, type ThreadKey } from "../lib/messageToast";
 import { Avatar } from "./Avatar";
+import { ErrorState } from "./ErrorState";
 import { colors, styles } from "../lib/theme";
 
 type Staged = { uri: string; kind: "image" | "file"; name?: string; mime?: string };
@@ -183,6 +184,9 @@ export function ChatThread({
   const nearBottom = useRef(true);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [messages, setMessages] = useState<Message[] | null>(null);
+  // A failed FIRST load (messages still null). Distinguishes "couldn't load" from
+  // a genuinely empty conversation, which otherwise look identical.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [pending, setPending] = useState<Pending[]>([]);
   const [text, setText] = useState("");
   const [staged, setStaged] = useState<Staged | null>(null);
@@ -225,6 +229,7 @@ export function ChatThread({
       const grewBy = Math.max(0, msgs.length - countRef.current);
       countRef.current = msgs.length;
       setMessages(msgs);
+      setLoadFailed(false); // any successful load clears the error state
       if (forceScroll || (grewBy > 0 && nearBottom.current)) {
         scrollEnd(forceScroll);
       } else if (grewBy > 0) {
@@ -242,7 +247,9 @@ export function ChatThread({
         try {
           await reload(true);
         } catch {
-          if (active) setMessages([]);
+          // First load failed — surface a retry card instead of an empty chat.
+          // (If we already had messages, keep them; only flag when none yet.)
+          if (active) setLoadFailed(true);
         }
       })();
 
@@ -297,6 +304,18 @@ export function ChatThread({
       /* keep last good */
     }
     setRefreshing(false);
+  }
+
+  // Retry after a failed first load: back to the spinner, then re-fetch.
+  async function retryLoad() {
+    setLoadFailed(false);
+    setMessages(null);
+    countRef.current = 0;
+    try {
+      await reload(true);
+    } catch {
+      setLoadFailed(true);
+    }
   }
 
   // --- attachments ---
@@ -703,7 +722,11 @@ export function ChatThread({
           </View>
         </View>
 
-        {messages === null ? (
+        {messages === null && loadFailed ? (
+          <View style={{ flex: 1, backgroundColor: colors.chatBg, justifyContent: "center", padding: 20 }}>
+            <ErrorState message="We couldn't load this conversation." onRetry={retryLoad} />
+          </View>
+        ) : messages === null ? (
           <View style={{ flex: 1, backgroundColor: colors.chatBg }}>
             <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
           </View>
