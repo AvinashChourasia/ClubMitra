@@ -89,11 +89,17 @@ type notifier interface {
 type Service struct {
 	repo   *Repository
 	notify notifier
+	// enforcePlanLimits gates the per-tier member cap. It's only on when payments
+	// are configured — a cap with no way to upgrade (payments parked) would just
+	// dead-end joins, so we don't enforce it until upgrading is actually possible.
+	enforcePlanLimits bool
 }
 
 // NewService wires the service to its repository and (optional) notifier.
-func NewService(repo *Repository, notify notifier) *Service {
-	return &Service{repo: repo, notify: notify}
+// enforcePlanLimits should be true only when payments are live (a club can pay
+// to upgrade); otherwise the free-tier member cap is not enforced.
+func NewService(repo *Repository, notify notifier, enforcePlanLimits bool) *Service {
+	return &Service{repo: repo, notify: notify, enforcePlanLimits: enforcePlanLimits}
 }
 
 // CreateOrg validates and creates an organisation owned by its creator.
@@ -330,16 +336,19 @@ func (s *Service) enrol(ctx context.Context, chapter *Chapter, userID string) (*
 
 	// Enforce the club's plan member limit — the free→paid upgrade pressure.
 	// Only genuinely new joins are gated (existing members were returned above).
-	tier, _, err := s.repo.GetSubscription(ctx, chapter.ID)
-	if err != nil {
-		return nil, err
-	}
-	count, err := s.repo.CountActiveMembers(ctx, chapter.ID)
-	if err != nil {
-		return nil, err
-	}
-	if count >= memberLimit(tier) {
-		return nil, ValidationError{Msg: "this club has reached its plan's member limit — ask an admin to upgrade the club's plan"}
+	// Skipped entirely while payments are parked (no way to upgrade → no cap).
+	if s.enforcePlanLimits {
+		tier, _, err := s.repo.GetSubscription(ctx, chapter.ID)
+		if err != nil {
+			return nil, err
+		}
+		count, err := s.repo.CountActiveMembers(ctx, chapter.ID)
+		if err != nil {
+			return nil, err
+		}
+		if count >= memberLimit(tier) {
+			return nil, ValidationError{Msg: "this club has reached its plan's member limit — ask an admin to upgrade the club's plan"}
+		}
 	}
 
 	status := StatusActive

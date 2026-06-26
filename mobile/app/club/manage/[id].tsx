@@ -16,6 +16,7 @@ import { listRuns, type Run } from "../../../lib/attendance";
 import { getDropoff, getEngagement, getVolume, type Dropoff, type Engagement, type VolumePoint } from "../../../lib/analytics";
 import { formatRunWhen } from "../../../lib/format";
 import { colors, styles, useThemeMode } from "../../../lib/theme";
+import { PAYMENTS_ENABLED } from "../../../lib/flags";
 
 function ToolRow({ icon, label, onPress, danger, last }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean; last?: boolean }) {
   return (
@@ -289,7 +290,7 @@ export default function ManageClub() {
               <ToolRow icon="megaphone-outline" label="Post an announcement" onPress={() => router.push(`/thread/club/${id}`)} />
               <ToolRow icon="create-outline" label="Edit club details" onPress={() => router.push(`/club/edit/${id}`)} />
               <ToolRow icon="cube-outline" label="Inventory" onPress={() => router.push(`/club/inventory/${id}`)} />
-              <ToolRow icon="card-outline" label="Plan & billing" onPress={() => router.push(`/club/billing/${id}`)} last={!isOwner} />
+              {PAYMENTS_ENABLED && <ToolRow icon="card-outline" label="Plan & billing" onPress={() => router.push(`/club/billing/${id}`)} last={!isOwner} />}
               {isOwner && <ToolRow icon="trash-outline" label="Delete club" danger last onPress={confirmDelete} />}
             </View>
 

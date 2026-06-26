@@ -24,7 +24,9 @@
       "Bash(curl -s http://localhost:8099/api/v1/health)",
       "Bash(BASE=http://localhost:8099/api/v1 bash scripts/phase1_e2e.sh)",
       "Bash(grep -niB1 -A12 \"type createRequest\\\\|type scheduleRequest\\\\|func \\(h \\\\*Handler\\) schedule\\\\b\" internal/attendance/handler.go)",
-      "Bash(grep -niA10 \"Request struct\" internal/attendance/handler.go)"
+      "Bash(grep -niA10 \"Request struct\" internal/attendance/handler.go)",
+      "Bash(cd /Users/avinash.chourasia/Documents/Practice/Strava/mobile *)",
+      "Read(//Users/avinash.chourasia/Documents/Practice/backend/internal/organisations/**)"
     ]
   }
 }

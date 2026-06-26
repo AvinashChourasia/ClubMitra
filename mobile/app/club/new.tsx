@@ -26,6 +26,7 @@ import { colors, styles } from "../../lib/theme";
 import { PhotoPicker } from "../../components/PhotoPicker";
 import { CityPicker } from "../../components/CityPicker";
 import { ClubFeeFields, defaultFeeState, feeSettings, type FeeState } from "../../components/ClubFeeFields";
+import { PAYMENTS_ENABLED } from "../../lib/flags";
 
 export default function NewClub() {
   const { getAccessToken } = useAuth();
@@ -94,7 +95,7 @@ export default function NewClub() {
             onChangeText={setDescription}
           />
 
-          <ClubFeeFields value={fee} onChange={setFee} />
+          {PAYMENTS_ENABLED && <ClubFeeFields value={fee} onChange={setFee} />}
 
           {error && <Text style={styles.error}>{error}</Text>}
 

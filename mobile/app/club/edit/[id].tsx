@@ -27,6 +27,7 @@ import { colors, styles } from "../../../lib/theme";
 import { PhotoPicker } from "../../../components/PhotoPicker";
 import { CityPicker } from "../../../components/CityPicker";
 import { ClubFeeFields, defaultFeeState, feeSettings, type FeeState } from "../../../components/ClubFeeFields";
+import { PAYMENTS_ENABLED } from "../../../lib/flags";
 
 export default function EditClub() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -161,7 +162,7 @@ export default function EditClub() {
             <Switch value={openJoin} onValueChange={setOpenJoin} trackColor={{ true: colors.primary }} />
           </View>
 
-          <ClubFeeFields value={fee} onChange={setFee} />
+          {PAYMENTS_ENABLED && <ClubFeeFields value={fee} onChange={setFee} />}
 
           {error && <Text style={styles.error}>{error}</Text>}
 

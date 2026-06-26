@@ -18,6 +18,7 @@ import {
   type Visibility,
 } from "../../lib/challenges";
 import { myChapters, isChapterAdmin, type MyChapter } from "../../lib/clubs";
+import { PAYMENTS_ENABLED } from "../../lib/flags";
 import { colors, styles } from "../../lib/theme";
 import { ChipSelect } from "../../components/ChipSelect";
 import { CityPicker } from "../../components/CityPicker";
@@ -202,8 +203,12 @@ export default function NewChallenge() {
         <Text style={styles.fieldLabel}>Length</Text>
         <ChipSelect options={LENGTHS} value={length} onChange={(k) => setLength(k ?? "30")} />
 
-        <Text style={styles.fieldLabel}>Join fee ₹ (optional)</Text>
-        <TextInput style={styles.input} placeholder="0 = free" placeholderTextColor={colors.muted} keyboardType="decimal-pad" value={joinFee} onChangeText={setJoinFee} />
+        {PAYMENTS_ENABLED && (
+          <>
+            <Text style={styles.fieldLabel}>Join fee ₹ (optional)</Text>
+            <TextInput style={styles.input} placeholder="0 = free" placeholderTextColor={colors.muted} keyboardType="decimal-pad" value={joinFee} onChangeText={setJoinFee} />
+          </>
+        )}
 
         <Text style={styles.fieldLabel}>Members can leave until</Text>
         <ChipSelect options={LOCK_OPTIONS} value={lockDays} onChange={(k) => setLockDays(k ?? "0")} />

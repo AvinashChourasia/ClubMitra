@@ -113,7 +113,10 @@ func main() {
 	// Club core: organisations, chapters, roles, members — gated by the
 	// org_roles-backed permission checker.
 	permChecker := permissions.NewChecker(pool)
-	orgSvc := organisations.NewService(organisations.NewRepository(pool), notifier)
+	// Plan member-limits are enforced only when payments are live — without a way
+	// to pay-to-upgrade (payments parked) a cap would just dead-end joins.
+	paymentsLive := cfg.RazorpayKeyID != "" && cfg.RazorpayKeySecret != ""
+	orgSvc := organisations.NewService(organisations.NewRepository(pool), notifier, paymentsLive)
 	orgHandler := organisations.NewHandler(orgSvc, permChecker)
 
 	// Attendance: scheduled group runs + member check-ins.
