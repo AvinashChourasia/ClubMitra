@@ -114,10 +114,15 @@
       [
         "expo-build-properties",
         {
-          "android": { "newArchEnabled": false },
-          "ios": { "newArchEnabled": false }
+          "android": {
+            "newArchEnabled": false
+          },
+          "ios": {
+            "newArchEnabled": false
+          }
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
