@@ -5,11 +5,12 @@
 // MarathonMitra event page for full details + registration.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, FlatList, Image, Linking, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
 
 import { useAuth } from "../../lib/auth";
@@ -34,6 +35,14 @@ const SCRIM = ["rgba(2,6,23,0)", "rgba(2,6,23,0.55)", "rgba(2,6,23,0.9)"] as con
 const SUCCESS_GRAD = ["#34D399", "#12B76A"] as const;
 
 type Scope = "city" | "all" | "saved";
+
+// The race map is react-native-maps. On iOS that's Apple Maps (no key needed);
+// on Android it's Google Maps, which renders blank / can crash WITHOUT a
+// `expo.android.config.googleMaps.apiKey`. So we only offer the map view when
+// it can actually work: always on iOS, on Android only once a key is set. Add
+// the key and the toggle re-appears on Android automatically — no code change.
+const MAP_AVAILABLE =
+  Platform.OS === "ios" || !!Constants.expoConfig?.android?.config?.googleMaps?.apiKey;
 
 export default function Races() {
   const { user, getAccessToken } = useAuth();
@@ -224,14 +233,18 @@ export default function Races() {
             <Text style={{ fontSize: 24, fontWeight: "800", color: colors.text }}>Race calendar</Text>
             <Text style={{ color: colors.muted, fontSize: 13 }}>Find your next start line</Text>
           </View>
-          {/* List ↔ Map toggle */}
-          <Tap
-            onPress={() => setViewMode((m) => (m === "list" ? "map" : "list"))}
-            hitSlop={8}
-            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}
-          >
-            <Ionicons name={viewMode === "list" ? "map-outline" : "list-outline"} size={20} color={colors.primary} />
-          </Tap>
+          {/* List ↔ Map toggle — only when the map view can actually render
+              (iOS always; Android once a Google Maps key is configured). */}
+          {MAP_AVAILABLE && (
+            <Tap
+              onPress={() => setViewMode((m) => (m === "list" ? "map" : "list"))}
+              hitSlop={8}
+              accessibilityLabel={viewMode === "list" ? "Map view" : "List view"}
+              style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}
+            >
+              <Ionicons name={viewMode === "list" ? "map-outline" : "list-outline"} size={20} color={colors.primary} />
+            </Tap>
+          )}
           <Tap onPress={onAddRace} hitSlop={8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="add" size={22} color="#fff" />
           </Tap>
@@ -265,7 +278,7 @@ export default function Races() {
       {/* Body: map or scrollable list */}
       {races === null ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
-      ) : viewMode === "map" ? (
+      ) : viewMode === "map" && MAP_AVAILABLE ? (
         <View style={{ flex: 1, marginTop: 8 }}>
           <RaceMap races={visible} onPressRace={openRace} />
         </View>
