@@ -47,6 +47,11 @@
     },
     "android": {
       "package": "in.clubmitra.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDITCNBw6vxOS6tvWDcCFMdXUCD2tbvo2U"
+        }
+      },
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

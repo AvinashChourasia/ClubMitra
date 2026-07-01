@@ -42,7 +42,10 @@ type Scope = "city" | "all" | "saved";
 // it can actually work: always on iOS, on Android only once a key is set. Add
 // the key and the toggle re-appears on Android automatically — no code change.
 const MAP_AVAILABLE =
-  Platform.OS === "ios" || !!Constants.expoConfig?.android?.config?.googleMaps?.apiKey;
+  Platform.OS === "ios" ||
+  // Only when a REAL Google Maps key is set (they start with "AIza") — a blank
+  // or placeholder value keeps the Android map gated off rather than blank.
+  (Constants.expoConfig?.android?.config?.googleMaps?.apiKey ?? "").startsWith("AIza");
 
 export default function Races() {
   const { user, getAccessToken } = useAuth();
