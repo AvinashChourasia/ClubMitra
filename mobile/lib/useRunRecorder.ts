@@ -92,10 +92,13 @@ export function useRunRecorder() {
     attach();
   }, [attach]);
 
-  // stop() ends the run and returns the captured track for upload.
+  // stop() ends the run and returns the captured track for upload. Clears the
+  // paused flag too — a run finished mid-auto-pause must not leave the HUD
+  // showing "Auto-paused" on the next pre-start screen.
   const stop = useCallback(async (): Promise<{ points: RunPoint[]; pausedS: number }> => {
     detach();
     setStatus("idle");
+    setPaused(false);
     return await stopRun();
   }, [detach]);
 
@@ -103,6 +106,7 @@ export function useRunRecorder() {
   const discard = useCallback(async () => {
     detach();
     setStatus("idle");
+    setPaused(false);
     await discardRun();
   }, [detach]);
 

@@ -31,7 +31,17 @@
       "Bash(awk '/Leave challenge|Leave challenge/{p=1} p && /^[[:space:]]*\\\\}[[:space:]]*$/{if\\(++count==3\\) {print; exit}} p' /Users/avinash.chourasia/Documents/Practice/Strava/mobile/app/challenge/\\\\[id\\\\].tsx)",
       "Bash(python3)",
       "Bash(xargs ls -la)",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "Bash(npx eslint *)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('app.json'\\)\\); print\\(json.dumps\\(d['expo'].get\\('android',{}\\),indent=1\\)\\); print\\(json.dumps\\(d['expo'].get\\('ios',{}\\),indent=1\\)\\)\")",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/expo-location/package.json'\\).version\\)\")",
+      "Bash(git -C /Users/avinash.chourasia/Documents/Practice/Strava log --oneline -1 d09a8f5)",
+      "Bash(git -C /Users/avinash.chourasia/Documents/Practice/Strava merge-base --is-ancestor d09a8f5 54e8fe8)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('app.json'\\)\\)['expo']; print\\(d.get\\('runtimeVersion'\\), d.get\\('updates'\\)\\)\")",
+      "Bash(python3 -c \"import json; print\\(json.load\\(open\\('app.json'\\)\\)['expo']['version']\\)\")",
+      "Bash(python3 -c \"import json,sys; print\\(json.load\\(sys.stdin\\)['expo']['version']\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(echo \"EXPORT=$?\")"
     ]
   }
 }

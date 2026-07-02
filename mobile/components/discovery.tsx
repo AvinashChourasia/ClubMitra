@@ -3,9 +3,11 @@
 // heart of deferred auth — members join in place; guests get their intent
 // stashed and are routed through signup, which resumes the join.
 
-import { useCallback, useEffect, useState } from "react";
-import { Alert, ScrollView, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, Animated, Easing, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Stop } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../lib/auth";
@@ -19,9 +21,8 @@ import {
 } from "../lib/discover";
 import { joinChallenge } from "../lib/challenges";
 import { Avatar } from "./Avatar";
-import { RouteTrace } from "./RouteTrace";
 import { Tap } from "./Tap";
-import { colors, styles } from "../lib/theme";
+import { colors, glow, gradients, radius, styles } from "../lib/theme";
 
 // useGuestCity: the discovery city — the member's profile city, else the city
 // the guest picked on Welcome (persisted so every guest surface agrees).
@@ -181,44 +182,126 @@ export function PublicChallengeCard({ challenge: ch, joiningId, onJoin }: { chal
   );
 }
 
-// A synthetic ~2.5km loop so the GPS teaser shows the real RouteTrace (pace
-// gradient, km markers) without needing a real run. Built once.
-function demoRoute() {
-  const coords = [] as { latitude: number; longitude: number }[];
-  const times = [] as number[];
-  let t = 0;
-  const n = 48;
-  for (let i = 0; i <= n; i++) {
-    const a = (i / n) * Math.PI * 2;
-    coords.push({
-      latitude: 18.52 + 0.0035 * Math.sin(a) + 0.0008 * Math.sin(3 * a),
-      longitude: 73.85 + 0.0045 * Math.cos(a) + 0.0006 * Math.sin(2 * a),
-    });
-    t += 24000 + 9000 * Math.sin(a * 2); // varying pace → visible gradient
-    times.push(t);
-  }
-  return { coords, times };
-}
-export const DEMO_ROUTE = demoRoute();
-
-// TrackRunCard: the GPS pitch that doubles as the Record entry point — shows the
-// real RouteTrace (pace gradient + km markers) on a demo loop. Guests tap into
+// TrackRunCard: the Record entry point as a night-HUD hero — a slice of the
+// record screen itself (ink gradient, pace-coloured route sweep) with a pulsing
+// record button. Deliberately dark: it sits under the red greeting hero on Home,
+// so ink contrasts instead of stacking two red gradients. Guests tap into
 // signup; members tap straight into recording.
 export function TrackRunCard({ onPress, title, subtitle }: { onPress: () => void; title?: string; subtitle?: string }) {
+  // Endless soft pulse radiating from the record button — "alive, ready to go".
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(pulse, { toValue: 1, duration: 2000, easing: Easing.out(Easing.quad), useNativeDriver: true })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 0.65, 1], outputRange: [0.5, 0.15, 0] });
+
   return (
-    <Tap onPress={onPress} style={[styles.card, { gap: 12, padding: 16 }]}>
-      <RouteTrace coords={DEMO_ROUTE.coords} times={DEMO_ROUTE.times} height={150} live />
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-        <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
-          <Ionicons name="navigate" size={22} color={colors.primary} />
+    <Tap onPress={onPress} scaleTo={0.97} style={{ borderRadius: radius.xl, ...glow("#0B1220", 0.3) }}>
+      <LinearGradient
+        colors={gradients.ink}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{ borderRadius: radius.xl, overflow: "hidden", padding: 18 }}
+      >
+        {/* Decorative pace-gradient route sweeping the card (fast→slow ramp). */}
+        <Svg
+          pointerEvents="none"
+          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+          viewBox="0 0 360 150"
+          preserveAspectRatio="xMidYMid slice"
+        >
+          <Defs>
+            <SvgLinearGradient id="paceRamp" x1="0" y1="0" x2="1" y2="0">
+              <Stop offset="0" stopColor="#4ADE80" />
+              <Stop offset="0.55" stopColor="#F59E0B" />
+              <Stop offset="1" stopColor="#EF4444" />
+            </SvgLinearGradient>
+          </Defs>
+          {/* Soft wide underlay, then the ramp line on top — the RouteTrace look. */}
+          <Path d={MOTIF_PATH} stroke="rgba(255,255,255,0.07)" strokeWidth={16} fill="none" strokeLinecap="round" />
+          <Path d={MOTIF_PATH} stroke="url(#paceRamp)" strokeWidth={3.5} fill="none" strokeLinecap="round" strokeOpacity={0.85} />
+          <Circle cx={26} cy={118} r={5} fill="#4ADE80" stroke="#fff" strokeWidth={1.5} />
+        </Svg>
+
+        {/* Top gloss so the card reads lit, like the app's other heroes. */}
+        <LinearGradient
+          colors={gradients.gloss}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={{ position: "absolute", top: 0, left: 0, right: 0, height: "55%" }}
+          pointerEvents="none"
+        />
+
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+          <View style={{ flex: 1, gap: 8 }}>
+            {/* Eyebrow: live-styled GPS badge */}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: "#4ADE80" }} />
+              <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: "800", letterSpacing: 1.6 }}>GPS TRACKER</Text>
+            </View>
+            <View>
+              <Text style={{ color: "#fff", fontSize: 21, fontWeight: "800", letterSpacing: -0.4 }}>{title ?? "Track every run"}</Text>
+              <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 13, marginTop: 2 }} numberOfLines={2}>
+                {subtitle ?? "Every km counts for your club."}
+              </Text>
+            </View>
+            {/* Feature chips — what the tracker gives you, at a glance */}
+            <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+              <HeroChip icon="map" label="Live map" />
+              <HeroChip icon="speedometer" label="Pace" />
+              <HeroChip icon="flag" label="Km splits" />
+            </View>
+          </View>
+
+          {/* The record button — pulsing halo, glossy red disc */}
+          <View style={{ width: 74, height: 74, alignItems: "center", justifyContent: "center" }}>
+            <Animated.View
+              style={{
+                position: "absolute",
+                width: 62,
+                height: 62,
+                borderRadius: 31,
+                backgroundColor: colors.primary,
+                transform: [{ scale: ringScale }],
+                opacity: ringOpacity,
+              }}
+            />
+            <View
+              style={{
+                width: 62,
+                height: 62,
+                borderRadius: 31,
+                backgroundColor: colors.primary,
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 2.5,
+                borderColor: "rgba(255,255,255,0.85)",
+                ...glow(colors.primary, 0.45),
+              }}
+            >
+              <Ionicons name="play" size={26} color="#fff" style={{ marginLeft: 3 }} />
+            </View>
+          </View>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16 }}>{title ?? "Track every run"}</Text>
-          <Text style={{ color: colors.muted, fontSize: 13 }}>{subtitle ?? "GPS route, pace, splits — and it counts for your club."}</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color={colors.subtle} />
-      </View>
+      </LinearGradient>
     </Tap>
+  );
+}
+
+// A smooth run-route squiggle sweeping the card, drawn once (viewBox 360×150).
+const MOTIF_PATH = "M26,118 C60,128 84,96 104,78 C124,60 150,58 176,72 C202,86 224,120 252,118 C280,116 292,80 310,58 C322,44 338,36 352,34";
+
+function HeroChip({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4.5 }}>
+      <Ionicons name={icon} size={11} color="rgba(255,255,255,0.9)" />
+      <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 11.5, fontWeight: "700" }}>{label}</Text>
+    </View>
   );
 }
 

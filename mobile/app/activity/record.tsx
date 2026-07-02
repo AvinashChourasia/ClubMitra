@@ -8,11 +8,12 @@
 // lib/runQueue owns persistence+upload, lib/pace computes splits.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, Platform, Pressable, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Animated, Pressable, Switch, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
+import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
 
 import { useAuth } from "../../lib/auth";
@@ -37,12 +38,50 @@ const TEXT = "#FFFFFF";
 const MUTED = "#94A3B8";
 const ACCENT = "#EF4444";
 
-// Native map only on iOS builds (Apple Maps — free, no key); Expo Go and
-// Android use the SVG trace (Google Maps would need an API key + billing).
+// Native map in any standalone build: Apple Maps on iOS (no key), Google Maps
+// on Android (API key ships in the manifest). Expo Go gets the SVG trace.
 const isExpoGo = Constants.appOwnership === "expo";
-const nativeMapAvailable = !isExpoGo && Platform.OS === "ios";
-const RunMap: React.ComponentType<{ coords: LatLng[]; times?: number[]; height?: number; live?: boolean }> | null =
-  nativeMapAvailable ? require("../../components/RunMap").RunMap : null;
+const nativeMapAvailable = !isExpoGo;
+const maps = nativeMapAvailable ? (require("../../components/RunMap") as typeof import("../../components/RunMap")) : null;
+const RunMap = maps?.RunMap ?? null;
+const PreStartMap = maps?.PreStartMap ?? null;
+
+// --- GPS warm-up ------------------------------------------------------------
+// The old flow started GPS only when START was pressed, so the runner stood
+// waiting ~10s while the chip acquired satellites (and the 30m accuracy filter
+// rightly dropped the coarse first fixes). Now a foreground watch starts the
+// moment the screen opens (permission already granted — we never prompt just
+// for opening it): any high-accuracy request powers the GNSS receiver and pulls
+// AGPS data, so by the time START is pressed the chip is already locked and the
+// first recorded fix lands in ~1s. The watch feeds the signal chip + pre-start
+// map, is removed once the engine takes over, and never records points itself.
+
+type WarmFix = { coord: LatLng; accuracyM: number | null; atMs: number };
+type GpsMeta = { granted: boolean; precise: boolean; servicesOn: boolean };
+type GpsLevel = "none" | "off" | "coarse" | "searching" | "weak" | "good" | "locked";
+
+// Thresholds relative to the recorder's 30m accuracy gate: "weak" means fixes
+// are still being dropped by the filter; "good" means they're passing.
+function gpsLevel(meta: GpsMeta | null, fix: WarmFix | null, nowMs: number): GpsLevel {
+  if (!meta || !meta.granted) return "none"; // permission comes with START, as before
+  if (!meta.servicesOn) return "off";
+  if (!meta.precise) return "coarse";
+  if (!fix || fix.atMs === 0 || nowMs - fix.atMs > 5000) return "searching";
+  const a = fix.accuracyM ?? 9999;
+  if (a > 100) return "searching"; // network-only fix; GPS not locked yet
+  if (a > 30) return "weak";
+  if (a > 15) return "good";
+  return "locked";
+}
+
+const GPS_CHIP: Record<Exclude<GpsLevel, "none">, { label: string; dot: string; text: string; bg: string }> = {
+  off: { label: "Turn on location services", dot: "#F59E0B", text: "#FCD34D", bg: "rgba(245,158,11,0.18)" },
+  coarse: { label: "Precise location is off", dot: "#F59E0B", text: "#FCD34D", bg: "rgba(245,158,11,0.18)" },
+  searching: { label: "GPS · searching…", dot: "#94A3B8", text: "#CBD5E1", bg: "rgba(255,255,255,0.07)" },
+  weak: { label: "GPS · weak signal", dot: "#F59E0B", text: "#FCD34D", bg: "rgba(245,158,11,0.18)" },
+  good: { label: "GPS · good", dot: "#4ADE80", text: "#86EFAC", bg: "rgba(74,222,128,0.14)" },
+  locked: { label: "GPS · locked", dot: "#34D399", text: "#6EE7B7", bg: "rgba(52,211,153,0.16)" },
+};
 
 export default function RecordRun() {
   const { getAccessToken } = useAuth();
@@ -63,6 +102,114 @@ export default function RecordRun() {
   // Live splits — the last completed kilometre's pace, for the ticker line.
   const splits = useMemo(() => computeSplits(route, times), [route, times]);
   const lastSplit = splits.length > 0 ? splits[splits.length - 1] : null;
+
+  // Fullscreen-map mode while recording (Strava-style): the map owns the screen
+  // with a floating stat capsule; the toggle lives on the map card. Reset when
+  // the run ends so the next run starts on the stats HUD.
+  const [mapMax, setMapMax] = useState(false);
+  useEffect(() => {
+    if (!recording) setMapMax(false);
+  }, [recording]);
+
+  // --- GPS warm-up state (pre-start only) ---
+  const [gpsMeta, setGpsMeta] = useState<GpsMeta | null>(null);
+  const [warmFix, setWarmFix] = useState<WarmFix | null>(null);
+  const [, setWarmTick] = useState(0); // re-render every 2s so the chip can go stale → "searching"
+  // Re-arms the warm-up effect when a blocker (services off / no permission)
+  // clears while we're sitting on the screen — bumped by the 2s re-check below.
+  const [warmNonce, setWarmNonce] = useState(0);
+  const warmingRef = useRef(false); // ignore stray fixes after remove()
+  // The "turn on high-accuracy mode" system dialog may show at most ONCE per
+  // screen visit — declining must not re-nag on every status transition.
+  const nudgedRef = useRef(false);
+
+  useEffect(() => {
+    // The engine owns GPS while recording; nothing to warm while we're still
+    // resolving whether a run is in progress, or while the finished run saves.
+    if (checking || recording || uploading) return;
+    let cancelled = false;
+    let sub: Location.LocationSubscription | null = null;
+    warmingRef.current = true;
+    const tick = setInterval(() => {
+      setWarmTick((t) => t + 1);
+      // Re-poll the environment (both calls are prompt-free): services/precise
+      // toggled in Settings must update the chip, and a cleared blocker must
+      // restart the warm-up (the effect early-returned before the watch began).
+      void (async () => {
+        const p = await Location.getForegroundPermissionsAsync().catch(() => null);
+        const s = await Location.hasServicesEnabledAsync().catch(() => true);
+        if (cancelled) return;
+        const fresh = { granted: !!p?.granted, precise: p?.android ? p.android.accuracy === "fine" : true, servicesOn: s };
+        setGpsMeta(fresh);
+        if (!sub && fresh.granted && fresh.servicesOn) setWarmNonce((n) => n + 1);
+      })();
+    }, 2000);
+    (async () => {
+      // Never prompt just for opening the screen — START owns the permission ask.
+      const perm = await Location.getForegroundPermissionsAsync().catch(() => null);
+      if (cancelled) return;
+      const granted = !!perm?.granted;
+      // Android 12+ can grant "approximate" only — every fix is ~km-scale and
+      // the 30m filter would starve the run. Surface it instead of "searching".
+      const precise = perm?.android ? perm.android.accuracy === "fine" : true;
+      const servicesOn = await Location.hasServicesEnabledAsync().catch(() => true);
+      if (cancelled) return;
+      setGpsMeta({ granted, precise, servicesOn });
+      if (!granted || !servicesOn) return;
+
+      // Instant approximate centre for the pre-start map (never a live fix —
+      // atMs 0 keeps the chip honest about it). Generous args on purpose: a
+      // 10-min-old ≤1km fix centres a neighbourhood map fine.
+      const last = await Location.getLastKnownPositionAsync({ maxAge: 600000, requiredAccuracy: 1000 }).catch(() => null);
+      if (cancelled) return;
+      if (last) {
+        setWarmFix((cur) => cur ?? {
+          coord: { latitude: last.coords.latitude, longitude: last.coords.longitude },
+          accuracyM: last.coords.accuracy ?? null,
+          atMs: 0,
+        });
+      }
+      // Nudge Android's high-accuracy mode on. NOT silent when it's off: it
+      // shows the system resolution dialog — so at most once per screen visit,
+      // and only in the true pre-start state (never mid start/finish flows).
+      if (!nudgedRef.current && status === "idle") {
+        nudgedRef.current = true;
+        await Location.enableNetworkProviderAsync().catch(() => {});
+      }
+      if (cancelled) return;
+      try {
+        sub = await Location.watchPositionAsync(
+          // Same accuracy class as recording, so the fused provider never
+          // downgrades between warm-up and the run.
+          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 },
+          (loc) => {
+            if (!warmingRef.current) return;
+            setWarmFix({
+              coord: { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
+              accuracyM: loc.coords.accuracy ?? null,
+              atMs: loc.timestamp,
+            });
+          }
+        );
+        if (cancelled) {
+          sub.remove();
+          sub = null;
+        }
+      } catch {
+        /* watch failed — the chip just stays on "searching" */
+      }
+    })();
+    return () => {
+      // Cleanup fires when recording flips true — i.e. AFTER the engine's
+      // location task registered — so the GNSS receiver never sees a gap.
+      cancelled = true;
+      warmingRef.current = false;
+      clearInterval(tick);
+      sub?.remove();
+    };
+  }, [checking, recording, status, uploading, warmNonce]);
+
+  const level = gpsLevel(gpsMeta, warmFix, Date.now());
 
   // Buzz every time a kilometre completes.
   useEffect(() => {
@@ -236,55 +383,148 @@ export default function RecordRun() {
             <View style={{ width: 36 }} />
           )}
           {/* When auto-paused, the pill is the manual override: detection can
-              get stuck through a bad-GPS stretch, so the runner taps to resume. */}
+              get stuck through a bad-GPS stretch, so the runner taps to resume.
+              Pre-start it doubles as the live GPS signal indicator (fed by the
+              warm-up watch) so the runner starts on a locked chip, not a cold one. */}
+          {/* `paused` only outranks while actually recording — a run finished
+              mid-auto-pause must not mask the GPS chip on the next pre-start. */}
           <Pressable
-            onPress={paused ? () => void resume() : undefined}
+            onPress={recording && paused ? () => void resume() : undefined}
             hitSlop={8}
             style={{
               flexDirection: "row",
               alignItems: "center",
               gap: 8,
-              backgroundColor: paused ? "rgba(245,158,11,0.18)" : recording ? "rgba(239,68,68,0.18)" : CARD,
+              backgroundColor:
+                recording && paused
+                  ? "rgba(245,158,11,0.18)"
+                  : recording
+                    ? "rgba(239,68,68,0.18)"
+                    : level !== "none"
+                      ? GPS_CHIP[level].bg
+                      : CARD,
               paddingHorizontal: 14,
               paddingVertical: 7,
               borderRadius: 999,
             }}
           >
-            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: paused ? "#F59E0B" : recording ? ACCENT : MUTED }} />
-            <Text style={{ color: paused ? "#FCD34D" : recording ? "#FCA5A5" : MUTED, fontWeight: "700", fontSize: 13 }}>
-              {paused ? "Auto-paused · tap to resume" : recording ? "Recording" : "Ready to run"}
+            <View
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor:
+                  recording && paused ? "#F59E0B" : recording ? ACCENT : level !== "none" ? GPS_CHIP[level].dot : MUTED,
+              }}
+            />
+            <Text
+              style={{
+                color: recording && paused ? "#FCD34D" : recording ? "#FCA5A5" : level !== "none" ? GPS_CHIP[level].text : MUTED,
+                fontWeight: "700",
+                fontSize: 13,
+              }}
+            >
+              {recording && paused
+                ? "Auto-paused · tap to resume"
+                : recording
+                  ? "Recording"
+                  : level !== "none"
+                    ? GPS_CHIP[level].label
+                    : "Ready to run"}
             </Text>
           </Pressable>
           <View style={{ width: 36 }} />
         </View>
 
-        {/* Hero: distance + live split ticker */}
-        <View style={{ alignItems: "center", gap: 4 }}>
-          <Text style={{ fontSize: 76, fontWeight: "800", color: TEXT, letterSpacing: -2, fontVariant: ["tabular-nums"] }}>
-            {(distanceM / 1000).toFixed(2)}
-          </Text>
-          <Text style={{ fontSize: 13, fontWeight: "800", color: MUTED, letterSpacing: 2 }}>KILOMETERS</Text>
-          {recording && (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6, backgroundColor: CARD, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 }}>
-              <Ionicons name="flag" size={12} color={MUTED} />
-              <Text style={{ color: MUTED, fontSize: 13, fontWeight: "700" }}>
-                {lastSplit ? `Km ${km + 1} · last km ${formatPace(lastSplit.paceSPerKm)}` : `Km ${km + 1} · first split coming up`}
-              </Text>
-            </View>
-          )}
-        </View>
+        {/* Hero: distance + live split ticker (hidden in fullscreen-map mode —
+            a floating capsule on the map carries the essentials instead) */}
+        {!(recording && mapMax) && (
+          <View style={{ alignItems: "center", gap: 4 }}>
+            <Text style={{ fontSize: 76, fontWeight: "800", color: TEXT, letterSpacing: -2, fontVariant: ["tabular-nums"] }}>
+              {(distanceM / 1000).toFixed(2)}
+            </Text>
+            <Text style={{ fontSize: 13, fontWeight: "800", color: MUTED, letterSpacing: 2 }}>KILOMETERS</Text>
+            {recording && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6, backgroundColor: CARD, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 }}>
+                <Ionicons name="flag" size={12} color={MUTED} />
+                <Text style={{ color: MUTED, fontSize: 13, fontWeight: "700" }}>
+                  {lastSplit ? `Km ${km + 1} · last km ${formatPace(lastSplit.paceSPerKm)}` : `Km ${km + 1} · first split coming up`}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Secondary stats */}
-        <View style={{ flexDirection: "row", gap: 12 }}>
-          <DarkStat label="TIME" value={formatDuration(elapsedS)} />
-          <DarkStat label="PACE" value={formatPace(livePaceSPerKm)} />
-          <DarkStat label="SPEED" value={formatSpeed(distanceM, elapsedS)} />
-        </View>
+        {!(recording && mapMax) && (
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <DarkStat label="TIME" value={formatDuration(elapsedS)} />
+            <DarkStat label="PACE" value={formatPace(livePaceSPerKm)} />
+            <DarkStat label="SPEED" value={formatSpeed(distanceM, elapsedS)} />
+          </View>
+        )}
 
-        {/* Live route — follow-me map in an iOS build, SVG trace elsewhere */}
+        {/* Pre-start: the "locking on" map — your position with an accuracy halo
+            that shrinks as the GPS locks. Feeds off the warm-up watch. */}
+        {!recording && !uploading && status !== "denied" && PreStartMap && warmFix && (
+          <PreStartMap coord={warmFix.coord} accuracyM={warmFix.accuracyM} height={170} />
+        )}
+
+        {/* Live route — follow-me map (fullscreen-capable), SVG trace in Expo Go */}
         {recording &&
           (RunMap ? (
-            <RunMap coords={route} times={times} height={190} live />
+            <View style={mapMax ? { flex: 1, marginVertical: 4 } : undefined}>
+              <RunMap coords={route} times={times} height={mapMax ? undefined : 190} live />
+              {/* Floating stat capsule — the essentials while the map owns the screen */}
+              {mapMax && (
+                <View
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    top: 10,
+                    alignSelf: "center",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    backgroundColor: "rgba(2,6,23,0.78)",
+                    borderRadius: 999,
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                  }}
+                >
+                  <Text style={{ color: TEXT, fontWeight: "800", fontSize: 15, fontVariant: ["tabular-nums"] }}>
+                    {(distanceM / 1000).toFixed(2)} km
+                  </Text>
+                  <Text style={{ color: MUTED, fontWeight: "700" }}>·</Text>
+                  <Text style={{ color: TEXT, fontWeight: "800", fontSize: 15, fontVariant: ["tabular-nums"] }}>
+                    {formatDuration(elapsedS)}
+                  </Text>
+                  <Text style={{ color: MUTED, fontWeight: "700" }}>·</Text>
+                  <Text style={{ color: TEXT, fontWeight: "800", fontSize: 15, fontVariant: ["tabular-nums"] }}>
+                    {formatPace(livePaceSPerKm)}
+                  </Text>
+                </View>
+              )}
+              {/* Expand / collapse toggle */}
+              <Pressable
+                onPress={() => setMapMax((v) => !v)}
+                hitSlop={8}
+                accessibilityLabel={mapMax ? "Shrink map" : "Expand map"}
+                style={{
+                  position: "absolute",
+                  top: 10,
+                  left: 10,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: "rgba(15,23,42,0.85)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons name={mapMax ? "contract" : "expand"} size={18} color="#fff" />
+              </Pressable>
+            </View>
           ) : (
             <RouteTrace coords={route} times={times} height={170} live />
           ))}
@@ -336,21 +576,24 @@ export default function RecordRun() {
 
           {recording && (
             <>
-              {/* Opt-out: exclude this run from challenge progress. */}
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  backgroundColor: CARD,
-                  borderRadius: 14,
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                }}
-              >
-                <Text style={{ color: TEXT, fontSize: 14, flex: 1 }}>Count toward challenges</Text>
-                <Switch value={countToward} onValueChange={setCountToward} trackColor={{ true: ACCENT }} />
-              </View>
+              {/* Opt-out: exclude this run from challenge progress. (Hidden in
+                  fullscreen-map mode — it's a set-once toggle; collapse to reach it.) */}
+              {!mapMax && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    backgroundColor: CARD,
+                    borderRadius: 14,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                  }}
+                >
+                  <Text style={{ color: TEXT, fontSize: 14, flex: 1 }}>Count toward challenges</Text>
+                  <Switch value={countToward} onValueChange={setCountToward} trackColor={{ true: ACCENT }} />
+                </View>
+              )}
 
               <Pressable
                 onLongPress={onFinish}
@@ -359,9 +602,11 @@ export default function RecordRun() {
               >
                 <Text style={{ color: BG, fontSize: 17, fontWeight: "800", letterSpacing: 1 }}>HOLD TO FINISH</Text>
               </Pressable>
-              <Text style={{ color: MUTED, fontSize: 12, textAlign: "center", marginTop: -4 }}>
-                press and hold so a stray tap can't end your run
-              </Text>
+              {!mapMax && (
+                <Text style={{ color: MUTED, fontSize: 12, textAlign: "center", marginTop: -4 }}>
+                  press and hold so a stray tap can't end your run
+                </Text>
+              )}
               <Pressable onPress={onDiscard} hitSlop={8} style={{ alignSelf: "center", paddingVertical: 6 }}>
                 <Text style={{ color: MUTED, fontSize: 13, fontWeight: "700", textDecorationLine: "underline" }}>Discard run</Text>
               </Pressable>

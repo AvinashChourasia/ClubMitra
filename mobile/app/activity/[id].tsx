@@ -4,7 +4,7 @@
 // (no map tiles / API key), and show the full stat breakdown.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, Share, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Share, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,12 +26,12 @@ import { ElevationChart } from "../../components/ElevationChart";
 import { Tap } from "../../components/Tap";
 
 // react-native-maps is a native module absent from Expo Go, so we only pull it
-// in (and render the interactive map) in a dev/standalone build. Expo Go gets
-// the SVG RouteTrace fallback — which still draws the pace-coloured route.
-// Native map only on iOS builds (Apple Maps — free, no key). Android falls back
-// to the SVG RouteTrace, since Google Maps would require an API key + billing.
+// in (and render the interactive map) in a standalone build. Expo Go gets the
+// SVG RouteTrace fallback — which still draws the pace-coloured route.
+// Both platforms now: Apple Maps on iOS (no key), Google Maps on Android (the
+// API key ships in the manifest via app.json → android.config.googleMaps).
 const isExpoGo = Constants.appOwnership === "expo";
-const nativeMapAvailable = !isExpoGo && Platform.OS === "ios";
+const nativeMapAvailable = !isExpoGo;
 const RunMap:
   | React.ComponentType<{
       coords: LatLng[];

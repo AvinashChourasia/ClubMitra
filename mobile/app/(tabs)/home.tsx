@@ -235,7 +235,7 @@ export default function Home() {
           <TrackRunCard
             onPress={() => router.push("/activity/record")}
             title="Record your run"
-            subtitle="GPS route, pace, splits — counts for your clubs & challenges."
+            subtitle="Every km counts for your clubs & challenges."
           />
         )}
 
