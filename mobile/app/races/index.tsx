@@ -10,7 +10,6 @@ import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
 
 import { useAuth } from "../../lib/auth";
@@ -41,11 +40,12 @@ type Scope = "city" | "all" | "saved";
 // `expo.android.config.googleMaps.apiKey`. So we only offer the map view when
 // it can actually work: always on iOS, on Android only once a key is set. Add
 // the key and the toggle re-appears on Android automatically — no code change.
-const MAP_AVAILABLE =
-  Platform.OS === "ios" ||
-  // Only when a REAL Google Maps key is set (they start with "AIza") — a blank
-  // or placeholder value keeps the Android map gated off rather than blank.
-  (Constants.expoConfig?.android?.config?.googleMaps?.apiKey ?? "").startsWith("AIza");
+// The races map works on both native platforms: iOS uses Apple Maps (no key),
+// Android uses Google Maps via app.json → android.config.googleMaps.apiKey.
+// Gate on the PLATFORM, not the runtime config: Expo strips `android.config`
+// from Constants.expoConfig at runtime, so the key reads as undefined there even
+// though it's correctly baked into the native manifest (which is what matters).
+const MAP_AVAILABLE = Platform.OS === "ios" || Platform.OS === "android";
 
 export default function Races() {
   const { user, getAccessToken } = useAuth();
