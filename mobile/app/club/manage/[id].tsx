@@ -268,10 +268,11 @@ export default function ManageClub() {
               </View>
             )}
 
-            {/* Pending approvals */}
+            {/* Pending approvals — deep-link straight to the Members tab (a
+                plain /club/<id> push landed on the feed tab: a dead end). */}
             {pending > 0 && (
               <Pressable
-                onPress={() => router.replace(`/club/${id}`)}
+                onPress={() => router.push(`/club/${id}?tab=members`)}
                 style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.primarySoft, borderRadius: 14, padding: 14 }}
               >
                 <Ionicons name="person-add" size={20} color={colors.primary} />

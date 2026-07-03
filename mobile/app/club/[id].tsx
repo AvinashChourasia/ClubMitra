@@ -4,7 +4,7 @@
 // and soft-delete the club.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, ImageBackground, Pressable, RefreshControl, ScrollView, Share, Text, View } from "react-native";
+import { ActivityIndicator, Alert, ImageBackground, Modal, Pressable, RefreshControl, ScrollView, Share, Text, View } from "react-native";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
@@ -37,7 +37,7 @@ import { leaderboard, clubStanding, type BoardEntry, type ClubStanding, type Per
 import { chapterAnnouncements, type Message as MsgType } from "../../lib/messaging";
 import { chapterFeed, type FeedItem } from "../../lib/activities";
 import { formatDistance, formatPace } from "../../lib/format";
-import { colors, styles, useThemeMode } from "../../lib/theme";
+import { colors, radius, shadow, styles, useThemeMode } from "../../lib/theme";
 import { PAYMENTS_ENABLED } from "../../lib/flags";
 import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
@@ -297,7 +297,9 @@ function LeaderboardTab({ chapterId, meId, getToken }: { chapterId: string; meId
 
 
 export default function ClubDetail() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // ?tab=members lets the Manage screen's "Review ›" land directly on the
+  // member list (it used to dump admins on the feed tab — a dead end).
+  const { id, tab: tabParam } = useLocalSearchParams<{ id: string; tab?: string }>();
   const { user, getAccessToken } = useAuth();
   useThemeMode(); // subscribe for instant theme updates
   const router = useRouter();
@@ -309,7 +311,10 @@ export default function ClubDetail() {
   const [role, setRole] = useState<string | null>(null);
   const [myStatus, setMyStatus] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState<MsgType | null>(null);
-  const [tab, setTab] = useState<Tab>("feed");
+  const [tab, setTab] = useState<Tab>(tabParam === "members" ? "members" : "feed");
+  // The member being managed in the bottom sheet (replaces the old Alert menu —
+  // Android caps alerts at 3 buttons, which silently ate most admin actions).
+  const [memberSheet, setMemberSheet] = useState<Member | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -475,38 +480,12 @@ export default function ClubDetail() {
     })();
   }
 
+  // Opens the member-management bottom sheet. (This used to be an Alert.alert
+  // menu — Android shows at most 3 alert buttons, so "Set status", roles and
+  // more were silently invisible on the production platform.)
   function manageMember(m: Member) {
     if (!isAdmin || !chapter) return;
-    // Pending members get a single Approve action (not raw status changes).
-    if (m.status === "pending") {
-      Alert.alert(m.name, "Approve this join request?", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Approve", onPress: () => withToken((t) => approveMember(t, id, m.user_id)) },
-        { text: "Reject", style: "destructive", onPress: () => withToken((t) => removeMember(t, id, m.user_id)) },
-      ]);
-      return;
-    }
-    const buttons: { text: string; style?: "destructive" | "cancel"; onPress?: () => void }[] = [
-      {
-        text: "View attendance",
-        onPress: () => router.push(`/member/${m.user_id}?chapter=${id}&name=${encodeURIComponent(m.name)}` as Href),
-      },
-      ...MEMBER_STATUSES.filter((s) => s !== m.status).map((s) => ({
-        text: `Set ${s.replace("_", " ")}`,
-        onPress: () => withToken((t) => setMemberStatus(t, id, m.user_id, s)),
-      })),
-    ];
-    if (isOwner) {
-      buttons.push(
-        { text: "Make admin", onPress: () => withToken((t) => assignRole(t, chapter.org_id, m.user_id, "chapter_admin", id)) },
-        { text: "Make co-admin", onPress: () => withToken((t) => assignRole(t, chapter.org_id, m.user_id, "co_admin", id)) }
-      );
-    }
-    buttons.push(
-      { text: "Remove from club", style: "destructive", onPress: () => withToken((t) => removeMember(t, id, m.user_id)) },
-      { text: "Cancel", style: "cancel" }
-    );
-    Alert.alert(m.name, `Currently ${m.status}.`, buttons);
+    setMemberSheet(m);
   }
 
   return (
@@ -696,14 +675,20 @@ export default function ClubDetail() {
                     <>
                       {isAdmin &&
                         (() => {
-                          const pending = members.filter((m) => m.status === "pending").length;
-                          return pending > 0 ? (
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.primarySoft, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8 }}>
+                          const pendingMembers = members.filter((m) => m.status === "pending");
+                          return pendingMembers.length > 0 ? (
+                            // Actually tappable (it said "tap to review" but was a
+                            // plain View) — opens the first pending request.
+                            <Pressable
+                              onPress={() => setMemberSheet(pendingMembers[0])}
+                              style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.primarySoft, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 10, marginBottom: 8 }}
+                            >
                               <Ionicons name="person-add" size={15} color={colors.primary} />
-                              <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 13 }}>
-                                {pending} pending approval{pending === 1 ? "" : "s"} — tap to review
+                              <Text style={{ flex: 1, color: colors.primary, fontWeight: "800", fontSize: 13 }}>
+                                {pendingMembers.length} pending approval{pendingMembers.length === 1 ? "" : "s"} — tap to review
                               </Text>
-                            </View>
+                              <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+                            </Pressable>
                           ) : (
                             <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 4 }}>Tap a member to manage.</Text>
                           );
@@ -803,6 +788,144 @@ export default function ClubDetail() {
           </>
         ) : null}
       </ScrollView>
+
+      {/* Member management — a real bottom sheet (Android alerts cap at 3
+          buttons, which used to hide most of these actions). */}
+      <Modal visible={memberSheet !== null} animationType="slide" transparent onRequestClose={() => setMemberSheet(null)}>
+        <Pressable onPress={() => setMemberSheet(null)} style={{ flex: 1, backgroundColor: "rgba(2,6,23,0.45)" }} />
+        {memberSheet && (
+          <SafeAreaView edges={["bottom"]} style={{ backgroundColor: colors.bg, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, ...shadow.xl }}>
+            <View style={{ alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: colors.border, marginTop: 10 }} />
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 8, gap: 12 }} style={{ maxHeight: 520 }}>
+              {/* Who */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                <Avatar name={memberSheet.name} size={44} bg={colors.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.text, fontWeight: "800", fontSize: 17 }} numberOfLines={1}>{memberSheet.name}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12.5 }} numberOfLines={1}>{memberSheet.email}</Text>
+                </View>
+                <View style={{ backgroundColor: memberSheet.status === "pending" ? colors.primarySoft : colors.bgSecondary, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4 }}>
+                  <Text style={{ color: memberSheet.status === "pending" ? colors.primary : memberSheet.status === "active" ? colors.success : colors.muted, fontSize: 11.5, fontWeight: "800", textTransform: "capitalize" }}>
+                    {memberSheet.status.replace("_", " ")}
+                  </Text>
+                </View>
+              </View>
+
+              {memberSheet.status === "pending" ? (
+                /* Join request: the two decisions, front and centre. */
+                <View style={{ gap: 10 }}>
+                  <Text style={{ color: colors.muted, fontSize: 13.5 }}>Wants to join this club.</Text>
+                  <View style={{ flexDirection: "row", gap: 10 }}>
+                    <Pressable
+                      onPress={() => {
+                        const m = memberSheet;
+                        setMemberSheet(null);
+                        void withToken((t) => approveMember(t, id, m.user_id));
+                      }}
+                      style={{ flex: 1, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 7, backgroundColor: colors.success, borderRadius: 12, paddingVertical: 14 }}
+                    >
+                      <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                      <Text style={{ color: "#fff", fontWeight: "800", fontSize: 15 }}>Approve</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        const m = memberSheet;
+                        setMemberSheet(null);
+                        void withToken((t) => removeMember(t, id, m.user_id));
+                      }}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: colors.bg, borderWidth: 1.5, borderColor: colors.danger, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 18 }}
+                    >
+                      <Ionicons name="close-circle" size={18} color={colors.danger} />
+                      <Text style={{ color: colors.danger, fontWeight: "800", fontSize: 15 }}>Reject</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <>
+                  {/* Regular member: attendance, status, roles, remove */}
+                  <SheetRow
+                    icon="checkmark-done-circle-outline"
+                    label="View attendance"
+                    onPress={() => {
+                      const m = memberSheet;
+                      setMemberSheet(null);
+                      router.push(`/member/${m.user_id}?chapter=${id}&name=${encodeURIComponent(m.name)}` as Href);
+                    }}
+                  />
+                  <View>
+                    <Text style={{ color: colors.muted, fontSize: 12, fontWeight: "800", letterSpacing: 0.6, marginBottom: 8 }}>SET STATUS</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {MEMBER_STATUSES.filter((s) => s !== memberSheet.status).map((s) => (
+                        <Pressable
+                          key={s}
+                          onPress={() => {
+                            const m = memberSheet;
+                            setMemberSheet(null);
+                            void withToken((t) => setMemberStatus(t, id, m.user_id, s));
+                          }}
+                          style={{ backgroundColor: colors.bgSecondary, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: colors.border }}
+                        >
+                          <Text style={{ color: colors.text, fontWeight: "700", fontSize: 13, textTransform: "capitalize" }}>{s.replace("_", " ")}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                  {isOwner && chapter && (
+                    <>
+                      <SheetRow
+                        icon="shield-checkmark-outline"
+                        label="Make admin"
+                        onPress={() => {
+                          const m = memberSheet;
+                          setMemberSheet(null);
+                          void withToken((t) => assignRole(t, chapter.org_id, m.user_id, "chapter_admin", id));
+                        }}
+                      />
+                      <SheetRow
+                        icon="shield-half-outline"
+                        label="Make co-admin"
+                        onPress={() => {
+                          const m = memberSheet;
+                          setMemberSheet(null);
+                          void withToken((t) => assignRole(t, chapter.org_id, m.user_id, "co_admin", id));
+                        }}
+                      />
+                    </>
+                  )}
+                  <SheetRow
+                    icon="person-remove-outline"
+                    label="Remove from club"
+                    danger
+                    onPress={() => {
+                      const m = memberSheet;
+                      setMemberSheet(null);
+                      // Destructive: keep a confirm between tap and removal.
+                      Alert.alert("Remove from club?", m.name, [
+                        { text: "Cancel", style: "cancel" },
+                        { text: "Remove", style: "destructive", onPress: () => void withToken((t) => removeMember(t, id, m.user_id)) },
+                      ]);
+                    }}
+                  />
+                </>
+              )}
+            </ScrollView>
+          </SafeAreaView>
+        )}
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+// SheetRow — one action row in the member sheet.
+function SheetRow({ icon, label, onPress, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.divider }}
+    >
+      <Ionicons name={icon} size={19} color={danger ? colors.danger : colors.accent} />
+      <Text style={{ flex: 1, color: danger ? colors.danger : colors.text, fontWeight: "600", fontSize: 15 }}>{label}</Text>
+      <Ionicons name="chevron-forward" size={16} color={colors.subtle} />
+    </Pressable>
   );
 }
