@@ -288,7 +288,7 @@ export default function ManageClub() {
             <View style={styles.card}>
               <Text style={[styles.sectionTitle, { marginBottom: 2 }]}>Club tools</Text>
               <ToolRow icon="calendar-outline" label="Schedule a run" onPress={() => router.push(`/run/new?chapter_id=${id}`)} />
-              <ToolRow icon="megaphone-outline" label="Post an announcement" onPress={() => router.push(`/thread/club/${id}`)} />
+              <ToolRow icon="megaphone-outline" label="Post an announcement" onPress={() => router.push(`/thread/club/${id}?announce=1`)} />
               <ToolRow icon="create-outline" label="Edit club details" onPress={() => router.push(`/club/edit/${id}`)} />
               <ToolRow icon="cube-outline" label="Inventory" onPress={() => router.push(`/club/inventory/${id}`)} />
               {PAYMENTS_ENABLED && <ToolRow icon="card-outline" label="Plan & billing" onPress={() => router.push(`/club/billing/${id}`)} last={!isOwner} />}

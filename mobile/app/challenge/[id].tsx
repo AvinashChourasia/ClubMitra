@@ -45,6 +45,7 @@ import { pay } from "../../lib/payments";
 import { GradientCard } from "../../components/GradientCard";
 import { Ionicons } from "@expo/vector-icons";
 
+import { ErrorState } from "../../components/ErrorState";
 import { ProgressRing, useCountUp } from "../../components/ProgressRing";
 import { Podium3D } from "../../components/Podium3D";
 import { Confetti } from "../../components/Confetti";
@@ -96,6 +97,7 @@ export default function ChallengeDetail() {
       let active = true;
       (async () => {
         setLoading(true);
+        setError(null);
         try {
           await load();
         } catch (e) {
@@ -112,6 +114,18 @@ export default function ChallengeDetail() {
 
   if (!user) return <Redirect href="/login" />;
   if (!id) return <Redirect href="/challenges" />; // malformed deep link → back to the list
+
+  async function retry() {
+    setError(null);
+    setLoading(true);
+    try {
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function run(fn: (token: string) => Promise<unknown>) {
     setBusy(true);
@@ -201,8 +215,8 @@ export default function ChallengeDetail() {
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
-        ) : error ? (
-          <Text style={{ color: colors.danger }}>{error}</Text>
+        ) : error && !challenge ? (
+          <ErrorState message={error} onRetry={retry} retrying={loading} />
         ) : challenge ? (
           <>
             {/* ── Hero ─────────────────────────────────────────────── */}

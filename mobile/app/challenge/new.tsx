@@ -3,7 +3,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../lib/auth";
@@ -55,13 +55,15 @@ function endISO(dateStr: string): string {
 export default function NewChallenge() {
   const { getAccessToken } = useAuth();
   const router = useRouter();
+  // Arriving from a club's Challenges tab pre-scopes the form to that club.
+  const { chapter_id } = useLocalSearchParams<{ chapter_id?: string }>();
 
   const [title, setTitle] = useState("");
   const [type, setType] = useState<ChallengeType>("distance");
   const [target, setTarget] = useState("");
-  const [visibility, setVisibility] = useState<Visibility>("public");
+  const [visibility, setVisibility] = useState<Visibility>(chapter_id ? "chapter" : "public");
   const [city, setCity] = useState("");
-  const [chapterId, setChapterId] = useState<string | null>(null);
+  const [chapterId, setChapterId] = useState<string | null>(chapter_id ?? null);
   const [startDate, setStartDate] = useState(toDateStr(new Date()));
   const [length, setLength] = useState("30");
   const [joinFee, setJoinFee] = useState("");

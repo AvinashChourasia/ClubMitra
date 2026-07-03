@@ -61,7 +61,18 @@ import { ErrorState } from "./ErrorState";
 import { colors, styles } from "../lib/theme";
 
 type Staged = { uri: string; kind: "image" | "file"; name?: string; mime?: string };
-type Pending = { tempId: string; body?: string; localUri?: string; kind?: "image" | "file" | "audio"; name?: string; failed?: boolean };
+// Pending keeps the full outgoing payload so a failed bubble can be retried.
+type Pending = {
+  tempId: string;
+  body?: string;
+  localUri?: string;
+  kind?: "image" | "file" | "audio";
+  name?: string;
+  mime?: string;
+  replyToId?: string;
+  announce?: boolean;
+  failed?: boolean;
+};
 
 const REACTIONS = ["👍", "❤️", "😂", "🔥", "👏", "🎉"];
 
@@ -161,6 +172,8 @@ type Props = {
   edit?: (id: string, body: string) => Promise<void>;
   canAnnounce?: boolean;
   announce?: (body: string) => Promise<void>;
+  /** Start with announce mode ON (e.g. arriving via "Post an announcement"). */
+  initialAnnounceMode?: boolean;
   onSenderPress?: (senderId: string, senderName: string) => void;
   /** Create a poll (admins, club chats). Presence enables the Poll composer. */
   createPoll?: (input: { question: string; options: string[]; multi: boolean }) => Promise<void>;
@@ -173,7 +186,7 @@ type Props = {
 
 export function ChatThread({
   title, subtitle, avatarName, avatarUri, meId, isGroup, isDirect, otherLastReadAt,
-  load, send, uploadImage, uploadFile, deleteMessage, react, edit, canAnnounce, announce, onSenderPress,
+  load, send, uploadImage, uploadFile, deleteMessage, react, edit, canAnnounce, announce, initialAnnounceMode, onSenderPress,
   createPoll, voteOnPoll,
   realtime, getToken,
 }: Props) {
@@ -205,7 +218,7 @@ export function ChatThread({
   const rowYs = useRef<Record<string, number>>({});
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
-  const [announceMode, setAnnounceMode] = useState(false);
+  const [announceMode, setAnnounceMode] = useState(!!initialAnnounceMode);
   const [refreshing, setRefreshing] = useState(false);
   const [viewer, setViewer] = useState<string | null>(null);
   const [showJump, setShowJump] = useState(false);
@@ -350,6 +363,54 @@ export function ChatThread({
   }
 
   // --- send (optimistic) ---
+  // sendPending delivers one optimistic entry — used by onSend, sendVoice and
+  // Retry on a failed bubble (the entry keeps everything needed to re-send).
+  async function sendPending(p: Pending) {
+    try {
+      if (p.announce) {
+        await announce!(p.body ?? "");
+      } else {
+        let mediaUrl: string | undefined;
+        let mediaType: string | undefined;
+        if (p.kind === "image" && p.localUri && uploadImage) {
+          mediaUrl = await uploadImage(p.localUri);
+          mediaType = "image";
+        } else if (p.kind === "file" && p.localUri && uploadFile) {
+          mediaUrl = await uploadFile(p.localUri, p.name ?? "document", p.mime ?? "application/octet-stream");
+          mediaType = "file";
+        } else if (p.kind === "audio" && p.localUri && uploadFile) {
+          mediaUrl = await uploadFile(p.localUri, `voice-${Date.now()}.m4a`, "audio/m4a");
+          mediaType = "audio";
+        }
+        await send({ body: p.body, media_url: mediaUrl, media_type: mediaType, reply_to_id: p.replyToId });
+      }
+      const msgs = await load();
+      countRef.current = msgs.length;
+      setMessages(msgs);
+      setPending((prev) => prev.filter((x) => x.tempId !== p.tempId));
+      scrollEnd(true);
+    } catch (e) {
+      setPending((prev) => prev.map((x) => (x.tempId === p.tempId ? { ...x, failed: true } : x)));
+      Alert.alert("Couldn't send", e instanceof ApiError ? e.message : "Something went wrong");
+    }
+  }
+
+  // A failed bubble is tappable: Retry re-sends the stored payload, Discard
+  // drops the entry.
+  function onFailedPress(p: Pending) {
+    Alert.alert("Message not sent", undefined, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Discard", style: "destructive", onPress: () => setPending((prev) => prev.filter((x) => x.tempId !== p.tempId)) },
+      {
+        text: "Retry",
+        onPress: () => {
+          setPending((prev) => prev.map((x) => (x.tempId === p.tempId ? { ...x, failed: false } : x)));
+          void sendPending(p);
+        },
+      },
+    ]);
+  }
+
   async function onSend() {
     const body = text.trim();
     if (!body && !staged) return;
@@ -370,39 +431,24 @@ export function ChatThread({
     const cap = staged;
     const quote = replyTo;
     const isAnnounce = announceMode && !!announce && !cap;
-    const tempId = `tmp-${seq.current++}`;
+    const p: Pending = {
+      tempId: `tmp-${seq.current++}`,
+      body: body || undefined,
+      localUri: cap?.uri,
+      kind: cap?.kind,
+      name: cap?.name,
+      mime: cap?.mime,
+      replyToId: quote?.id,
+      announce: isAnnounce || undefined,
+    };
 
-    setPending((p) => [...p, { tempId, body: body || undefined, localUri: cap?.uri, kind: cap?.kind, name: cap?.name }]);
+    setPending((prev) => [...prev, p]);
     setText("");
     setStaged(null);
     setReplyTo(null);
     setAnnounceMode(false);
     scrollEnd(true);
-
-    try {
-      if (isAnnounce) {
-        await announce!(body);
-      } else {
-        let mediaUrl: string | undefined;
-        let mediaType: string | undefined;
-        if (cap?.kind === "image" && uploadImage) {
-          mediaUrl = await uploadImage(cap.uri);
-          mediaType = "image";
-        } else if (cap?.kind === "file" && uploadFile) {
-          mediaUrl = await uploadFile(cap.uri, cap.name ?? "document", cap.mime ?? "application/octet-stream");
-          mediaType = "file";
-        }
-        await send({ body: body || undefined, media_url: mediaUrl, media_type: mediaType, reply_to_id: quote?.id });
-      }
-      const msgs = await load();
-      countRef.current = msgs.length;
-      setMessages(msgs);
-      setPending((p) => p.filter((x) => x.tempId !== tempId));
-      scrollEnd(true);
-    } catch (e) {
-      setPending((p) => p.map((x) => (x.tempId === tempId ? { ...x, failed: true } : x)));
-      Alert.alert("Couldn't send", e instanceof ApiError ? e.message : "Something went wrong");
-    }
+    await sendPending(p);
   }
 
   function onTextChange(v: string) {
@@ -531,9 +577,17 @@ export function ChatThread({
 
   function doDelete(m: Message) {
     setActionFor(null);
-    deleteMessage?.(m.id)
-      .then(() => reload(false))
-      .catch((e) => Alert.alert("Couldn't delete", e instanceof ApiError ? e.message : "Something went wrong"));
+    Alert.alert("Delete for everyone?", undefined, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () =>
+          deleteMessage?.(m.id)
+            .then(() => reload(false))
+            .catch((e) => Alert.alert("Couldn't delete", e instanceof ApiError ? e.message : "Something went wrong")),
+      },
+    ]);
   }
 
   // --- voice notes ---
@@ -572,21 +626,10 @@ export function ChatThread({
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
     if (!uri || !uploadFile) return;
 
-    const tempId = `tmp-${seq.current++}`;
-    setPending((p) => [...p, { tempId, localUri: uri!, kind: "audio" }]);
+    const p: Pending = { tempId: `tmp-${seq.current++}`, localUri: uri, kind: "audio" };
+    setPending((prev) => [...prev, p]);
     scrollEnd(true);
-    try {
-      const mediaUrl = await uploadFile(uri, `voice-${Date.now()}.m4a`, "audio/m4a");
-      await send({ media_url: mediaUrl, media_type: "audio" });
-      const msgs = await load();
-      countRef.current = msgs.length;
-      setMessages(msgs);
-      setPending((p) => p.filter((x) => x.tempId !== tempId));
-      scrollEnd(true);
-    } catch (e) {
-      setPending((p) => p.map((x) => (x.tempId === tempId ? { ...x, failed: true } : x)));
-      Alert.alert("Couldn't send", e instanceof ApiError ? e.message : "Something went wrong");
-    }
+    await sendPending(p);
   }
 
   // --- per-message info (read receipts) ---
@@ -671,7 +714,9 @@ export function ChatThread({
           </Pressable>
         )}
         {isImage ? (
-          <Pressable onPress={() => opts.mediaUrl && setViewer(opts.mediaUrl)}>
+          // disabled when there's no remote URL (pending bubbles) so the tap
+          // falls through to the failed-message handler.
+          <Pressable disabled={!opts.mediaUrl} onPress={() => opts.mediaUrl && setViewer(opts.mediaUrl)}>
             <Image source={{ uri: imgUri! }} style={{ width: 216, height: 216, borderRadius: 15 }} resizeMode="cover" />
           </Pressable>
         ) : null}
@@ -680,6 +725,7 @@ export function ChatThread({
         ) : null}
         {isFile ? (
           <Pressable
+            disabled={!opts.mediaUrl}
             onPress={() => opts.mediaUrl && Linking.openURL(opts.mediaUrl)}
             style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 8 }}
           >
@@ -896,11 +942,20 @@ export function ChatThread({
               })
             )}
 
-            {/* Optimistic (pending) messages — always mine, shown at the bottom. */}
+            {/* Optimistic (pending) messages — always mine, shown at the bottom.
+                A failed one is tappable → Retry / Discard. */}
             {pending.map((p) => (
-              <View key={p.tempId} style={{ alignSelf: "flex-end", maxWidth: "80%", marginTop: 2, opacity: p.failed ? 0.9 : 0.75 }}>
+              <Pressable
+                key={p.tempId}
+                disabled={!p.failed}
+                onPress={() => onFailedPress(p)}
+                style={{ alignSelf: "flex-end", maxWidth: "80%", marginTop: 2, opacity: p.failed ? 0.9 : 0.75 }}
+              >
                 {bubble(true, { body: p.body, localUri: p.localUri, kind: p.kind, name: p.name, replyTo: replyTo ? { sender_name: replyTo.sender_name, preview: replyTo.body ?? "…" } : null }, "", p.failed ? "failed" : "sending")}
-              </View>
+                {p.failed && (
+                  <Text style={{ color: colors.danger, fontSize: 11, fontWeight: "700", textAlign: "right", marginTop: 3 }}>Not sent — tap for options</Text>
+                )}
+              </Pressable>
             ))}
           </ScrollView>
         )}

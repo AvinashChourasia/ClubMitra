@@ -3,7 +3,7 @@
 // the new, already-logged-in user home. Everything except t-shirt size is
 // required — the backend enforces the same.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, type Href } from "expo-router";
@@ -37,6 +37,10 @@ export default function Register() {
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+  const phoneRef = useRef<TextInput>(null);
 
   // A guest arriving from Welcome/Explore already told us their city — prefill.
   useEffect(() => {
@@ -124,8 +128,18 @@ export default function Register() {
             </View>
           </View>
 
-          <TextInput style={styles.input} placeholder="Full name" placeholderTextColor={colors.muted} value={name} onChangeText={setName} />
           <TextInput
+            style={styles.input}
+            placeholder="Full name"
+            placeholderTextColor={colors.muted}
+            value={name}
+            onChangeText={setName}
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => emailRef.current?.focus()}
+          />
+          <TextInput
+            ref={emailRef}
             style={styles.input}
             placeholder="Email"
             placeholderTextColor={colors.muted}
@@ -134,19 +148,27 @@ export default function Register() {
             keyboardType="email-address"
             value={email}
             onChangeText={setEmail}
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => passwordRef.current?.focus()}
           />
           <TextInput
+            ref={passwordRef}
             style={styles.input}
             placeholder="Password (min 8 characters)"
             placeholderTextColor={colors.muted}
             secureTextEntry
             value={password}
             onChangeText={setPassword}
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => phoneRef.current?.focus()}
           />
 
           {/* Two-up: phone + age share a row to keep the form in one frame. */}
           <View style={{ flexDirection: "row", gap: 10 }}>
             <TextInput
+              ref={phoneRef}
               style={[styles.input, { flex: 1.4 }]}
               placeholder="Phone"
               placeholderTextColor={colors.muted}
@@ -176,7 +198,7 @@ export default function Register() {
 
           <Button label="Create account" onPress={onSubmit} loading={submitting} />
 
-          <Tap onPress={() => router.back()} haptic={false}>
+          <Tap onPress={() => router.push("/login")} haptic={false}>
             <Text style={styles.link}>Already have an account? Log in</Text>
           </Tap>
         </ScrollView>

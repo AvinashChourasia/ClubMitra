@@ -5,7 +5,7 @@
 // the list refreshes the moment a message lands anywhere.
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Swipeable } from "react-native-gesture-handler";
@@ -141,7 +141,7 @@ export default function Chat() {
       await setChatPrefs(token, kind, id, prefs);
       await load();
     } catch {
-      /* row stays as-is */
+      Alert.alert("Couldn't update", "Check your connection and try again.");
     }
   }
 

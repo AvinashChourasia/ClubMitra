@@ -11,7 +11,8 @@ import { uploadChatImage, uploadChatFile } from "../../../lib/upload";
 import { ChatThread } from "../../../components/ChatThread";
 
 export default function ClubGroupChat() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // ?announce=1 ("Post an announcement" entry points) opens with announce mode on.
+  const { id, announce: announceParam } = useLocalSearchParams<{ id: string; announce?: string }>();
   const { user, getAccessToken } = useAuth();
   const router = useRouter();
 
@@ -108,6 +109,7 @@ export default function ClubGroupChat() {
       getToken={getAccessToken}
       canAnnounce={isAdmin}
       announce={announce}
+      initialAnnounceMode={announceParam === "1"}
       createPoll={isAdmin ? makePoll : undefined}
       voteOnPoll={vote}
       onSenderPress={(senderId) => {

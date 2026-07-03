@@ -5,7 +5,7 @@
 // a rotating code means a forwarded screenshot is dead within seconds.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, BackHandler, Pressable, ScrollView, Text, View } from "react-native";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -27,6 +27,7 @@ export default function CheckinHost() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [code, setCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selfBusy, setSelfBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const codeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const open = run?.checkin_open ?? false;
@@ -109,6 +110,29 @@ export default function CheckinHost() {
     };
   }, [id]);
 
+  // Leaving while check-in is open closes it (see the unmount effect above) —
+  // say so instead of doing it silently.
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/home");
+  }, [router]);
+  const confirmLeave = useCallback(() => {
+    Alert.alert("Close check-in and leave?", "Members will no longer be able to mark themselves present.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Leave", style: "destructive", onPress: goBack },
+    ]);
+  }, [goBack]);
+
+  // Android hardware back gets the same confirm while check-in is open.
+  useEffect(() => {
+    if (!open) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      confirmLeave();
+      return true;
+    });
+    return () => sub.remove();
+  }, [open, confirmLeave]);
+
   if (!user) return <Redirect href="/login" />;
 
   async function toggle(next: boolean) {
@@ -129,7 +153,7 @@ export default function CheckinHost() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40, alignItems: "center" }}>
         <View style={{ flexDirection: "row", alignItems: "center", alignSelf: "stretch", gap: 8 }}>
-          <Tap onPress={() => (router.canGoBack() ? router.back() : router.replace("/home"))} hitSlop={12} haptic={false} style={{ marginLeft: -8, padding: 6 }}>
+          <Tap onPress={() => (open ? confirmLeave() : goBack())} hitSlop={12} haptic={false} style={{ marginLeft: -8, padding: 6 }}>
             <Ionicons name="chevron-back" size={28} color={colors.text} />
           </Tap>
           <View style={{ flex: 1 }}>
@@ -192,20 +216,30 @@ export default function CheckinHost() {
               <Tap
                 onPress={async () => {
                   if (!code) return;
+                  setSelfBusy(true);
                   try {
                     const token = await getAccessToken();
                     if (token) {
                       await checkIn(token, id, { code });
                       await refreshRoster();
                     }
-                  } catch {
-                    /* ignore — they can retry */
+                  } catch (e) {
+                    Alert.alert("Couldn't check you in", e instanceof ApiError ? e.message : "Something went wrong");
+                  } finally {
+                    setSelfBusy(false);
                   }
                 }}
-                style={{ alignSelf: "stretch", flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 7, backgroundColor: colors.success, borderRadius: 14, paddingVertical: 13 }}
+                disabled={selfBusy}
+                style={{ alignSelf: "stretch", flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 7, backgroundColor: colors.success, borderRadius: 14, paddingVertical: 13, opacity: selfBusy ? 0.6 : 1 }}
               >
-                <Ionicons name="checkmark-circle" size={17} color="#fff" />
-                <Text style={{ color: "#fff", fontWeight: "800" }}>Mark me here too</Text>
+                {selfBusy ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle" size={17} color="#fff" />
+                    <Text style={{ color: "#fff", fontWeight: "800" }}>Mark me here too</Text>
+                  </>
+                )}
               </Tap>
             )}
 

@@ -71,7 +71,7 @@ export function useJoinGate() {
             : res.status === "pending_payment"
               ? `${club.name} has a membership fee — open the club to pay and activate.`
               : `${club.name} reviews join requests — you'll be in once an admin approves.`,
-          [{ text: "Open club", onPress: () => router.push(`/club/${club.id}`) }, { text: "OK" }]
+          [{ text: "OK", style: "cancel" }, { text: "Open club", onPress: () => router.push(`/club/${club.id}`) }]
         );
       } catch (e) {
         Alert.alert("Couldn't join", e instanceof Error ? e.message : "Try again.");
@@ -95,8 +95,8 @@ export function useJoinGate() {
         if (!token) return;
         await joinChallenge(token, ch.id);
         Alert.alert("You're in! 🏁", `${ch.title} — go log those runs.`, [
+          { text: "OK", style: "cancel" },
           { text: "Open challenge", onPress: () => router.push(`/challenge/${ch.id}`) },
-          { text: "OK" },
         ]);
       } catch (e) {
         Alert.alert("Couldn't join", e instanceof Error ? e.message : "Try again.");
@@ -165,9 +165,23 @@ function endDateLabel(iso: string): string {
 }
 
 // PublicChallengeCard: one public challenge row — goal, window, joined count.
+// Tap anywhere to open the challenge; guests get their intent stashed and go
+// through signup first (same deferral as the Join button).
 export function PublicChallengeCard({ challenge: ch, joiningId, onJoin }: { challenge: PublicChallenge; joiningId: string | null; onJoin: (c: PublicChallenge) => void }) {
+  const { user } = useAuth();
+  const router = useRouter();
   return (
-    <View style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 10 }]}>
+    <Tap
+      onPress={async () => {
+        if (!user) {
+          await setPendingIntent({ type: "join_challenge", id: ch.id, name: ch.title });
+          router.push("/register");
+          return;
+        }
+        router.push(`/challenge/${ch.id}`);
+      }}
+      style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 10 }]}
+    >
       <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
         <Ionicons name={challengeIcon(ch.type)} size={20} color={colors.primary} />
       </View>
@@ -178,7 +192,7 @@ export function PublicChallengeCard({ challenge: ch, joiningId, onJoin }: { chal
         </Text>
       </View>
       <JoinButton joining={joiningId === ch.id} onPress={() => onJoin(ch)} />
-    </View>
+    </Tap>
   );
 }
 

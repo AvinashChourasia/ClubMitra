@@ -103,7 +103,7 @@ export default function Explore() {
           : res.status === "pending_payment"
             ? `${club.name} has a membership fee — open the club to pay and activate.`
             : `${club.name} reviews join requests — you'll be in once an admin approves.`,
-        [{ text: "Open club", onPress: () => router.push(`/club/${club.id}`) }, { text: "OK" }]
+        [{ text: "OK", style: "cancel" }, { text: "Open club", onPress: () => router.push(`/club/${club.id}`) }]
       );
     } catch (e) {
       Alert.alert("Couldn't join", e instanceof Error ? e.message : "Try again.");
@@ -124,8 +124,8 @@ export default function Explore() {
       if (!token) return;
       await joinChallenge(token, ch.id);
       Alert.alert("You're in! 🏁", `${ch.title} — go log those runs.`, [
+        { text: "OK", style: "cancel" },
         { text: "Open challenge", onPress: () => router.push(`/challenge/${ch.id}`) },
-        { text: "OK" },
       ]);
     } catch (e) {
       Alert.alert("Couldn't join", e instanceof Error ? e.message : "Try again.");
@@ -273,7 +273,12 @@ export default function Explore() {
           <EmptyState icon="flag" title="No challenges found" body="Try a different search, type, or city." />
         ) : (
           challenges!.map((ch) => (
-            <View key={ch.id} style={[styles.card, { gap: 8 }]}>
+            <Tap
+              key={ch.id}
+              haptic={false}
+              onPress={() => router.push(`/challenge/${ch.id}` as Href)}
+              style={[styles.card, { gap: 8 }]}
+            >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
                   <Ionicons name={ch.type === "distance" ? "speedometer" : ch.type === "streak" ? "flame" : "calendar"} size={20} color={colors.primary} />
@@ -292,7 +297,7 @@ export default function Explore() {
                   <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>{joining === ch.id ? "Joining…" : "Join"}</Text>
                 </Tap>
               </View>
-            </View>
+            </Tap>
           ))
         )}
       </ScrollView>

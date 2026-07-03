@@ -10,6 +10,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import * as Updates from "expo-updates";
+import * as Clipboard from "expo-clipboard";
 
 import { useAuth } from "../lib/auth";
 import { ApiError, request } from "../lib/api";
@@ -290,7 +291,13 @@ export default function Settings() {
   function sendFeedback() {
     const body = `\n\n\n— — —\nApp: ClubMitra v${appVersion} (${buildTag})\nPlatform: ${Platform.OS}\nBackend: ${backend}\nUser: ${user?.email ?? ""}`;
     const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent("ClubMitra feedback")}&body=${encodeURIComponent(body)}`;
-    Linking.openURL(url).catch(() => {});
+    Linking.openURL(url).catch(() => {
+      // No mail app on this device — hand over the address instead.
+      Alert.alert("No mail app found", `Send your feedback to ${FEEDBACK_EMAIL}.`, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Copy address", onPress: () => void Clipboard.setStringAsync(FEEDBACK_EMAIL) },
+      ]);
+    });
   }
 
   if (!user) return <Redirect href="/login" />;
@@ -369,7 +376,12 @@ export default function Settings() {
 
         {/* Logout */}
         <Pressable
-          onPress={logout}
+          onPress={() =>
+            Alert.alert("Log out?", "You'll need your password to log back in.", [
+              { text: "Cancel", style: "cancel" },
+              { text: "Log out", style: "destructive", onPress: () => void logout() },
+            ])
+          }
           style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, borderRadius: 14, paddingVertical: 15, alignItems: "center" }}
         >
           <Text style={{ color: colors.danger, fontWeight: "700", fontSize: 15 }}>Log out</Text>

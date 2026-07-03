@@ -102,6 +102,7 @@ export default function RootLayout() {
         href = `/u/${data.user_id}`; // open the new follower's profile
       } else if (data.run_id) href = `/run/${data.run_id}`;
       else if (data.challenge_id) href = `/challenge/${data.challenge_id}`;
+      else if (data.type === "join_request" && data.chapter_id) href = `/club/${data.chapter_id}?tab=members`; // land the admin on the pending request
       else if (data.chapter_id) href = `/club/${data.chapter_id}`;
       if (!href) return;
 

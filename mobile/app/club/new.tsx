@@ -10,8 +10,10 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Switch,
   Text,
   TextInput,
+  View,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -95,7 +97,20 @@ export default function NewClub() {
             onChangeText={setDescription}
           />
 
-          {PAYMENTS_ENABLED && <ClubFeeFields value={fee} onChange={setFee} />}
+          {/* Approval is a membership setting, not a payments one — always shown.
+              ClubFeeFields already includes this toggle, so it only renders inline
+              when the fee fields are flagged off. */}
+          {PAYMENTS_ENABLED ? (
+            <ClubFeeFields value={fee} onChange={setFee} />
+          ) : (
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fieldLabel}>Require admin approval</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>New members wait for an admin to approve them.</Text>
+              </View>
+              <Switch value={fee.requiresApproval} onValueChange={(v) => setFee({ ...fee, requiresApproval: v })} trackColor={{ true: colors.primary }} />
+            </View>
+          )}
 
           {error && <Text style={styles.error}>{error}</Text>}
 

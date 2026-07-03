@@ -2,7 +2,7 @@
 // backend), and on success the auth gate (index.tsx) routes the now-logged-in
 // user home. New runners create an account on the register screen.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -27,6 +27,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
 
   async function onSubmit() {
     setError(null);
@@ -78,14 +79,20 @@ export default function Login() {
           keyboardType="email-address"
           value={email}
           onChangeText={setEmail}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => passwordRef.current?.focus()}
         />
         <TextInput
+          ref={passwordRef}
           style={styles.input}
           placeholder="Password"
           placeholderTextColor={colors.muted}
           secureTextEntry
           value={password}
           onChangeText={setPassword}
+          returnKeyType="go"
+          onSubmitEditing={onSubmit}
         />
 
         {error && <Text style={styles.error}>{error}</Text>}

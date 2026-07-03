@@ -49,6 +49,9 @@ type Tab = "feed" | "members" | "schedule" | "challenges" | "leaderboard";
 
 const MEDAL = ["#FACC15", "#CBD5E1", "#D8965B"]; // gold / silver / bronze
 
+// Placeholder — update when the final distribution link (APK/store) is live.
+const APP_DOWNLOAD_URL = "https://clubmitra.app";
+
 // timeAgo renders a feed timestamp the way people read it ("2h ago").
 function timeAgo(iso: string): string {
   const t = new Date(iso).getTime();
@@ -315,6 +318,9 @@ export default function ClubDetail() {
   // The member being managed in the bottom sheet (replaces the old Alert menu —
   // Android caps alerts at 3 buttons, which silently ate most admin actions).
   const [memberSheet, setMemberSheet] = useState<Member | null>(null);
+  // Which sheet action is in flight (e.g. "approve", a status key). While set,
+  // the sheet stays open with a spinner on that row and everything disabled.
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -436,18 +442,30 @@ export default function ClubDetail() {
 
   async function shareInvite() {
     if (!chapter) return;
-    await Share.share({ message: `Join ${chapter.name} on ClubMitra! Use invite code ${chapter.invite_code} in the app.` });
+    await Share.share({ message: `Join ${chapter.name} on ClubMitra! Use invite code ${chapter.invite_code} in the app. Get the app: ${APP_DOWNLOAD_URL}` });
   }
 
-  async function withToken(fn: (token: string) => Promise<unknown>) {
+  async function withToken(fn: (token: string) => Promise<unknown>): Promise<boolean> {
     try {
       const token = await getAccessToken();
       await fn(token!);
       await load();
+      return true;
     } catch (e) {
       Alert.alert("Couldn't do that", e instanceof ApiError ? e.message : "Something went wrong");
       await load().catch(() => {}); // re-sync the list even on error (e.g. member already removed)
+      return false;
     }
+  }
+
+  // Runs one member-sheet action: the sheet stays open (spinner on the active
+  // row, everything else disabled) until the call resolves, then closes.
+  async function runSheetAction(label: string, fn: (token: string) => Promise<unknown>): Promise<boolean> {
+    setBusyLabel(label);
+    const ok = await withToken(fn);
+    setBusyLabel(null);
+    setMemberSheet(null);
+    return ok;
   }
 
   // Real payment via Razorpay's hosted checkout (dormant until the backend has
@@ -624,7 +642,7 @@ export default function ClubDetail() {
             {/* Admins: post an announcement (also pushes to members). */}
             {isAdmin && (
               <Pressable
-                onPress={() => router.push(`/thread/club/${id}` as Href)}
+                onPress={() => router.push(`/thread/club/${id}?announce=1` as Href)}
                 style={{ flexDirection: "row", alignItems: "center", gap: 7, alignSelf: "flex-start" }}
               >
                 <Ionicons name="add-circle-outline" size={16} color={colors.accent} />
@@ -752,7 +770,7 @@ export default function ClubDetail() {
               <>
                 {isAdmin && (
                   <Pressable
-                    onPress={() => router.push("/challenge/new")}
+                    onPress={() => router.push(`/challenge/new?chapter_id=${id}`)}
                     style={{ backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, alignItems: "center" }}
                   >
                     <Text style={{ color: "#fff", fontWeight: "700" }}>+ New challenge</Text>
@@ -791,8 +809,8 @@ export default function ClubDetail() {
 
       {/* Member management — a real bottom sheet (Android alerts cap at 3
           buttons, which used to hide most of these actions). */}
-      <Modal visible={memberSheet !== null} animationType="slide" transparent onRequestClose={() => setMemberSheet(null)}>
-        <Pressable onPress={() => setMemberSheet(null)} style={{ flex: 1, backgroundColor: "rgba(2,6,23,0.45)" }} />
+      <Modal visible={memberSheet !== null} animationType="slide" transparent onRequestClose={() => { if (!busyLabel) setMemberSheet(null); }}>
+        <Pressable onPress={() => { if (!busyLabel) setMemberSheet(null); }} style={{ flex: 1, backgroundColor: "rgba(2,6,23,0.45)" }} />
         {memberSheet && (
           <SafeAreaView edges={["bottom"]} style={{ backgroundColor: colors.bg, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, ...shadow.xl }}>
             <View style={{ alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: colors.border, marginTop: 10 }} />
@@ -817,25 +835,39 @@ export default function ClubDetail() {
                   <Text style={{ color: colors.muted, fontSize: 13.5 }}>Wants to join this club.</Text>
                   <View style={{ flexDirection: "row", gap: 10 }}>
                     <Pressable
+                      disabled={busyLabel !== null}
                       onPress={() => {
                         const m = memberSheet;
-                        setMemberSheet(null);
-                        void withToken((t) => approveMember(t, id, m.user_id));
+                        void runSheetAction("approve", (t) => approveMember(t, id, m.user_id)).then((ok) => {
+                          if (ok) Alert.alert("Approved", `${m.name} is now a member.`);
+                        });
                       }}
-                      style={{ flex: 1, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 7, backgroundColor: colors.success, borderRadius: 12, paddingVertical: 14 }}
+                      style={{ flex: 1, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 7, backgroundColor: colors.success, borderRadius: 12, paddingVertical: 14, opacity: busyLabel && busyLabel !== "approve" ? 0.5 : 1 }}
                     >
-                      <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                      {busyLabel === "approve" ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                      )}
                       <Text style={{ color: "#fff", fontWeight: "800", fontSize: 15 }}>Approve</Text>
                     </Pressable>
                     <Pressable
+                      disabled={busyLabel !== null}
                       onPress={() => {
                         const m = memberSheet;
-                        setMemberSheet(null);
-                        void withToken((t) => removeMember(t, id, m.user_id));
+                        // Destructive: confirm before turning the request down.
+                        Alert.alert(`Reject ${m.name}'s request?`, undefined, [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "Reject", style: "destructive", onPress: () => void runSheetAction("reject", (t) => removeMember(t, id, m.user_id)) },
+                        ]);
                       }}
-                      style={{ flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: colors.bg, borderWidth: 1.5, borderColor: colors.danger, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 18 }}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: colors.bg, borderWidth: 1.5, borderColor: colors.danger, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 18, opacity: busyLabel && busyLabel !== "reject" ? 0.5 : 1 }}
                     >
-                      <Ionicons name="close-circle" size={18} color={colors.danger} />
+                      {busyLabel === "reject" ? (
+                        <ActivityIndicator size="small" color={colors.danger} />
+                      ) : (
+                        <Ionicons name="close-circle" size={18} color={colors.danger} />
+                      )}
                       <Text style={{ color: colors.danger, fontWeight: "800", fontSize: 15 }}>Reject</Text>
                     </Pressable>
                   </View>
@@ -846,6 +878,7 @@ export default function ClubDetail() {
                   <SheetRow
                     icon="checkmark-done-circle-outline"
                     label="View attendance"
+                    disabled={busyLabel !== null}
                     onPress={() => {
                       const m = memberSheet;
                       setMemberSheet(null);
@@ -858,13 +891,14 @@ export default function ClubDetail() {
                       {MEMBER_STATUSES.filter((s) => s !== memberSheet.status).map((s) => (
                         <Pressable
                           key={s}
+                          disabled={busyLabel !== null}
                           onPress={() => {
                             const m = memberSheet;
-                            setMemberSheet(null);
-                            void withToken((t) => setMemberStatus(t, id, m.user_id, s));
+                            void runSheetAction(s, (t) => setMemberStatus(t, id, m.user_id, s));
                           }}
-                          style={{ backgroundColor: colors.bgSecondary, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: colors.border }}
+                          style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.bgSecondary, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: colors.border, opacity: busyLabel && busyLabel !== s ? 0.5 : 1 }}
                         >
+                          {busyLabel === s && <ActivityIndicator size="small" color={colors.primary} />}
                           <Text style={{ color: colors.text, fontWeight: "700", fontSize: 13, textTransform: "capitalize" }}>{s.replace("_", " ")}</Text>
                         </Pressable>
                       ))}
@@ -875,19 +909,21 @@ export default function ClubDetail() {
                       <SheetRow
                         icon="shield-checkmark-outline"
                         label="Make admin"
+                        busy={busyLabel === "make_admin"}
+                        disabled={busyLabel !== null}
                         onPress={() => {
                           const m = memberSheet;
-                          setMemberSheet(null);
-                          void withToken((t) => assignRole(t, chapter.org_id, m.user_id, "chapter_admin", id));
+                          void runSheetAction("make_admin", (t) => assignRole(t, chapter.org_id, m.user_id, "chapter_admin", id));
                         }}
                       />
                       <SheetRow
                         icon="shield-half-outline"
                         label="Make co-admin"
+                        busy={busyLabel === "make_coadmin"}
+                        disabled={busyLabel !== null}
                         onPress={() => {
                           const m = memberSheet;
-                          setMemberSheet(null);
-                          void withToken((t) => assignRole(t, chapter.org_id, m.user_id, "co_admin", id));
+                          void runSheetAction("make_coadmin", (t) => assignRole(t, chapter.org_id, m.user_id, "co_admin", id));
                         }}
                       />
                     </>
@@ -896,6 +932,7 @@ export default function ClubDetail() {
                     icon="person-remove-outline"
                     label="Remove from club"
                     danger
+                    disabled={busyLabel !== null}
                     onPress={() => {
                       const m = memberSheet;
                       setMemberSheet(null);
@@ -917,15 +954,16 @@ export default function ClubDetail() {
 }
 
 // SheetRow — one action row in the member sheet.
-function SheetRow({ icon, label, onPress, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean }) {
+function SheetRow({ icon, label, onPress, danger, busy, disabled }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean; busy?: boolean; disabled?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
-      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.divider }}
+      disabled={disabled}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.divider, opacity: disabled && !busy ? 0.5 : 1 }}
     >
       <Ionicons name={icon} size={19} color={danger ? colors.danger : colors.accent} />
       <Text style={{ flex: 1, color: danger ? colors.danger : colors.text, fontWeight: "600", fontSize: 15 }}>{label}</Text>
-      <Ionicons name="chevron-forward" size={16} color={colors.subtle} />
+      {busy ? <ActivityIndicator size="small" color={colors.accent} /> : <Ionicons name="chevron-forward" size={16} color={colors.subtle} />}
     </Pressable>
   );
 }

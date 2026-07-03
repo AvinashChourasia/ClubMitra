@@ -129,6 +129,7 @@ export default function ActivityDetail() {
         "Couldn't share the image",
         e instanceof Error ? e.message : "Something went wrong.",
         [
+          { text: "Cancel", style: "cancel" },
           {
             text: "Share as text",
             onPress: () => {
@@ -136,7 +137,6 @@ export default function ActivityDetail() {
               void shareText();
             },
           },
-          { text: "Cancel", style: "cancel" },
         ]
       );
     } finally {

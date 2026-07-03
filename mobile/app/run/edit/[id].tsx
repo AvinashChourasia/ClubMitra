@@ -3,7 +3,7 @@
 // changes just this one run.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -61,6 +61,7 @@ export default function EditRun() {
   async function onSave() {
     setError(null);
     if (!title.trim()) return setError("Enter a title.");
+    if (distance.trim() && !Number.isFinite(Number(distance))) return setError("Enter the distance in km, numbers only.");
     const [y, m, d] = date.split("-").map(Number);
     const [hh, mm] = time ? time.split(":").map(Number) : [0, 0];
     const scheduledAt = new Date(y, m - 1, d, hh, mm, 0).toISOString();
@@ -94,41 +95,43 @@ export default function EditRun() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Edit run</Text>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
+          <Text style={styles.title}>Edit run</Text>
 
-        <Text style={styles.fieldLabel}>Title</Text>
-        <TextInput style={styles.input} placeholder="Title" placeholderTextColor={colors.muted} value={title} onChangeText={setTitle} />
+          <Text style={styles.fieldLabel}>Title</Text>
+          <TextInput style={styles.input} placeholder="Title" placeholderTextColor={colors.muted} value={title} onChangeText={setTitle} />
 
-        <Text style={styles.fieldLabel}>Date</Text>
-        <View style={styles.card}>
-          <Calendar selected={date} onSelect={setDate} minDate={new Date()} />
-        </View>
+          <Text style={styles.fieldLabel}>Date</Text>
+          <View style={styles.card}>
+            <Calendar selected={date} onSelect={setDate} minDate={new Date()} />
+          </View>
 
-        <Text style={styles.fieldLabel}>Time</Text>
-        <TimePicker value={time} onChange={setTime} />
+          <Text style={styles.fieldLabel}>Time</Text>
+          <TimePicker value={time} onChange={setTime} />
 
-        <Text style={styles.fieldLabel}>Location (optional)</Text>
-        <TextInput style={styles.input} placeholder="Location" placeholderTextColor={colors.muted} value={location} onChangeText={setLocation} />
+          <Text style={styles.fieldLabel}>Location (optional)</Text>
+          <TextInput style={styles.input} placeholder="Location" placeholderTextColor={colors.muted} value={location} onChangeText={setLocation} />
 
-        <Text style={styles.fieldLabel}>Distance target km (optional)</Text>
-        <TextInput style={styles.input} placeholder="e.g. 5" placeholderTextColor={colors.muted} keyboardType="decimal-pad" value={distance} onChangeText={setDistance} />
+          <Text style={styles.fieldLabel}>Distance target km (optional)</Text>
+          <TextInput style={styles.input} placeholder="e.g. 5" placeholderTextColor={colors.muted} keyboardType="decimal-pad" value={distance} onChangeText={setDistance} />
 
-        <Text style={styles.fieldLabel}>Notes (optional)</Text>
-        <TextInput
-          style={[styles.input, { height: 72, textAlignVertical: "top" }]}
-          placeholder="Notes"
-          placeholderTextColor={colors.muted}
-          multiline
-          value={notes}
-          onChangeText={setNotes}
-        />
+          <Text style={styles.fieldLabel}>Notes (optional)</Text>
+          <TextInput
+            style={[styles.input, { height: 72, textAlignVertical: "top" }]}
+            placeholder="Notes"
+            placeholderTextColor={colors.muted}
+            multiline
+            value={notes}
+            onChangeText={setNotes}
+          />
 
-        {error && <Text style={styles.error}>{error}</Text>}
+          {error && <Text style={styles.error}>{error}</Text>}
 
-        <Button label="Save changes" onPress={onSave} loading={saving} />
-        <Tap onPress={() => router.back()} haptic={false}><Text style={styles.link}>Cancel</Text></Tap>
-      </ScrollView>
+          <Button label="Save changes" onPress={onSave} loading={saving} />
+          <Tap onPress={() => router.back()} haptic={false}><Text style={styles.link}>Cancel</Text></Tap>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

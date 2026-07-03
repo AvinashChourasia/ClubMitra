@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../../lib/auth";
 import { publicClub, type DiscoverClub } from "../../../lib/discover";
+import { myChapters } from "../../../lib/clubs";
 import { useJoinGate } from "../../../components/discovery";
 import { Avatar } from "../../../components/Avatar";
 import { Tap } from "../../../components/Tap";
@@ -18,11 +19,12 @@ import { colors, styles, useThemeMode } from "../../../lib/theme";
 
 export default function PublicClubScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const router = useRouter();
   useThemeMode();
   const { joinClub, joiningId } = useJoinGate();
   const [club, setClub] = useState<DiscoverClub | null>(null);
+  const [member, setMember] = useState<boolean | null>(null); // null = still checking
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
 
@@ -37,10 +39,28 @@ export default function PublicClubScreen() {
     }
   }, [id]);
 
+  // Membership check: signed-in users only see "Open club" if they actually
+  // belong; everyone else gets the join path.
+  const loadMembership = useCallback(async () => {
+    if (!user) {
+      setMember(false);
+      return;
+    }
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+      const mine = await myChapters(token);
+      setMember(mine.some((c) => c.id === id));
+    } catch {
+      setMember(false);
+    }
+  }, [user, getAccessToken, id]);
+
   useFocusEffect(
     useCallback(() => {
       void load();
-    }, [load])
+      void loadMembership();
+    }, [load, loadMembership])
   );
 
   // A guest who just signed in mid-flow shouldn't be stuck here — but we don't
@@ -93,7 +113,7 @@ export default function PublicClubScreen() {
             </View>
 
             {/* Primary action */}
-            {user ? (
+            {member === null ? null : member ? (
               <Tap onPress={() => router.push(`/club/${club.id}` as Href)} style={[styles.button, { borderRadius: 999 }]}>
                 <Text style={styles.buttonText}>Open club</Text>
               </Tap>

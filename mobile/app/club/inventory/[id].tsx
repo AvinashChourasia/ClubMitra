@@ -23,6 +23,7 @@ import { useAuth } from "../../../lib/auth";
 import { ApiError } from "../../../lib/api";
 import { listItems, createItem, deleteItem, move, type InventoryItem, type MoveType } from "../../../lib/inventory";
 import { pay } from "../../../lib/payments";
+import { PAYMENTS_ENABLED } from "../../../lib/flags";
 import { colors, styles } from "../../../lib/theme";
 import { ErrorState } from "../../../components/ErrorState";
 
@@ -264,7 +265,7 @@ export default function ClubInventory() {
                       </Pressable>
                     ))}
                   </View>
-                  {it.unit_price != null && it.unit_price > 0 && (
+                  {PAYMENTS_ENABLED && it.unit_price != null && it.unit_price > 0 && (
                     <Pressable
                       onPress={() => buy(it)}
                       disabled={low}
