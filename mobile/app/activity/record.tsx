@@ -171,8 +171,8 @@ export default function RecordRun() {
       }
       // Nudge Android's high-accuracy mode on. NOT silent when it's off: it
       // shows the system resolution dialog — so at most once per screen visit,
-      // and only in the true pre-start state (never mid start/finish flows).
-      if (!nudgedRef.current && status === "idle") {
+      // and only in the true pre-start state (never mid countdown/start/finish).
+      if (!nudgedRef.current && status === "idle" && !countdownRef.current) {
         nudgedRef.current = true;
         await Location.enableNetworkProviderAsync().catch(() => {});
       }
@@ -218,17 +218,30 @@ export default function RecordRun() {
     }
   }, [km, recording]);
 
-  // 3-2-1 countdown, then the engine starts. Each tick pulses + clicks.
+  // 3-2-1 countdown, then the engine starts. Each tick pulses + clicks. The
+  // timer lives in a ref and is cleared on unmount — backing out mid-countdown
+  // must NOT phantom-start a recording from off-screen.
+  const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownRef = useRef(false); // mirrored for the warm-up effect's closure
+  useEffect(
+    () => () => {
+      if (countdownTimer.current) clearInterval(countdownTimer.current);
+    },
+    []
+  );
   function onStartPress() {
     if (countdown !== null) return;
     let n = 3;
     setCountdown(n);
+    countdownRef.current = true;
     pulse();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    const timer = setInterval(() => {
+    countdownTimer.current = setInterval(() => {
       n -= 1;
       if (n <= 0) {
-        clearInterval(timer);
+        if (countdownTimer.current) clearInterval(countdownTimer.current);
+        countdownTimer.current = null;
+        countdownRef.current = false;
         setCountdown(null);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         void start();
@@ -247,12 +260,16 @@ export default function RecordRun() {
 
   async function onFinish() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    // uploading goes true BEFORE stop() flips status to idle, so the warm-up
+    // effect never sees an idle+not-uploading gap mid-finish (it would start a
+    // pointless GPS watch — and could pop the high-accuracy dialog).
+    setUploading(true);
     const { points, pausedS } = await stop();
     if (points.length < 2) {
+      setUploading(false);
       Alert.alert("Run too short", "We didn't capture enough GPS points. Try moving around a bit.");
       return;
     }
-    setUploading(true);
     // 1. Persist locally FIRST — from here the run can never be lost. If THIS
     //    fails (e.g. storage full), the run is genuinely not saved, so tell the
     //    truth rather than the comforting "saved on phone" lie below.
@@ -400,9 +417,11 @@ export default function RecordRun() {
                   ? "rgba(245,158,11,0.18)"
                   : recording
                     ? "rgba(239,68,68,0.18)"
-                    : level !== "none"
-                      ? GPS_CHIP[level].bg
-                      : CARD,
+                    : status === "denied"
+                      ? "rgba(245,158,11,0.18)"
+                      : level !== "none"
+                        ? GPS_CHIP[level].bg
+                        : CARD,
               paddingHorizontal: 14,
               paddingVertical: 7,
               borderRadius: 999,
@@ -414,12 +433,29 @@ export default function RecordRun() {
                 height: 8,
                 borderRadius: 4,
                 backgroundColor:
-                  recording && paused ? "#F59E0B" : recording ? ACCENT : level !== "none" ? GPS_CHIP[level].dot : MUTED,
+                  recording && paused
+                    ? "#F59E0B"
+                    : recording
+                      ? ACCENT
+                      : status === "denied"
+                        ? "#F59E0B"
+                        : level !== "none"
+                          ? GPS_CHIP[level].dot
+                          : MUTED,
               }}
             />
             <Text
               style={{
-                color: recording && paused ? "#FCD34D" : recording ? "#FCA5A5" : level !== "none" ? GPS_CHIP[level].text : MUTED,
+                color:
+                  recording && paused
+                    ? "#FCD34D"
+                    : recording
+                      ? "#FCA5A5"
+                      : status === "denied"
+                        ? "#FCD34D"
+                        : level !== "none"
+                          ? GPS_CHIP[level].text
+                          : MUTED,
                 fontWeight: "700",
                 fontSize: 13,
               }}
@@ -428,9 +464,11 @@ export default function RecordRun() {
                 ? "Auto-paused · tap to resume"
                 : recording
                   ? "Recording"
-                  : level !== "none"
-                    ? GPS_CHIP[level].label
-                    : "Ready to run"}
+                  : status === "denied"
+                    ? "Location permission needed"
+                    : level !== "none"
+                      ? GPS_CHIP[level].label
+                      : "Ready to run"}
             </Text>
           </Pressable>
           <View style={{ width: 36 }} />

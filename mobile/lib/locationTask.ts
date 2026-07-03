@@ -121,6 +121,11 @@ let bgChain: Promise<void> = Promise.resolve();
 // and retry on the next batch — otherwise that batch's points vanish silently.
 let bgActive: Active | null = null;
 let bgWriteFailed = false;
+// True while the run is being torn down. A batch already queued on the chain
+// could read the buffer BEFORE stopRun clears it and write AFTER — resurrecting
+// the finished run as a ghost "run in progress" (which would then upload twice).
+// Batches check this at execution time and no-op during/after teardown.
+let bgStopping = false;
 function resetBgMirror(): void {
   bgActive = null;
   bgWriteFailed = false;
@@ -131,10 +136,12 @@ TaskManager.defineTask(RUN_TASK, async ({ data, error }) => {
   if (!locations?.length) return;
   bgChain = bgChain
     .then(async () => {
+      if (bgStopping) return; // run is ending — this batch must not write
       const active = bgWriteFailed && bgActive ? bgActive : await readActive();
       if (!active) return; // not recording
       for (const loc of locations) processFix(active, loc);
       bgActive = active;
+      if (bgStopping) return; // teardown began while we processed — drop the write
       try {
         await writeActive(active);
         bgWriteFailed = false;
@@ -201,6 +208,7 @@ async function beginUpdates(): Promise<void> {
     await startForegroundWatch();
     return;
   }
+  bgStopping = false; // re-arm the background task for the new/resumed run
   if (!(await Location.hasStartedLocationUpdatesAsync(RUN_TASK).catch(() => false))) {
     await Location.startLocationUpdatesAsync(RUN_TASK, BG_OPTS);
   }
@@ -211,6 +219,7 @@ async function endUpdates(): Promise<void> {
     stopForegroundWatch();
     return;
   }
+  bgStopping = true; // queued/in-flight batches must no-op from here on
   try {
     if (await Location.hasStartedLocationUpdatesAsync(RUN_TASK)) {
       await Location.stopLocationUpdatesAsync(RUN_TASK);
@@ -218,6 +227,9 @@ async function endUpdates(): Promise<void> {
   } catch {
     /* already stopped */
   }
+  // Drain any batch already on the chain BEFORE the caller clears the buffer —
+  // its write landing after removeItem would resurrect the run as a ghost.
+  await bgChain.catch(() => {});
 }
 
 // --- public API ---

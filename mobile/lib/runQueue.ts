@@ -87,12 +87,21 @@ export type FlushResult = {
 let flushInFlight: Promise<FlushResult> | null = null;
 
 export function flush(getToken: () => Promise<string | null>): Promise<FlushResult> {
-  if (!flushInFlight) {
-    flushInFlight = doFlush(getToken).finally(() => {
-      flushInFlight = null;
-    });
-  }
-  return flushInFlight;
+  // A flush already mid-air read its queue snapshot BEFORE this caller's run
+  // was enqueued — joining it would (a) not upload the new run and (b) hand the
+  // caller an older run's stats as "their" result. So a late caller CHAINS a
+  // fresh pass behind the in-flight one instead of joining it.
+  const p = flushInFlight
+    ? flushInFlight.then(() => doFlush(getToken), () => doFlush(getToken))
+    : doFlush(getToken);
+  flushInFlight = p;
+  // Observer (never rejects) that releases the latch only if it's still ours —
+  // an earlier flush finishing must not clobber a chained successor's latch.
+  const clear = () => {
+    if (flushInFlight === p) flushInFlight = null;
+  };
+  p.then(clear, clear);
+  return p;
 }
 
 async function doFlush(getToken: () => Promise<string | null>): Promise<FlushResult> {
@@ -103,21 +112,24 @@ async function doFlush(getToken: () => Promise<string | null>): Promise<FlushRes
   if (!token) return { uploaded: [], remaining: queue.length };
 
   const uploaded: Activity[] = [];
-  let index = 0;
-  for (; index < queue.length; index++) {
+  const uploadedIds = new Set<string>();
+  for (const run of queue) {
     try {
-      const run = queue[index];
       // Omitted flag (older queued runs) defaults to counting.
       const activity = await uploadRun(token, run.points, run.countTowardChallenges !== false, run.pausedS ?? 0);
       uploaded.push(activity);
+      uploadedIds.add(run.id);
     } catch {
       // Network/server failure: stop here, keep this and the rest for later.
       break;
     }
   }
 
-  // Persist whatever we didn't manage to upload (the unprocessed tail).
-  const remainingRuns = queue.slice(index);
+  // Remove ONLY what we uploaded, from a FRESH read — a run enqueued while the
+  // uploads were in flight lives in storage but not in our snapshot, and
+  // writing back the stale slice would silently erase it (lost run).
+  const fresh = await readQueue();
+  const remainingRuns = fresh.filter((r) => !uploadedIds.has(r.id));
   await writeQueue(remainingRuns);
   return { uploaded, remaining: remainingRuns.length };
 }
