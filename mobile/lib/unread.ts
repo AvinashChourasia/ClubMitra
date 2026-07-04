@@ -5,10 +5,27 @@
 
 import { useEffect, useState } from "react";
 
-import { inbox } from "./messaging";
+import { inbox, type InboxItem } from "./messaging";
 
 let total = 0;
 const subs = new Set<(n: number) => void>();
+
+// Threads the in-app banner must stay silent for (muted or archived), keyed
+// the way realtime events are ("chapter:<id>" / "dm:<userId>"). Refreshed from
+// every inbox fetch, so mute/archive take effect while the app is open.
+const silenced = new Set<string>();
+
+export function updateSilenced(items: InboxItem[]): void {
+  silenced.clear();
+  for (const it of items) {
+    if (!it.muted && !it.archived) continue;
+    silenced.add(it.kind === "club" ? `chapter:${it.chapter_id}` : `dm:${it.user_id}`);
+  }
+}
+
+export function isSilenced(threadKey: string): boolean {
+  return silenced.has(threadKey);
+}
 
 export function setUnreadTotal(n: number): void {
   total = n;
@@ -26,7 +43,9 @@ export async function refreshUnread(getToken: () => Promise<string | null>): Pro
   try {
     const token = await getToken();
     if (!token) return;
-    setUnreadTotal(sumUnread(await inbox(token)));
+    const list = await inbox(token);
+    updateSilenced(list);
+    setUnreadTotal(sumUnread(list));
   } catch {
     /* badge keeps its last value */
   }

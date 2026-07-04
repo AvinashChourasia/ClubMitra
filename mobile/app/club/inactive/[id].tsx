@@ -5,7 +5,7 @@
 import { useCallback, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../../lib/auth";
@@ -24,6 +24,7 @@ export default function InactiveMembers() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getAccessToken } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   useThemeMode();
 
   const [days, setDays] = useState<number>(14);
@@ -103,7 +104,7 @@ export default function InactiveMembers() {
         data={list ?? []}
         keyExtractor={(m) => m.user_id}
         renderItem={renderRow}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 + insets.bottom }}
         ListEmptyComponent={
           list === null && !failed ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 28 }} />

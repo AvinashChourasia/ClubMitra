@@ -21,6 +21,7 @@ type Listener = (e: RTEvent) => void;
 let ws: WebSocket | null = null;
 let alive = false; // socket open and authenticated
 let wanted = false; // should we keep a connection up?
+let opening = false; // single-flight guard: open() is mid-token-fetch
 let attempts = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let tokenGetter: (() => Promise<string | null>) | null = null;
@@ -32,28 +33,46 @@ function wsUrl(token: string): string {
 }
 
 async function open() {
-  if (!wanted || !tokenGetter || (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
+  // CLOSING counts as busy too — its onclose will schedule the reconnect.
+  if (!wanted || !tokenGetter || opening || (ws && ws.readyState !== WebSocket.CLOSED)) return;
+  opening = true;
+  const myGetter = tokenGetter;
   let token: string | null = null;
   try {
-    token = await tokenGetter();
+    token = await myGetter();
   } catch {
     /* retry below */
   }
+  // Re-check after the await: disconnect()/re-login may have swapped state,
+  // and a token minted for the previous account must never be used.
+  if (!wanted || tokenGetter !== myGetter || (ws && ws.readyState !== WebSocket.CLOSED)) {
+    opening = false;
+    return;
+  }
   if (!token) {
+    opening = false;
     scheduleReconnect();
     return;
   }
+  let sock: WebSocket;
   try {
-    ws = new WebSocket(wsUrl(token));
+    sock = new WebSocket(wsUrl(token));
   } catch {
+    opening = false;
     scheduleReconnect();
     return;
   }
-  ws.onopen = () => {
+  ws = sock;
+  opening = false;
+  // Every handler checks it still owns the module socket, so a replaced or
+  // orphaned socket can't clobber state or double-deliver events.
+  sock.onopen = () => {
+    if (sock !== ws) return;
     alive = true;
     attempts = 0;
   };
-  ws.onmessage = (ev) => {
+  sock.onmessage = (ev) => {
+    if (sock !== ws) return;
     try {
       const e = JSON.parse(String(ev.data)) as RTEvent;
       listeners.forEach((f) => f(e));
@@ -61,10 +80,11 @@ async function open() {
       /* ignore malformed frames */
     }
   };
-  ws.onerror = () => {
+  sock.onerror = () => {
     /* onclose follows */
   };
-  ws.onclose = () => {
+  sock.onclose = () => {
+    if (sock !== ws) return;
     alive = false;
     ws = null;
     scheduleReconnect();
@@ -87,6 +107,27 @@ export function ensureConnected(getToken: () => Promise<string | null>): void {
   tokenGetter = getToken;
   wanted = true;
   void open();
+}
+
+// disconnect tears the socket down for good (logout / account switch): stop
+// wanting a connection, cancel any pending reconnect, and close the socket so
+// the next login can't ride the previous account's authenticated session.
+export function disconnect(): void {
+  wanted = false;
+  tokenGetter = null;
+  attempts = 0;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  const sock = ws;
+  ws = null; // null first so sock's onclose is a no-op (identity check)
+  alive = false;
+  try {
+    sock?.close();
+  } catch {
+    /* already closed */
+  }
 }
 
 // subscribe registers a listener for all events; returns the unsubscribe.

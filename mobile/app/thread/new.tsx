@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
@@ -14,6 +14,7 @@ import { colors, styles } from "../../lib/theme";
 export default function NewChat() {
   const { getAccessToken } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [q, setQ] = useState("");
   const [results, setResults] = useState<UserHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,7 +74,7 @@ export default function NewChat() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 + insets.bottom }} keyboardShouldPersistTaps="handled">
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
         ) : q.trim().length < 2 ? (

@@ -9,7 +9,7 @@
 import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, Text, TextInput, View } from "react-native";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
@@ -40,6 +40,7 @@ export default function CheckinScan() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user, getAccessToken } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [mode, setMode] = useState<"scan" | "code">(Camera ? "scan" : "code");
   const [manual, setManual] = useState("");
@@ -108,7 +109,9 @@ export default function CheckinScan() {
                 if (code && !submitted.current) void submit(code);
               }}
             />
-            <View style={{ position: "absolute", bottom: 30, left: 0, right: 0, alignItems: "center" }}>
+            {/* Camera reaches the screen bottom (top-only SafeArea) — lift the
+                overlay above the Android system nav bar. */}
+            <View style={{ position: "absolute", bottom: 30 + insets.bottom, left: 0, right: 0, alignItems: "center" }}>
               <Text style={{ color: "#fff", backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, overflow: "hidden", fontWeight: "700" }}>
                 {busy ? "Checking in…" : "Point at the organiser's QR"}
               </Text>

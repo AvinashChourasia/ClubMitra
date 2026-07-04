@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { Redirect, useRouter, type Href } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../lib/auth";
@@ -17,6 +17,7 @@ import { FollowButton } from "../components/FollowButton";
 export default function FindRunners() {
   const { user, getAccessToken } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   useThemeMode();
 
   const [q, setQ] = useState("");
@@ -109,7 +110,7 @@ export default function FindRunners() {
         data={data}
         keyExtractor={(c) => c.id}
         renderItem={renderRow}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 + insets.bottom }}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           !searching && suggestions.length > 0 ? (

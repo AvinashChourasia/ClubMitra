@@ -15,10 +15,11 @@ import { useAuth } from "../../lib/auth";
 import { inbox, setChatPrefs, type InboxItem } from "../../lib/messaging";
 import { swr } from "../../lib/cache";
 import { ensureConnected, subscribe, type RTEvent } from "../../lib/realtime";
-import { setUnreadTotal, sumUnread } from "../../lib/unread";
+import { setUnreadTotal, sumUnread, updateSilenced } from "../../lib/unread";
 import { Avatar } from "../../components/Avatar";
 import { Tap } from "../../components/Tap";
 import { Button } from "../../components/Button";
+import { ErrorState } from "../../components/ErrorState";
 import { colors, useThemeMode } from "../../lib/theme";
 import { GuestChat } from "../../components/GuestScreens";
 
@@ -55,6 +56,9 @@ export default function Chat() {
   const router = useRouter();
   useThemeMode();
   const [items, setItems] = useState<InboxItem[] | null>(null);
+  // First load failed with nothing cached — show a retry card, NOT the
+  // "no chats yet" onboarding (a member's chats aren't gone, the fetch is).
+  const [loadFailed, setLoadFailed] = useState(false);
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -69,6 +73,8 @@ export default function Chat() {
     // Cached inbox paints instantly (offline / cold backend), then refreshes.
     await swr(`${user?.id}:inbox`, () => inbox(token), (list) => {
       setItems(list);
+      setLoadFailed(false);
+      updateSilenced(list);
       setUnreadTotal(sumUnread(list));
     });
   }, [getAccessToken, user?.id]);
@@ -80,7 +86,9 @@ export default function Chat() {
         try {
           await load();
         } catch {
-          if (active) setItems([]);
+          // No cache AND the network failed — flag it instead of faking an
+          // empty inbox (which reads as "your chats are gone").
+          if (active) setLoadFailed(true);
         }
       })();
 
@@ -112,6 +120,7 @@ export default function Chat() {
         unsub();
         Object.values(typingTimers.current).forEach(clearTimeout);
         typingTimers.current = {};
+        setTyping({}); // timers are gone — don't leave "typing…" stuck on rows
       };
     }, [load, getAccessToken])
   );
@@ -296,7 +305,17 @@ export default function Chat() {
         )}
       </View>
 
-      {items === null ? (
+      {items === null && loadFailed ? (
+        <View style={{ flex: 1, justifyContent: "center", padding: 20 }}>
+          <ErrorState
+            message="We couldn't load your chats."
+            onRetry={() => {
+              setLoadFailed(false);
+              load().catch(() => setLoadFailed(true));
+            }}
+          />
+        </View>
+      ) : items === null ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
       ) : (
         <ScrollView

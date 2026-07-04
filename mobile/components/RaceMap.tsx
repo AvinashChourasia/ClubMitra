@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import MapView, { Marker, PROVIDER_DEFAULT } from "react-native-maps";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { colors, radius, shadow } from "../lib/theme";
@@ -24,6 +25,10 @@ const SPREAD = 0.03; // ~3.3km max fan-out radius around a city centre
 const GOLDEN = 2.399963; // golden angle → even spiral distribution
 
 export function RaceMap({ races, onPressRace }: { races: Race[]; onPressRace: (r: Race) => void }) {
+  // The map reaches the physical screen bottom (parent SafeArea is top-only),
+  // so bottom overlays — and the Google logo, via mapPadding — must clear the
+  // Android system nav bar.
+  const insets = useSafeAreaInsets();
   // One pin per race. Races sharing a city are spiral-spread around its centre.
   const pins = useMemo(() => {
     const groups = new Map<string, { lat: number; lng: number; races: Race[] }>();
@@ -87,7 +92,13 @@ export function RaceMap({ races, onPressRace }: { races: Race[]; onPressRace: (r
 
   return (
     <View style={{ flex: 1 }}>
-      <MapView style={{ flex: 1 }} provider={PROVIDER_DEFAULT} initialRegion={region} showsPointsOfInterest={false}>
+      <MapView
+        style={{ flex: 1 }}
+        provider={PROVIDER_DEFAULT}
+        initialRegion={region}
+        showsPointsOfInterest={false}
+        mapPadding={{ top: 0, right: 0, bottom: insets.bottom, left: 0 }}
+      >
         {pins.map((p) => {
           const saved = p.race.going;
           const tint = saved ? colors.success : colors.primary;
@@ -139,14 +150,14 @@ export function RaceMap({ races, onPressRace }: { races: Race[]; onPressRace: (r
 
       {/* Empty hint */}
       {pins.length === 0 && (
-        <View style={{ position: "absolute", bottom: 24, alignSelf: "center", backgroundColor: colors.bg, borderRadius: radius.lg, paddingHorizontal: 16, paddingVertical: 12, ...shadow.md }}>
+        <View style={{ position: "absolute", bottom: 24 + insets.bottom, alignSelf: "center", backgroundColor: colors.bg, borderRadius: radius.lg, paddingHorizontal: 16, paddingVertical: 12, ...shadow.md }}>
           <Text style={{ color: colors.muted, fontWeight: "700" }}>No races to place on the map.</Text>
         </View>
       )}
 
       {/* Hint: tap a flag to open its event page */}
       {pins.length > 0 && (
-        <View style={{ position: "absolute", bottom: 16, alignSelf: "center", backgroundColor: "rgba(15,23,42,0.82)", borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 5 }}>
+        <View style={{ position: "absolute", bottom: 16 + insets.bottom, alignSelf: "center", backgroundColor: "rgba(15,23,42,0.82)", borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 5 }}>
           <Ionicons name="hand-left" size={12} color="#fff" />
           <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Tap a flag to open the event · pinch to zoom</Text>
         </View>

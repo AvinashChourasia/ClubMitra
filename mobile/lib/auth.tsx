@@ -15,6 +15,7 @@ import * as SecureStore from "expo-secure-store";
 import { ApiError, request } from "./api";
 import { flush } from "./runQueue";
 import { registerForPush, unregisterPush } from "./push";
+import { disconnect } from "./realtime";
 
 // Keys under which we persist the tokens in the secure store.
 const ACCESS_KEY = "access_token";
@@ -280,6 +281,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore: even if the network call fails, we still clear local state.
     }
+    // Tear the realtime socket down: it was authenticated as THIS account, and
+    // a later login must not receive (or send typing as) the previous user.
+    disconnect();
     await clearTokens();
     setUser(null);
   }

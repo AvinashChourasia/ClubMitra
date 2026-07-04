@@ -16,7 +16,7 @@ import * as Haptics from "expo-haptics";
 import { useAuth } from "../lib/auth";
 import { ensureConnected, subscribe, type RTEvent } from "../lib/realtime";
 import { getActiveThread } from "../lib/messageToast";
-import { refreshUnread } from "../lib/unread";
+import { isSilenced, refreshUnread } from "../lib/unread";
 import { Avatar } from "./Avatar";
 import { colors } from "../lib/theme";
 
@@ -81,6 +81,7 @@ export function MessageToast() {
       if (e.payload.sender_id === user.id) return; // own messages
       const key = `${e.scope}:${e.id}`;
       if (getActiveThread() === key) return; // already reading this thread
+      if (isSilenced(key)) return; // muted/archived chats never banner or buzz
 
       refreshUnread(getAccessToken).catch(() => {});
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});

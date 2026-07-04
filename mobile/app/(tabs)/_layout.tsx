@@ -3,6 +3,7 @@
 
 import { useEffect } from "react";
 import { Tabs } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../../lib/auth";
@@ -20,6 +21,7 @@ function tab(name: IoniconName, outline: IoniconName) {
 export default function TabsLayout() {
   const { user, getAccessToken } = useAuth();
   const unread = useUnreadTotal();
+  const insets = useSafeAreaInsets();
 
   // Keep the Chat badge fresh in the background; the chat list also pushes
   // exact counts whenever it loads.
@@ -41,7 +43,10 @@ export default function TabsLayout() {
           backgroundColor: colors.bg,
           borderTopColor: colors.border,
           borderTopWidth: 1,
-          height: 88,
+          // A fixed height must ADD the bottom inset: bottom-tabs pads the bar
+          // by insets.bottom (Android 3-button nav ≈ 48dp), and a flat height
+          // would leave too little room for the icons + labels.
+          height: 60 + insets.bottom,
           paddingTop: 8,
         },
         tabBarItemStyle: { paddingTop: 2 },

@@ -70,6 +70,9 @@ type Pending = {
   name?: string;
   mime?: string;
   replyToId?: string;
+  // Quote snapshot taken when the entry was created — the bubble renders this,
+  // never the live composer replyTo (which is cleared/re-armed independently).
+  replyPreview?: { sender_name: string; preview: string };
   announce?: boolean;
   failed?: boolean;
 };
@@ -194,6 +197,12 @@ export function ChatThread({
   const scrollRef = useRef<ScrollView>(null);
   const countRef = useRef(0);
   const seq = useRef(0);
+  // Monotonic fetch id: only the NEWEST in-flight load may setMessages, so a
+  // slow poll response can't overwrite a fresher list (vanishing messages).
+  const reqSeq = useRef(0);
+  // Last applied payload (serialized) — lets reload skip identical responses
+  // instead of re-rendering every bubble on each poll tick.
+  const lastPayload = useRef("");
   const nearBottom = useRef(true);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [messages, setMessages] = useState<Message[] | null>(null);
@@ -205,11 +214,15 @@ export function ChatThread({
   const [staged, setStaged] = useState<Staged | null>(null);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
+  // The draft (text/attachment/reply) stashed when entering edit mode, restored
+  // when the edit is saved or cancelled — starting an edit must not eat it.
+  const draftBeforeEdit = useRef<{ text: string; staged: Staged | null; replyTo: Message | null } | null>(null);
   const [actionFor, setActionFor] = useState<Message | null>(null);
   const [forwardFor, setForwardFor] = useState<Message | null>(null);
   const [forwardTargets, setForwardTargets] = useState<InboxItem[] | null>(null);
   const [infoFor, setInfoFor] = useState<Message | null>(null);
   const [infoData, setInfoData] = useState<MessageInfo | null>(null);
+  const [infoFailed, setInfoFailed] = useState(false);
   const [recordingVoice, setRecordingVoice] = useState(false);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
@@ -238,11 +251,20 @@ export function ChatThread({
   // when already near it — otherwise the jump FAB counts what's waiting.
   const reload = useCallback(
     async (forceScroll: boolean) => {
+      const myReq = ++reqSeq.current;
       const msgs = await load();
+      if (myReq !== reqSeq.current) return; // superseded by a newer request
+      setLoadFailed(false); // any successful load clears the error state
+      const raw = JSON.stringify(msgs);
+      if (raw === lastPayload.current) {
+        // Nothing changed — skip the setMessages (and the full re-render).
+        if (forceScroll) scrollEnd(true);
+        return;
+      }
+      lastPayload.current = raw;
       const grewBy = Math.max(0, msgs.length - countRef.current);
       countRef.current = msgs.length;
       setMessages(msgs);
-      setLoadFailed(false); // any successful load clears the error state
       if (forceScroll || (grewBy > 0 && nearBottom.current)) {
         scrollEnd(forceScroll);
       } else if (grewBy > 0) {
@@ -256,6 +278,7 @@ export function ChatThread({
     useCallback(() => {
       let active = true;
       countRef.current = 0;
+      lastPayload.current = "";
       (async () => {
         try {
           await reload(true);
@@ -287,16 +310,25 @@ export function ChatThread({
       }
 
       // Poll fallback: slow when the socket is live, snappy when it isn't.
-      const timer = setInterval(() => {
-        if (!active) return;
-        reload(false).catch(() => {});
-      }, realtime && isLive() ? 20000 : 4000);
+      // A setTimeout CHAIN (not setInterval) so the cadence is re-read every
+      // tick — a socket that connects or drops mid-session adjusts the pace
+      // without leaving and re-entering the thread.
+      let pollTimer: ReturnType<typeof setTimeout> | null = null;
+      const schedulePoll = () => {
+        pollTimer = setTimeout(() => {
+          if (!active) return;
+          reload(false).catch(() => {});
+          schedulePoll();
+        }, realtime && isLive() ? 20000 : 4000);
+      };
+      schedulePoll();
 
       return () => {
         active = false;
-        clearInterval(timer);
+        if (pollTimer) clearTimeout(pollTimer);
         unsub?.();
         if (typingTimer.current) clearTimeout(typingTimer.current);
+        setTypingName(null); // don't leave "typing…" frozen in the header
         setActiveThread(null);
       };
       // Key on the PRIMITIVE scope/id, never the `realtime` OBJECT: the DM
@@ -324,6 +356,7 @@ export function ChatThread({
     setLoadFailed(false);
     setMessages(null);
     countRef.current = 0;
+    lastPayload.current = "";
     try {
       await reload(true);
     } catch {
@@ -384,15 +417,19 @@ export function ChatThread({
         }
         await send({ body: p.body, media_url: mediaUrl, media_type: mediaType, reply_to_id: p.replyToId });
       }
-      const msgs = await load();
-      countRef.current = msgs.length;
-      setMessages(msgs);
-      setPending((prev) => prev.filter((x) => x.tempId !== p.tempId));
-      scrollEnd(true);
     } catch (e) {
       setPending((prev) => prev.map((x) => (x.tempId === p.tempId ? { ...x, failed: true } : x)));
       Alert.alert("Couldn't send", e instanceof ApiError ? e.message : "Something went wrong");
+      return;
     }
+    // Delivered. The refresh is best-effort — a failure here must NOT mark the
+    // bubble failed (Retry would post a duplicate); the poll reconciles instead.
+    try {
+      await reload(true);
+    } catch {
+      /* the poll will reconcile */
+    }
+    setPending((prev) => prev.filter((x) => x.tempId !== p.tempId));
   }
 
   // A failed bubble is tappable: Retry re-sends the stored payload, Discard
@@ -418,14 +455,15 @@ export function ChatThread({
     // Edit mode: apply the rewrite in place (no optimistic bubble needed).
     if (editing && edit) {
       const target = editing;
-      setEditing(null);
-      setText("");
+      endEdit();
       try {
         await edit(target.id, body);
-        await reload(false);
       } catch (e) {
         Alert.alert("Couldn't edit", e instanceof ApiError ? e.message : "Something went wrong");
+        return;
       }
+      // Edit applied — a failed refresh must not read as a failed edit.
+      await reload(false).catch(() => {});
       return;
     }
     const cap = staged;
@@ -439,6 +477,7 @@ export function ChatThread({
       name: cap?.name,
       mime: cap?.mime,
       replyToId: quote?.id,
+      replyPreview: quote ? { sender_name: quote.sender_name, preview: quote.body ?? "…" } : undefined,
       announce: isAnnounce || undefined,
     };
 
@@ -474,13 +513,16 @@ export function ChatThread({
     setPollBusy(true);
     try {
       await createPoll({ question, options, multi: pollMulti });
-      setPollOpen(false);
-      await reload(true);
     } catch (e) {
       Alert.alert("Couldn't post poll", e instanceof ApiError ? e.message : "Something went wrong");
+      return;
     } finally {
       setPollBusy(false);
     }
+    setPollOpen(false);
+    // Posted — a failed refresh must not read as a failed poll (a retry would
+    // push a duplicate to the whole club); the poll timer reconciles instead.
+    await reload(true).catch(() => {});
   }
 
   // onVote casts/toggles a vote, then refreshes the tallies (realtime nudges the
@@ -518,10 +560,23 @@ export function ChatThread({
 
   function startEdit(m: Message) {
     setActionFor(null);
+    // Stash whatever was being composed — the edit borrows the input box.
+    draftBeforeEdit.current = { text, staged, replyTo };
     setReplyTo(null);
     setStaged(null);
     setEditing(m);
     setText(m.body ?? "");
+  }
+
+  // endEdit leaves edit mode and restores the pre-edit draft (text, staged
+  // attachment, reply) — used by both Save and the X (cancel) button.
+  function endEdit() {
+    const d = draftBeforeEdit.current;
+    draftBeforeEdit.current = null;
+    setEditing(null);
+    setText(d?.text ?? "");
+    setStaged(d?.staged ?? null);
+    setReplyTo(d?.replyTo ?? null);
   }
 
   function openActions(m: Message) {
@@ -548,7 +603,10 @@ export function ChatThread({
     setForwardTargets(null);
     try {
       const token = getToken ? await getToken() : null;
-      if (!token) return;
+      if (!token) {
+        setForwardTargets([]); // never leave the sheet on an eternal spinner
+        return;
+      }
       setForwardTargets((await inbox(token)).filter((c) => !c.archived));
     } catch {
       setForwardTargets([]);
@@ -597,9 +655,16 @@ export function ChatThread({
       Alert.alert("Microphone needed", "Enable microphone access for ClubMitra to record voice notes.");
       return;
     }
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-    await recorder.prepareToRecordAsync();
-    recorder.record();
+    try {
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+    } catch {
+      // e.g. the mic is held by a call or another app — say so instead of a
+      // silent unhandled rejection.
+      Alert.alert("Couldn't start recording", "The microphone may be in use — try again.");
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setRecordingVoice(true);
   }
@@ -624,9 +689,23 @@ export function ChatThread({
       uri = null;
     }
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
-    if (!uri || !uploadFile) return;
+    if (!uri || !uploadFile) {
+      // The user tapped SEND — a lost recording must not vanish silently.
+      Alert.alert("Couldn't send voice note", "The recording didn't save — try again.");
+      return;
+    }
 
-    const p: Pending = { tempId: `tmp-${seq.current++}`, localUri: uri, kind: "audio" };
+    // Mirror onSend: capture the armed reply and clear the bar, so the voice
+    // note carries the quote instead of leaking it onto the next text message.
+    const quote = replyTo;
+    setReplyTo(null);
+    const p: Pending = {
+      tempId: `tmp-${seq.current++}`,
+      localUri: uri,
+      kind: "audio",
+      replyToId: quote?.id,
+      replyPreview: quote ? { sender_name: quote.sender_name, preview: quote.body ?? "…" } : undefined,
+    };
     setPending((prev) => [...prev, p]);
     scrollEnd(true);
     await sendPending(p);
@@ -637,12 +716,16 @@ export function ChatThread({
     setActionFor(null);
     setInfoFor(m);
     setInfoData(null);
+    setInfoFailed(false);
     try {
       const token = getToken ? await getToken() : null;
-      if (!token) return;
+      if (!token) {
+        setInfoFailed(true);
+        return;
+      }
       setInfoData(await getMessageInfo(token, m.id));
     } catch {
-      /* sheet shows a spinner-less fallback */
+      setInfoFailed(true); // sheet shows a retry row instead of a spinner
     }
   }
 
@@ -748,7 +831,10 @@ export function ChatThread({
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top"]}>
+    // Bottom edge is REQUIRED here: Android runs edge-to-edge (SDK 54 default),
+    // so without the bottom inset the composer sits UNDER the 3-button system
+    // navigation bar — input and mic become untappable.
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top", "bottom"]}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={8}>
         {/* Header — subtitle becomes the live typing line when someone types */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
@@ -842,6 +928,9 @@ export function ChatThread({
                         {showName && (
                           <Text style={{ color: colors.accent, fontSize: 12, marginLeft: 10, marginBottom: 2, fontWeight: "700" }}>{m.sender_name}</Text>
                         )}
+                        {/* Long-press opens the same action menu as a bubble, so
+                            a mistaken poll can be deleted. */}
+                        <Pressable onLongPress={() => openActions(m)} delayLongPress={250}>
                         <View style={{ backgroundColor: colors.bg, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: colors.border, gap: 9, minWidth: 248 }}>
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                             <Ionicons name="stats-chart" size={13} color={colors.primary} />
@@ -876,8 +965,12 @@ export function ChatThread({
                             <Text style={{ color: colors.subtle, fontSize: 11 }}>{timeOf(m.created_at)}</Text>
                           </View>
                         </View>
+                        </Pressable>
                       </View>
                     ) : m.is_announcement ? (
+                      // Long-press → actions, so a typo'd announcement can be
+                      // edited or deleted by its sender.
+                      <Pressable onLongPress={() => openActions(m)} delayLongPress={250}>
                       <View style={{ backgroundColor: colors.primarySoft, borderRadius: 14, padding: 12, marginVertical: 4, borderLeftWidth: 3, borderLeftColor: colors.primary }}>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
                           <Ionicons name="megaphone" size={14} color={colors.primary} />
@@ -886,6 +979,7 @@ export function ChatThread({
                         {m.body ? <Text style={{ color: colors.text, fontSize: 14 }}>{m.body}</Text> : null}
                         <Text style={{ color: colors.muted, fontSize: 10, marginTop: 4 }}>{timeOf(m.created_at)}</Text>
                       </View>
+                      </Pressable>
                     ) : (
                       <SwipeToReply onReply={() => setReplyTo(m)}>
                       <View style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "80%", marginTop: showName ? 8 : 2, marginBottom: hasReactions ? 12 : 0 }}>
@@ -951,7 +1045,7 @@ export function ChatThread({
                 onPress={() => onFailedPress(p)}
                 style={{ alignSelf: "flex-end", maxWidth: "80%", marginTop: 2, opacity: p.failed ? 0.9 : 0.75 }}
               >
-                {bubble(true, { body: p.body, localUri: p.localUri, kind: p.kind, name: p.name, replyTo: replyTo ? { sender_name: replyTo.sender_name, preview: replyTo.body ?? "…" } : null }, "", p.failed ? "failed" : "sending")}
+                {bubble(true, { body: p.body, localUri: p.localUri, kind: p.kind, name: p.name, replyTo: p.replyPreview ?? null }, "", p.failed ? "failed" : "sending")}
                 {p.failed && (
                   <Text style={{ color: colors.danger, fontSize: 11, fontWeight: "700", textAlign: "right", marginTop: 3 }}>Not sent — tap for options</Text>
                 )}
@@ -1004,7 +1098,7 @@ export function ChatThread({
               <Text style={{ color: colors.accent, fontWeight: "800", fontSize: 12 }}>Editing message</Text>
               <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={1}>{editing.body}</Text>
             </View>
-            <Pressable onPress={() => { setEditing(null); setText(""); }} hitSlop={8}>
+            <Pressable onPress={endEdit} hitSlop={8}>
               <Ionicons name="close-circle" size={20} color={colors.muted} />
             </Pressable>
           </View>
@@ -1187,7 +1281,7 @@ export function ChatThread({
               <MenuRow label="Reply" icon="arrow-undo" onPress={() => { setReplyTo(actionFor); setActionFor(null); }} />
               {getToken ? <MenuRow label="Forward" icon="arrow-redo" onPress={() => void openForward(actionFor)} /> : null}
               {actionFor.body ? <MenuRow label="Copy" icon="copy-outline" onPress={() => doCopy(actionFor)} /> : null}
-              {actionFor.sender_id === meId && actionFor.body && edit ? (
+              {actionFor.sender_id === meId && actionFor.body && edit && actionFor.kind !== "poll" ? (
                 <MenuRow label="Edit" icon="pencil" onPress={() => startEdit(actionFor)} />
               ) : null}
               {actionFor.sender_id === meId && getToken ? (
@@ -1244,7 +1338,12 @@ export function ChatThread({
             <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2, marginBottom: 10 }}>
               Sent {new Date(infoFor.created_at).toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
             </Text>
-            {infoData === null ? (
+            {infoData === null && infoFailed ? (
+              <Pressable onPress={() => void openInfo(infoFor)} style={{ alignItems: "center", paddingVertical: 18, gap: 4 }}>
+                <Text style={{ color: colors.muted, fontSize: 13.5 }}>Couldn&apos;t load message info.</Text>
+                <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 14 }}>Tap to retry</Text>
+              </Pressable>
+            ) : infoData === null ? (
               <ActivityIndicator color={colors.primary} style={{ marginVertical: 18 }} />
             ) : (
               <>
