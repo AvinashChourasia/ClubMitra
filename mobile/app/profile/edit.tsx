@@ -6,7 +6,6 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -78,7 +77,9 @@ export default function EditProfile() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {/* behavior="padding" on BOTH platforms: Android adjustResize is dead
+          under edge-to-edge — the Age field (number pad) was keyboard-covered. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Edit profile</Text>
           <Text style={styles.subtitle}>To change your password, go to Settings → Change password.</Text>

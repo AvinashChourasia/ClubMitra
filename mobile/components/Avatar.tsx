@@ -35,7 +35,9 @@ export function Avatar({ name, uri, size = 48, bg = colors.primary, color = "#ff
       }}
     >
       {uri ? (
-        <Image source={{ uri }} style={{ width: size, height: size }} />
+        // resizeMethod="resize": decode near the rendered size on Android — a
+        // full-res photo_url would otherwise decode a huge bitmap per row.
+        <Image source={{ uri }} style={{ width: size, height: size }} resizeMethod="resize" />
       ) : (
         <Text style={{ color, fontSize: size * 0.38, fontWeight: "800" }}>{initialsOf(name)}</Text>
       )}

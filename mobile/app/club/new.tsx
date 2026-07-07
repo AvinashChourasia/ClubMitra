@@ -7,7 +7,6 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Switch,
@@ -71,7 +70,9 @@ export default function NewClub() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {/* behavior="padding" on BOTH platforms: Android adjustResize is dead
+          under edge-to-edge — the bottom-of-form Description was typed blind. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Create a club</Text>
           <Text style={styles.subtitle}>You&apos;ll be its admin. Name it and pick your city to start.</Text>

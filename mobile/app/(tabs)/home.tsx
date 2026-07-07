@@ -58,9 +58,6 @@ export default function Home() {
   // the last-good state). Only surfaced as a retry card when we have nothing
   // to show — see `loadFailed && !hasData` below.
   const [loadFailed, setLoadFailed] = useState(false);
-  // A run recording in the background (started then minimised) — surfaced as a
-  // "resume" banner so it's never silently lost behind the home screen.
-  const [activeRun, setActiveRun] = useState<{ distanceM: number; elapsedS: number } | null>(null);
   const { joinClub, joiningId } = useJoinGate();
 
   const load = useCallback(async () => {
@@ -115,29 +112,6 @@ export default function Home() {
         active = false;
       };
     }, [load])
-  );
-
-  // Keep the "resume run" banner live while Home is focused — a run minimised
-  // here is still recording, so its distance/time should keep ticking.
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
-      const tick = async () => {
-        const s = await activeStats();
-        if (!active) return;
-        if (!s) {
-          setActiveRun(null);
-          return;
-        }
-        setActiveRun({ distanceM: s.distanceM, elapsedS: liveElapsedS(s, Date.now()) });
-      };
-      void tick();
-      const id = setInterval(() => void tick(), 1000);
-      return () => {
-        active = false;
-        clearInterval(id);
-      };
-    }, [])
   );
 
   async function onRefresh() {
@@ -203,41 +177,10 @@ export default function Home() {
           </View>
         </GradientCard>
 
-        {/* A run is recording in the background — resume it instead of offering
-            to start a new one (which would discard the one in progress). */}
-        {activeRun ? (
-          <Tap
-            onPress={() => router.push("/activity/record")}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 14,
-              backgroundColor: colors.primarySoft,
-              borderRadius: 18,
-              borderWidth: 1,
-              borderColor: colors.primary,
-              padding: 16,
-            }}
-          >
-            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name="pulse" size={22} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 16 }}>Run in progress · tap to resume</Text>
-              <Text style={{ color: colors.muted, fontSize: 13, fontWeight: "600" }}>
-                {formatDistance(activeRun.distanceM)} · {formatDuration(activeRun.elapsedS)}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.primary} />
-          </Tap>
-        ) : (
-          /* Start a run — the GPS track card IS the record button. */
-          <TrackRunCard
-            onPress={() => router.push("/activity/record")}
-            title="Record your run"
-            subtitle="Every km counts for your clubs & challenges."
-          />
-        )}
+        {/* Record entry point — resume banner while a run records in the
+            background, otherwise the "start a run" track card. Lives in its
+            own component so its 1s tick never re-renders this whole screen. */}
+        <ActiveRunBanner onPress={() => router.push("/activity/record")} />
 
         {/* Your last run — real route thumbnail + the headline numbers. */}
         {lastRun && (
@@ -349,6 +292,77 @@ export default function Home() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+// ActiveRunBanner: the "run in progress" resume banner, or the start-a-run
+// track card when nothing is recording. The 1s activeStats() tick lives HERE
+// so a minimised run only re-renders these few views every second — never the
+// whole Home ScrollView (hero, RouteTrace SVG, carousels, challenge cards).
+function ActiveRunBanner({ onPress }: { onPress: () => void }) {
+  // A run recording in the background (started then minimised) — surfaced as a
+  // "resume" banner so it's never silently lost behind the home screen.
+  const [activeRun, setActiveRun] = useState<{ distanceM: number; elapsedS: number } | null>(null);
+
+  // Keep the banner live while Home is focused — a run minimised here is still
+  // recording, so its distance/time should keep ticking.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const tick = async () => {
+        const s = await activeStats();
+        if (!active) return;
+        if (!s) {
+          setActiveRun((prev) => (prev === null ? prev : null));
+          return;
+        }
+        const distanceM = s.distanceM;
+        const elapsedS = liveElapsedS(s, Date.now());
+        // Bail with the same object when nothing changed (e.g. auto-paused) so
+        // identical seconds don't re-render even this small tree.
+        setActiveRun((prev) => (prev && prev.distanceM === distanceM && prev.elapsedS === elapsedS ? prev : { distanceM, elapsedS }));
+      };
+      void tick();
+      const id = setInterval(() => void tick(), 1000);
+      return () => {
+        active = false;
+        clearInterval(id);
+      };
+    }, [])
+  );
+
+  // A run is recording in the background — resume it instead of offering to
+  // start a new one (which would discard the one in progress).
+  if (activeRun) {
+    return (
+      <Tap
+        onPress={onPress}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 14,
+          backgroundColor: colors.primarySoft,
+          borderRadius: 18,
+          borderWidth: 1,
+          borderColor: colors.primary,
+          padding: 16,
+        }}
+      >
+        <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="pulse" size={22} color="#fff" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 16 }}>Run in progress · tap to resume</Text>
+          <Text style={{ color: colors.muted, fontSize: 13, fontWeight: "600" }}>
+            {formatDistance(activeRun.distanceM)} · {formatDuration(activeRun.elapsedS)}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.primary} />
+      </Tap>
+    );
+  }
+
+  /* Start a run — the GPS track card IS the record button. */
+  return <TrackRunCard onPress={onPress} title="Record your run" subtitle="Every km counts for your clubs & challenges." />;
 }
 
 function HeroStat({ value, label }: { value: number; label: string }) {

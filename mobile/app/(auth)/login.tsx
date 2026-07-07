@@ -3,7 +3,7 @@
 // user home. New runners create an account on the register screen.
 
 import { useRef, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Text, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -52,7 +52,10 @@ export default function Login() {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    // behavior="padding" on BOTH platforms: Android's adjustResize is dead under
+    // edge-to-edge, so without JS padding the keyboard covers the password
+    // field, the error text and the Log in button (centered layout, no scroll).
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior="padding">
       <View style={styles.screen}>
         {/* Brand */}
         <View style={{ alignItems: "center", gap: 12, marginBottom: 12 }}>

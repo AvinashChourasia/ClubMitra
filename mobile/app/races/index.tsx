@@ -5,7 +5,7 @@
 // MarathonMitra event page for full details + registration.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, FlatList, Image, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Animated, FlatList, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -286,56 +286,65 @@ export default function Races() {
           <RaceMap races={visible} onPressRace={openRace} />
         </View>
       ) : (
-        <ScrollView
+        // FlatList (windowed) — a plain ScrollView mounted EVERY hero card at
+        // once: N full-res banner decodes + N mount springs in one frame budget.
+        <FlatList
+          data={visible}
+          keyExtractor={(r) => r.id}
+          initialNumToRender={6}
+          windowSize={7}
+          removeClippedSubviews
           contentContainerStyle={{ padding: 16, paddingTop: 12, gap: 12, paddingBottom: 40 }}
           keyboardShouldPersistTaps="handled"
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-        >
-          {/* Recommended for you — affinity-curated strip */}
-          {showRecommended && (
-            <View style={{ gap: 8, marginBottom: 2 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Ionicons name="sparkles" size={15} color={colors.primary} />
-                <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Recommended for you</Text>
-              </View>
-              <RaceCarousel races={recommended} onPressRace={openRace} />
-            </View>
-          )}
-
-          {visible.length === 0 ? (
-            <View style={[styles.card, { alignItems: "center", paddingVertical: 32 }]}>
-              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name={emptyIcon} size={28} color={colors.primary} />
-              </View>
-              <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, marginTop: 12, textAlign: "center" }}>{emptyTitle}</Text>
-              <Text style={{ color: colors.muted, marginTop: 4, textAlign: "center", paddingHorizontal: 12 }}>{emptyBody}</Text>
-            </View>
-          ) : (
+          ListHeaderComponent={
             <>
+              {/* Recommended for you — affinity-curated strip */}
               {showRecommended && (
+                <View style={{ gap: 8, marginBottom: 2 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Ionicons name="sparkles" size={15} color={colors.primary} />
+                    <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Recommended for you</Text>
+                  </View>
+                  <RaceCarousel races={recommended} onPressRace={openRace} />
+                </View>
+              )}
+
+              {visible.length === 0 ? (
+                <View style={[styles.card, { alignItems: "center", paddingVertical: 32 }]}>
+                  <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" }}>
+                    <Ionicons name={emptyIcon} size={28} color={colors.primary} />
+                  </View>
+                  <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16, marginTop: 12, textAlign: "center" }}>{emptyTitle}</Text>
+                  <Text style={{ color: colors.muted, marginTop: 4, textAlign: "center", paddingHorizontal: 12 }}>{emptyBody}</Text>
+                </View>
+              ) : showRecommended ? (
                 <Text style={{ color: colors.muted, fontWeight: "800", fontSize: 13, marginTop: 2 }}>
                   {scope === "city" && city ? `All races in ${city}` : "All upcoming races"}
                 </Text>
-              )}
-              {visible.map((r, i) => (
-                <RaceCard
-                  key={r.id}
-                  race={r}
-                  index={i}
-                  busy={busyId === r.id}
-                  mine={r.created_by === user.id}
-                  saved={r.going}
-                  onGoing={() => void onGoing(r)}
-                  onCalendar={() => void onAddToCalendar(r)}
-                  onDelete={() => onDelete(r)}
-                />
-              ))}
+              ) : null}
+            </>
+          }
+          ListFooterComponent={
+            visible.length > 0 ? (
               <Text style={{ color: colors.subtle, fontSize: 11, textAlign: "center" }}>
                 {visible.length} {visible.length === 1 ? "race" : "races"} · data from MarathonMitra · tap a card for details
               </Text>
-            </>
+            ) : null
+          }
+          renderItem={({ item: r, index: i }) => (
+            <RaceCard
+              race={r}
+              index={i}
+              busy={busyId === r.id}
+              mine={r.created_by === user.id}
+              saved={r.going}
+              onGoing={() => void onGoing(r)}
+              onCalendar={() => void onAddToCalendar(r)}
+              onDelete={() => onDelete(r)}
+            />
           )}
-        </ScrollView>
+        />
       )}
 
       <CityFilterSheet
@@ -465,9 +474,14 @@ function CityFilterSheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={close}>
-      {/* Dim backdrop; tap to dismiss. */}
-      <Pressable onPress={close} style={{ flex: 1, backgroundColor: "rgba(2,6,23,0.45)" }} />
-      <SafeAreaView edges={["bottom"]} style={{ backgroundColor: colors.bg, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: "75%", ...shadow.xl }}>
+      {/* A Modal is its own native window, so keyboard handling must live HERE
+          (behavior="padding" both platforms — Android adjustResize is dead
+          under edge-to-edge). The backdrop is absolute-fill so the KAV's
+          padding lifts the sheet, not the backdrop. */}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: "flex-end" }}>
+        {/* Dim backdrop; tap to dismiss. */}
+        <Pressable onPress={close} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(2,6,23,0.45)" }} />
+        <SafeAreaView edges={["bottom"]} style={{ backgroundColor: colors.bg, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, maxHeight: "75%", ...shadow.xl }}>
         {/* Grab handle */}
         <View style={{ alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: colors.border, marginTop: 10, marginBottom: 6 }} />
         <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 12 }}>
@@ -511,7 +525,8 @@ function CityFilterSheet({
             );
           }}
         />
-      </SafeAreaView>
+        </SafeAreaView>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -593,7 +608,9 @@ function RaceCard({
       >
         {r.image_url ? (
           <View>
-            <Image source={{ uri: r.image_url }} style={{ width: "100%", height: 184 }} resizeMode="cover" />
+            {/* resizeMethod="resize": decode near the card size on Android
+                instead of the full event photo (memory spike + jank). */}
+            <Image source={{ uri: r.image_url }} style={{ width: "100%", height: 184 }} resizeMode="cover" resizeMethod="resize" />
             <LinearGradient
               colors={SCRIM}
               locations={[0, 0.5, 1]}

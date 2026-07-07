@@ -1,7 +1,7 @@
 // Run detail: when/where, who's checked in, and a one-tap self check-in.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -191,8 +191,11 @@ export default function RunDetail() {
 
       {/* Check-out reason modal (reason is optional) */}
       <Modal visible={showCheckout} animationType="fade" transparent onRequestClose={() => setShowCheckout(false)}>
+        {/* behavior="padding" on BOTH platforms: Android adjustResize is dead
+            under edge-to-edge — the multiline reason input and the Check out
+            button overlapped the keyboard. Centered card re-centers above it. */}
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior="padding"
           style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 24 }}
         >
           <View style={{ backgroundColor: colors.bg, borderRadius: 16, padding: 20, gap: 12 }}>

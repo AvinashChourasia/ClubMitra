@@ -285,6 +285,10 @@ export default function ClubInventory() {
 
       {/* Stock-move modal */}
       <Modal visible={moveItem !== null} transparent animationType="fade" onRequestClose={() => setMoveItem(null)}>
+        {/* A Modal is its own native window — the screen-level KAV can't reach
+            it, and the Quantity input autoFocuses. behavior="padding" on BOTH
+            platforms so the centered card re-centers above the number pad. */}
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <Pressable onPress={() => setMoveItem(null)} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 28 }}>
           <Pressable onPress={() => {}} style={{ backgroundColor: colors.bg, borderRadius: 18, padding: 20, gap: 12 }}>
             <Text style={{ color: colors.text, fontWeight: "800", fontSize: 17, textTransform: "capitalize" }}>
@@ -304,6 +308,7 @@ export default function ClubInventory() {
             </Pressable>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

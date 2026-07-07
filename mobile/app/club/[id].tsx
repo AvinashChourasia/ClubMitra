@@ -446,16 +446,20 @@ export default function ClubDetail() {
   }
 
   async function withToken(fn: (token: string) => Promise<unknown>): Promise<boolean> {
+    // Only the MUTATION decides success/failure — the refresh is best-effort.
+    // Folding load() into the same try meant a flaky follow-up GET could report
+    // "Couldn't do that" for an approve/remove that actually succeeded (and the
+    // admin would re-tap into a second, now-invalid, action).
     try {
       const token = await getAccessToken();
       await fn(token!);
-      await load();
-      return true;
     } catch (e) {
       Alert.alert("Couldn't do that", e instanceof ApiError ? e.message : "Something went wrong");
       await load().catch(() => {}); // re-sync the list even on error (e.g. member already removed)
       return false;
     }
+    await load().catch(() => {}); // the poll/next focus reconciles if this blips
+    return true;
   }
 
   // Runs one member-sheet action: the sheet stays open (spinner on the active

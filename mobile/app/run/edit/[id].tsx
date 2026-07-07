@@ -3,7 +3,7 @@
 // changes just this one run.
 
 import { useCallback, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -95,7 +95,9 @@ export default function EditRun() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {/* behavior="padding" on BOTH platforms — same calendar-then-inputs layout
+          as run/new: Android's dead adjustResize left the lower inputs covered. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Edit run</Text>
 

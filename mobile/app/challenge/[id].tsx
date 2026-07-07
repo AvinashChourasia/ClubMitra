@@ -10,7 +10,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -572,8 +571,11 @@ function EditSheet({
 
   return (
     <Modal visible animationType="fade" transparent onRequestClose={onClose}>
+      {/* behavior="padding" on BOTH platforms: Android adjustResize is dead
+          under edge-to-edge, so the lower inputs/date rows/Save were keyboard-
+          covered. With justifyContent:"center" the card re-centers above it. */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: 22 }}
       >
         <View style={{ backgroundColor: colors.bg, borderRadius: 20, maxHeight: "88%" }}>

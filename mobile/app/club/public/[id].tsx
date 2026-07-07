@@ -119,7 +119,10 @@ export default function PublicClubScreen() {
               </Tap>
             ) : club.join_policy === "open" ? (
               <Tap
-                onPress={() => void joinClub(club)}
+                // Re-check membership once the join resolves — the user may stay
+                // on this page (alert "OK"), and a stale `member` would leave an
+                // active "Join this club" button that re-posts the join.
+                onPress={() => void joinClub(club).then(() => loadMembership())}
                 disabled={joiningId === club.id}
                 style={[styles.button, { borderRadius: 999, opacity: joiningId === club.id ? 0.6 : 1 }]}
               >

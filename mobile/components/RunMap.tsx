@@ -92,11 +92,17 @@ export function RunMap({ coords, times, height, live = false, selectedKm = null,
   // Live trace, chunked. Completed chunks are memoized keyed ONLY on how many
   // exist — the track is append-only, so their contents never change and their
   // identities stay stable across the 1 Hz polls. Chunks overlap by one point
-  // so the line has no gaps.
+  // so the line has no gaps. When a NEW chunk completes, earlier chunks are
+  // reused from the previous compute (the ref) — re-slicing them all would hand
+  // every Polyline a fresh coordinates identity and re-marshal the whole route
+  // to native in one frame (a growing jank spike every ~3 minutes).
   const chunkCount = live ? Math.floor(Math.max(0, coords.length - 1) / CHUNK) : 0;
+  const prevChunksRef = useRef<LatLng[][]>([]);
   const frozenChunks = useMemo(() => {
+    const prev = prevChunksRef.current;
     const out: LatLng[][] = [];
-    for (let i = 0; i < chunkCount; i++) out.push(coords.slice(i * CHUNK, (i + 1) * CHUNK + 1));
+    for (let i = 0; i < chunkCount; i++) out.push(prev[i] ?? coords.slice(i * CHUNK, (i + 1) * CHUNK + 1));
+    prevChunksRef.current = out;
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chunkCount]);

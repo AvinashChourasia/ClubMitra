@@ -122,6 +122,12 @@ export default function RecordRun() {
   // The "turn on high-accuracy mode" system dialog may show at most ONCE per
   // screen visit — declining must not re-nag on every status transition.
   const nudgedRef = useRef(false);
+  // Current status for the nudge gate WITHOUT being an effect dependency —
+  // depending on `status` tore the warm watch down and relaunched the whole
+  // pipeline on START (idle→requesting), exactly the GNSS remove/re-add gap
+  // the cleanup comment below defends against.
+  const statusRef = useRef(status);
+  statusRef.current = status;
 
   useEffect(() => {
     // The engine owns GPS while recording; nothing to warm while we're still
@@ -129,6 +135,11 @@ export default function RecordRun() {
     if (checking || recording || uploading) return;
     let cancelled = false;
     let sub: Location.LocationSubscription | null = null;
+    // True once this run reached the watchPositionAsync attempt. The 2s tick
+    // must only re-arm the effect when it bailed BEFORE the watch (blocker
+    // cleared) — re-arming while a watch is pending/failed would relaunch the
+    // whole pipeline every 2s indefinitely (battery + churn).
+    let watchAttempted = false;
     warmingRef.current = true;
     const tick = setInterval(() => {
       setWarmTick((t) => t + 1);
@@ -141,7 +152,7 @@ export default function RecordRun() {
         if (cancelled) return;
         const fresh = { granted: !!p?.granted, precise: p?.android ? p.android.accuracy === "fine" : true, servicesOn: s };
         setGpsMeta(fresh);
-        if (!sub && fresh.granted && fresh.servicesOn) setWarmNonce((n) => n + 1);
+        if (!sub && !watchAttempted && fresh.granted && fresh.servicesOn) setWarmNonce((n) => n + 1);
       })();
     }, 2000);
     (async () => {
@@ -158,9 +169,10 @@ export default function RecordRun() {
       if (!granted || !servicesOn) return;
 
       // Instant approximate centre for the pre-start map (never a live fix —
-      // atMs 0 keeps the chip honest about it). Generous args on purpose: a
-      // 10-min-old ≤1km fix centres a neighbourhood map fine.
-      const last = await Location.getLastKnownPositionAsync({ maxAge: 600000, requiredAccuracy: 1000 }).catch(() => null);
+      // atMs 0 keeps the chip honest about it). Accept ANY cached fix: a stale
+      // rough centre beats a blank box while the GNSS warms ("map takes a
+      // minute to appear"). The live watch replaces it within seconds.
+      const last = await Location.getLastKnownPositionAsync().catch(() => null);
       if (cancelled) return;
       if (last) {
         setWarmFix((cur) => cur ?? {
@@ -168,16 +180,30 @@ export default function RecordRun() {
           accuracyM: last.coords.accuracy ?? null,
           atMs: 0,
         });
+      } else {
+        // No cache (fresh boot / services toggled): grab a fast network-level
+        // fix so the map appears in ~1-3s instead of waiting on satellites.
+        void Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Lowest })
+          .then((quick) => {
+            if (cancelled) return;
+            setWarmFix((cur) => cur ?? {
+              coord: { latitude: quick.coords.latitude, longitude: quick.coords.longitude },
+              accuracyM: quick.coords.accuracy ?? null,
+              atMs: 0,
+            });
+          })
+          .catch(() => {});
       }
       // Nudge Android's high-accuracy mode on. NOT silent when it's off: it
       // shows the system resolution dialog — so at most once per screen visit,
       // and only in the true pre-start state (never mid countdown/start/finish).
-      if (!nudgedRef.current && status === "idle" && !countdownRef.current) {
+      if (!nudgedRef.current && statusRef.current === "idle" && !countdownRef.current) {
         nudgedRef.current = true;
         await Location.enableNetworkProviderAsync().catch(() => {});
       }
       if (cancelled) return;
       try {
+        watchAttempted = true;
         sub = await Location.watchPositionAsync(
           // Same accuracy class as recording, so the fused provider never
           // downgrades between warm-up and the run.
@@ -207,15 +233,25 @@ export default function RecordRun() {
       clearInterval(tick);
       sub?.remove();
     };
-  }, [checking, recording, status, uploading, warmNonce]);
+    // `status` is deliberately NOT a dep (read via statusRef): idle→requesting
+    // on START must not churn the warm watch — it lives until `recording`.
+  }, [checking, recording, uploading, warmNonce]);
 
   const level = gpsLevel(gpsMeta, warmFix, Date.now());
 
-  // Buzz every time a kilometre completes.
+  // Buzz every time a kilometre completes — only on a genuine +1 increment.
+  // Re-entering the screen mid-run jumps km from 0 to N in one poll (attach
+  // reconciliation), which must not fire a phantom "km completed" haptic.
+  const lastKm = useRef(-1);
   useEffect(() => {
-    if (km > 0 && recording) {
+    if (!recording) {
+      lastKm.current = -1; // detached/ended — re-baseline on the next attach
+      return;
+    }
+    if (lastKm.current !== -1 && km === lastKm.current + 1) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
+    lastKm.current = km;
   }, [km, recording]);
 
   // 3-2-1 countdown, then the engine starts. Each tick pulses + clicks. The

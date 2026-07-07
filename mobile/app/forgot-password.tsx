@@ -5,7 +5,7 @@
 // we surface that message as-is (the flow is dormant until a club sets it up).
 
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -57,7 +57,9 @@ export default function ForgotPassword() {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    // behavior="padding" on BOTH platforms — Android adjustResize is dead under
+    // edge-to-edge; the code + new-password inputs would sit behind the keyboard.
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior="padding">
       <ScrollView contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
         <View style={{ alignItems: "center", gap: 10, marginBottom: 18 }}>
           <Ionicons name="lock-closed" size={40} color={colors.primary} />

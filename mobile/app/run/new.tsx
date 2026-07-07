@@ -4,7 +4,7 @@
 // occurrences and creates them all in one call.
 
 import { useMemo, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -88,7 +88,10 @@ export default function NewRun() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {/* behavior="padding" on BOTH platforms: Android adjustResize is dead
+          under edge-to-edge, and Location/Distance/Notes sit below the calendar
+          in the bottom third — with no padding there's no scroll escape. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Schedule a run</Text>
 

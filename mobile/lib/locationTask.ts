@@ -73,12 +73,22 @@ export function liveElapsedS(s: { startMs: number; pause: PauseState; lastFixMs:
   return Math.max(0, Math.floor((ref - s.startMs - pausedMsAt(s.pause, ref)) / 1000));
 }
 
+// In-process mirror of the active buffer. activeStats() is polled at 1 Hz by
+// the HUD and Home's resume banner; without this every tick would re-read and
+// JSON.parse the ENTIRE buffer (~400 KB after an hour) across the bridge. The
+// mirror keeps the hot path bridge-free; storage is only touched on a cold
+// start (mirror still null) and remains the crash-safe source of truth.
+let memActive: Active | null = null;
+
 async function readActive(): Promise<Active | null> {
+  if (memActive) return memActive;
   const raw = await AsyncStorage.getItem(ACTIVE_KEY);
-  return raw ? (JSON.parse(raw) as Active) : null;
+  memActive = raw ? (JSON.parse(raw) as Active) : null;
+  return memActive;
 }
 async function writeActive(a: Active): Promise<void> {
   await AsyncStorage.setItem(ACTIVE_KEY, JSON.stringify(a));
+  memActive = a;
 }
 
 // processFix folds ONE OS location into the active buffer: update the auto-pause
@@ -126,9 +136,16 @@ let bgWriteFailed = false;
 // the finished run as a ghost "run in progress" (which would then upload twice).
 // Batches check this at execution time and no-op during/after teardown.
 let bgStopping = false;
+// Persist the buffer at most this often from the background task — the full
+// JSON.stringify + setItem grows linearly with run length, so doing it on every
+// fix batch is the write-side twin of the activeStats parse cost. Readers use
+// the memActive mirror, so a throttled write only bounds crash-loss (~5s).
+const BG_PERSIST_MS = 5000;
+let bgLastPersistMs = 0;
 function resetBgMirror(): void {
   bgActive = null;
   bgWriteFailed = false;
+  bgLastPersistMs = 0;
 }
 TaskManager.defineTask(RUN_TASK, async ({ data, error }) => {
   if (error) return;
@@ -141,9 +158,15 @@ TaskManager.defineTask(RUN_TASK, async ({ data, error }) => {
       if (!active) return; // not recording
       for (const loc of locations) processFix(active, loc);
       bgActive = active;
+      memActive = active; // live readers (HUD/banner) see this batch immediately
       if (bgStopping) return; // teardown began while we processed — drop the write
+      // Throttle the persist: skip when the last successful write is fresh
+      // (a failed write always retries — those points exist nowhere else).
+      const now = Date.now();
+      if (!bgWriteFailed && now - bgLastPersistMs < BG_PERSIST_MS) return;
       try {
         await writeActive(active);
+        bgLastPersistMs = now;
         bgWriteFailed = false;
       } catch {
         bgWriteFailed = true; // keep bgActive so the next batch retries the write
@@ -298,6 +321,7 @@ export async function stopRun(): Promise<{ points: RunPoint[]; pausedS: number }
   const active = isExpoGo && fgActive ? fgActive : await readActive();
   await endUpdates();
   await AsyncStorage.removeItem(ACTIVE_KEY);
+  memActive = null;
   fgActive = null;
   // Measure paused time at the same capped reference the live clock used, so a
   // trailing suspend right before finishing can't distort the paused total.
@@ -310,6 +334,7 @@ export async function stopRun(): Promise<{ points: RunPoint[]; pausedS: number }
 export async function discardRun(): Promise<void> {
   await endUpdates();
   await AsyncStorage.removeItem(ACTIVE_KEY);
+  memActive = null;
   fgActive = null;
 }
 

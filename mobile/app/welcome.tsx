@@ -3,7 +3,7 @@
 // wall — identity is asked for later, at the moment they try to act.
 
 import { useEffect, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
@@ -60,7 +60,9 @@ export default function Welcome() {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    // behavior="padding" on BOTH platforms — Android adjustResize is dead under
+    // edge-to-edge; the centered city autocomplete would sink under the keyboard.
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior="padding">
       <ScrollView contentContainerStyle={[styles.screen, { flexGrow: 1, justifyContent: "center" }]} keyboardShouldPersistTaps="handled">
         {/* Brand */}
         <View style={{ alignItems: "center", gap: 12, marginBottom: 18 }}>

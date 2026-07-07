@@ -25,6 +25,11 @@ export function useRunRecorder() {
   const [times, setTimes] = useState<number[]>([]);
   const [paused, setPaused] = useState(false);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
+  // How many buffer points route/times currently reflect. Lets the 1s poll
+  // skip the O(n) rebuild (and the identity churn that defeats every
+  // downstream useMemo) on ticks where no new fix landed, and append only the
+  // NEW points otherwise — Date.parse cost is O(new), not O(route).
+  const lastLen = useRef(0);
 
   // poll pulls the latest from the engine's buffer into HUD state.
   const poll = useCallback(async () => {
@@ -32,9 +37,19 @@ export function useRunRecorder() {
     if (!s) return;
     setElapsedS(liveElapsedS(s, Date.now()));
     setDistanceM(s.distanceM);
-    setRoute(s.points.map((p) => ({ latitude: p.lat, longitude: p.lng })));
-    setTimes(s.points.map((p) => Date.parse(p.timestamp)));
     setPaused(s.pause.paused);
+    const n = s.points.length;
+    if (n === lastLen.current) return; // no new points — keep array identities
+    if (n > lastLen.current) {
+      const fresh = s.points.slice(lastLen.current);
+      setRoute((prev) => prev.concat(fresh.map((p) => ({ latitude: p.lat, longitude: p.lng }))));
+      setTimes((prev) => prev.concat(fresh.map((p) => Date.parse(p.timestamp))));
+    } else {
+      // Buffer shrank (new run attached) — rebuild from scratch.
+      setRoute(s.points.map((p) => ({ latitude: p.lat, longitude: p.lng })));
+      setTimes(s.points.map((p) => Date.parse(p.timestamp)));
+    }
+    lastLen.current = n;
   }, []);
 
   const attach = useCallback(() => {
@@ -87,6 +102,7 @@ export function useRunRecorder() {
     setDistanceM(0);
     setRoute([]);
     setTimes([]);
+    lastLen.current = 0; // route/times were reset — appends must start over
     setPaused(false);
     setStatus("recording");
     attach();

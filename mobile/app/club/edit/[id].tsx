@@ -6,7 +6,6 @@ import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Switch,
@@ -119,7 +118,9 @@ export default function EditClub() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {/* behavior="padding" on BOTH platforms: Android adjustResize is dead
+          under edge-to-edge — Description and the fee fields were keyboard-covered. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Edit club</Text>
 

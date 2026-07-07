@@ -298,7 +298,9 @@ function ChallengeCard({ item, onPress }: { item: Challenge; onPress: () => void
           {item.joined && phase !== "ended" && <Stat icon="checkmark-circle" text="In" tint={colors.success} />}
         </View>
         {item.joined && (
-          <ProgressRing size={46} stroke={5} fraction={frac} colors={t.ring}>
+          // animate off: one JS-driven sweep per card stacks bridge traffic
+          // exactly during the tab transition — the 46px ring doesn't need it.
+          <ProgressRing size={46} stroke={5} fraction={frac} colors={t.ring} animate={false}>
             <Text style={{ color: colors.text, fontWeight: "800", fontSize: 11 }}>{Math.round(frac * 100)}</Text>
           </ProgressRing>
         )}

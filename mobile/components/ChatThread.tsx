@@ -244,6 +244,11 @@ export function ChatThread({
   const [pollMulti, setPollMulti] = useState(false);
   const [pollBusy, setPollBusy] = useState(false);
   const [votingId, setVotingId] = useState<string | null>(null);
+  // Window the rendered history: only the newest N bubbles mount (each row
+  // carries a PanResponder, images decode, voice notes hold a live native
+  // player). "Show earlier messages" raises the cap; the full array still
+  // drives counts/scroll bookkeeping. Keeps the rock-solid ScrollView.
+  const [visibleCount, setVisibleCount] = useState(60);
 
   const scrollEnd = (animated: boolean) => setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 50);
 
@@ -455,20 +460,25 @@ export function ChatThread({
     // Edit mode: apply the rewrite in place (no optimistic bubble needed).
     if (editing && edit) {
       const target = editing;
-      endEdit();
       try {
         await edit(target.id, body);
       } catch (e) {
+        // STAY in edit mode: endEdit() would restore the pre-edit draft and
+        // throw the rewrite away — keep it in the composer for a retry.
         Alert.alert("Couldn't edit", e instanceof ApiError ? e.message : "Something went wrong");
         return;
       }
+      endEdit(); // only leave edit mode (restoring the stashed draft) on success
       // Edit applied — a failed refresh must not read as a failed edit.
       await reload(false).catch(() => {});
       return;
     }
     const cap = staged;
     const quote = replyTo;
-    const isAnnounce = announceMode && !!announce && !cap;
+    // canAnnounce guards the SEND too: ?announce=1 can arm announceMode before
+    // the async admin check resolves — never blast the announce endpoint (or
+    // 403) while the "Announcing" chip isn't even visible yet.
+    const isAnnounce = announceMode && !!canAnnounce && !!announce && !cap;
     const p: Pending = {
       tempId: `tmp-${seq.current++}`,
       body: body || undefined,
@@ -800,7 +810,9 @@ export function ChatThread({
           // disabled when there's no remote URL (pending bubbles) so the tap
           // falls through to the failed-message handler.
           <Pressable disabled={!opts.mediaUrl} onPress={() => opts.mediaUrl && setViewer(opts.mediaUrl)}>
-            <Image source={{ uri: imgUri! }} style={{ width: 216, height: 216, borderRadius: 15 }} resizeMode="cover" />
+            {/* resizeMethod="resize": Android otherwise decodes the FULL camera
+                bitmap (30-45 MB) for this 216pt box — GC churn + dropped frames. */}
+            <Image source={{ uri: imgUri! }} style={{ width: 216, height: 216, borderRadius: 15 }} resizeMode="cover" resizeMethod="resize" />
           </Pressable>
         ) : null}
         {isAudio ? (
@@ -835,7 +847,10 @@ export function ChatThread({
     // so without the bottom inset the composer sits UNDER the 3-button system
     // navigation bar — input and mic become untappable.
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgSecondary }} edges={["top", "bottom"]}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={8}>
+      {/* behavior="padding" on BOTH platforms: Android's automatic adjustResize
+          is dead under SDK 54 edge-to-edge, so without JS padding the keyboard
+          simply covers the composer (typing blind). */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
         {/* Header — subtitle becomes the live typing line when someone types */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
           <Pressable onPress={() => router.back()} hitSlop={8}>
@@ -885,8 +900,23 @@ export function ChatThread({
                 <Text style={{ color: colors.muted, marginTop: 8 }}>No messages yet. Say hello 👋</Text>
               </View>
             ) : (
-              messages.map((m, i) => {
-                const prev = i > 0 ? messages[i - 1] : null;
+              (() => {
+                const shown = messages.length > visibleCount ? messages.slice(-visibleCount) : messages;
+                return (
+                  <>
+                    {messages.length > visibleCount && (
+                      <Pressable
+                        onPress={() => setVisibleCount((c) => c + 60)}
+                        style={{ alignItems: "center", paddingVertical: 10 }}
+                        hitSlop={8}
+                      >
+                        <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 13 }}>
+                          Show earlier messages ({messages.length - visibleCount})
+                        </Text>
+                      </Pressable>
+                    )}
+                    {shown.map((m, i) => {
+                const prev = i > 0 ? shown[i - 1] : null;
                 const showDate = !prev || !sameDay(prev.created_at, m.created_at);
                 const mine = m.sender_id === meId;
                 const showName = !!isGroup && !mine && (showDate || !prev || prev.sender_id !== m.sender_id);
@@ -1033,7 +1063,10 @@ export function ChatThread({
                     )}
                   </View>
                 );
-              })
+                    })}
+                  </>
+                );
+              })()
             )}
 
             {/* Optimistic (pending) messages — always mine, shown at the bottom.
@@ -1139,7 +1172,10 @@ export function ChatThread({
 
         {/* Composer — pill input, circular attach + send */}
         <View style={{ padding: 10, borderTopWidth: staged || replyTo ? 0 : 1, borderTopColor: colors.border, gap: 8 }}>
-          {canAnnounce && announce && !staged && (
+          {/* Also shown while announceMode is armed but canAnnounce hasn't
+              resolved yet (?announce=1 deep link) — an armed mode must always
+              be visible and cancellable, never silently pending. */}
+          {announce && (canAnnounce || announceMode) && !staged && (
             <Pressable onPress={() => setAnnounceMode((v) => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 4 }}>
               <Ionicons name={announceMode ? "megaphone" : "megaphone-outline"} size={16} color={announceMode ? colors.primary : colors.muted} />
               <Text style={{ color: announceMode ? colors.primary : colors.muted, fontSize: 12, fontWeight: "700" }}>{announceMode ? "Announcing (pushes to all members)" : "Send as announcement"}</Text>
@@ -1192,6 +1228,60 @@ export function ChatThread({
           </View>
           )}
         </View>
+
+        {/* Poll composer (admins) — INSIDE the KAV so its padding lifts the
+            sheet above the keyboard (as a sibling it stayed pinned to the
+            window bottom, fully covered while typing on both platforms). */}
+        {pollOpen && (
+          <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
+            <Pressable onPress={() => setPollOpen(false)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
+            <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 30, gap: 12 }}>
+              <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 2 }} />
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ fontSize: 17, fontWeight: "800", color: colors.text }}>New poll</Text>
+                <Pressable onPress={() => setPollOpen(false)} hitSlop={8}>
+                  <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 15 }}>Cancel</Text>
+                </Pressable>
+              </View>
+              <TextInput
+                style={styles.input}
+                placeholder="Ask a question…"
+                placeholderTextColor={colors.muted}
+                value={pollQuestion}
+                onChangeText={setPollQuestion}
+              />
+              {pollOptions.map((opt, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    placeholder={`Option ${i + 1}`}
+                    placeholderTextColor={colors.muted}
+                    value={opt}
+                    onChangeText={(v) => setPollOptions((arr) => arr.map((x, j) => (j === i ? v : x)))}
+                  />
+                  {pollOptions.length > 2 && (
+                    <Pressable onPress={() => setPollOptions((arr) => arr.filter((_, j) => j !== i))} hitSlop={8}>
+                      <Ionicons name="close-circle" size={22} color={colors.muted} />
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+              {pollOptions.length < 6 && (
+                <Pressable onPress={() => setPollOptions((arr) => [...arr, ""])} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" }}>
+                  <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+                  <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 14 }}>Add option</Text>
+                </Pressable>
+              )}
+              <Pressable onPress={() => setPollMulti((m) => !m)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name={pollMulti ? "checkbox" : "square-outline"} size={20} color={pollMulti ? colors.primary : colors.muted} />
+                <Text style={{ color: colors.muted, fontSize: 14 }}>Allow choosing multiple options</Text>
+              </Pressable>
+              <Pressable onPress={() => void submitPoll()} disabled={pollBusy} style={[styles.button, { borderRadius: 999, opacity: pollBusy ? 0.6 : 1 }]}>
+                <Text style={styles.buttonText}>{pollBusy ? "Posting…" : "Post poll"}</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
       </KeyboardAvoidingView>
 
       {/* Long-press overlay — WhatsApp style: dim the room, float the emoji bar
@@ -1400,62 +1490,10 @@ export function ChatThread({
         </View>
       )}
 
-      {/* Poll composer (admins) */}
-      {pollOpen && (
-        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}>
-          <Pressable onPress={() => setPollOpen(false)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
-          <View style={{ backgroundColor: colors.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 30, gap: 12 }}>
-            <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 2 }} />
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={{ fontSize: 17, fontWeight: "800", color: colors.text }}>New poll</Text>
-              <Pressable onPress={() => setPollOpen(false)} hitSlop={8}>
-                <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 15 }}>Cancel</Text>
-              </Pressable>
-            </View>
-            <TextInput
-              style={styles.input}
-              placeholder="Ask a question…"
-              placeholderTextColor={colors.muted}
-              value={pollQuestion}
-              onChangeText={setPollQuestion}
-            />
-            {pollOptions.map((opt, i) => (
-              <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <TextInput
-                  style={[styles.input, { flex: 1 }]}
-                  placeholder={`Option ${i + 1}`}
-                  placeholderTextColor={colors.muted}
-                  value={opt}
-                  onChangeText={(v) => setPollOptions((arr) => arr.map((x, j) => (j === i ? v : x)))}
-                />
-                {pollOptions.length > 2 && (
-                  <Pressable onPress={() => setPollOptions((arr) => arr.filter((_, j) => j !== i))} hitSlop={8}>
-                    <Ionicons name="close-circle" size={22} color={colors.muted} />
-                  </Pressable>
-                )}
-              </View>
-            ))}
-            {pollOptions.length < 6 && (
-              <Pressable onPress={() => setPollOptions((arr) => [...arr, ""])} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" }}>
-                <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
-                <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 14 }}>Add option</Text>
-              </Pressable>
-            )}
-            <Pressable onPress={() => setPollMulti((m) => !m)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Ionicons name={pollMulti ? "checkbox" : "square-outline"} size={20} color={pollMulti ? colors.primary : colors.muted} />
-              <Text style={{ color: colors.muted, fontSize: 14 }}>Allow choosing multiple options</Text>
-            </Pressable>
-            <Pressable onPress={() => void submitPoll()} disabled={pollBusy} style={[styles.button, { borderRadius: 999, opacity: pollBusy ? 0.6 : 1 }]}>
-              <Text style={styles.buttonText}>{pollBusy ? "Posting…" : "Post poll"}</Text>
-            </Pressable>
-          </View>
-        </View>
-      )}
-
       {/* Fullscreen image viewer */}
       <Modal visible={viewer !== null} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
         <Pressable onPress={() => setViewer(null)} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.94)", alignItems: "center", justifyContent: "center" }}>
-          {viewer && <Image source={{ uri: viewer }} style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height * 0.8 }} resizeMode="contain" />}
+          {viewer && <Image source={{ uri: viewer }} style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height * 0.8 }} resizeMode="contain" resizeMethod="resize" />}
           <Pressable onPress={() => setViewer(null)} hitSlop={12} style={{ position: "absolute", top: 50, right: 20 }}>
             <Ionicons name="close" size={30} color="#fff" />
           </Pressable>
