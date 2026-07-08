@@ -51,9 +51,7 @@ type metrics struct {
 	earlyRuns   int
 	nightRuns   int
 	monsoonRuns int
-	sub30Pace5k bool // a 5km+ run at < 6:00/km
-	sub60Pace10 bool // a 10km+ run at < 6:00/km
-	bestWeeks   int  // longest stretch of consecutive weeks with 3+ run days
+	bestWeeks   int // longest stretch of consecutive weeks with 3+ run days
 	clubs       int
 	attendance  int
 	chJoined    int
@@ -77,15 +75,10 @@ func (s *Service) computeMetrics(ctx context.Context, userID string) (*metrics, 
 		       COUNT(*)::int,
 		       COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM started_at AT TIME ZONE 'Asia/Kolkata') < 6)::int,
 		       COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM started_at AT TIME ZONE 'Asia/Kolkata') >= 21)::int,
-		       COUNT(*) FILTER (WHERE EXTRACT(MONTH FROM started_at AT TIME ZONE 'Asia/Kolkata') BETWEEN 6 AND 9)::int,
-		       EXISTS(SELECT 1 FROM activities x WHERE x.user_id = $1 AND x.distance_m >= 5000
-		              AND x.duration_s > 0 AND x.duration_s::float / (x.distance_m / 1000.0) < 360),
-		       EXISTS(SELECT 1 FROM activities y WHERE y.user_id = $1 AND y.distance_m >= 10000
-		              AND y.duration_s > 0 AND y.duration_s::float / (y.distance_m / 1000.0) < 360)
+		       COUNT(*) FILTER (WHERE EXTRACT(MONTH FROM started_at AT TIME ZONE 'Asia/Kolkata') BETWEEN 6 AND 9)::int
 		FROM activities WHERE user_id = $1`
 	if err := s.db.QueryRow(ctx, agg, userID).Scan(
-		&m.totalKM, &m.maxRunKM, &m.totalRuns, &m.earlyRuns, &m.nightRuns, &m.monsoonRuns,
-		&m.sub30Pace5k, &m.sub60Pace10); err != nil {
+		&m.totalKM, &m.maxRunKM, &m.totalRuns, &m.earlyRuns, &m.nightRuns, &m.monsoonRuns); err != nil {
 		return nil, err
 	}
 
@@ -194,51 +187,77 @@ func dayMath(days []time.Time) (bestStreak, weekendDays, bestWeeks int) {
 	return bestStreak, weekendDays, run
 }
 
-// progressOf maps a badge to its current metric value (same unit as Target).
-func progressOf(b Badge, m *metrics) float64 {
+// progressOf evaluates a badge RULE: the row's `metric` picks the verified
+// stat, and the returned value is compared against the row's Target (same
+// unit). paceOK carries the per-row results of the parameterized pace_run
+// metric. Unknown metrics evaluate to 0 — a typo'd row can never award.
+func progressOf(b Badge, m *metrics, paceOK map[string]bool) float64 {
 	boolVal := func(ok bool) float64 {
 		if ok {
 			return 1
 		}
 		return 0
 	}
-	switch b.ID {
-	case "first_run":
-		return min(float64(m.totalRuns), 1)
-	case "first_club":
-		return min(float64(m.clubs), 1)
-	case "km_25", "km_100", "km_500", "km_1000":
+	switch b.Metric {
+	case "total_runs":
+		return float64(m.totalRuns)
+	case "clubs":
+		return float64(m.clubs)
+	case "total_km":
 		return m.totalKM
-	case "run_5k", "run_10k", "run_half", "run_full":
+	case "max_run_km":
 		return m.maxRunKM
-	case "streak_3", "streak_7", "streak_14", "streak_30":
+	case "best_streak":
 		return float64(m.bestStreak)
-	case "consistent_4w":
+	case "best_weeks":
 		return float64(m.bestWeeks)
-	case "pace_5k_30":
-		return boolVal(m.sub30Pace5k)
-	case "pace_10k_60":
-		return boolVal(m.sub60Pace10)
-	case "early_bird":
+	case "pace_run":
+		return boolVal(paceOK[b.ID])
+	case "early_runs":
 		return float64(m.earlyRuns)
-	case "night_owl":
+	case "night_runs":
 		return float64(m.nightRuns)
-	case "weekend_12":
+	case "weekend_days":
 		return float64(m.weekendDays)
-	case "monsoon_10":
+	case "monsoon_runs":
 		return float64(m.monsoonRuns)
-	case "attend_10":
+	case "attendance":
 		return float64(m.attendance)
-	case "challenge_join":
+	case "ch_joined":
 		return float64(m.chJoined)
-	case "challenge_done", "challenge_done_5":
+	case "ch_done":
 		return float64(m.chDone)
-	case "challenge_podium":
+	case "ch_podium":
 		return boolVal(m.chPodium)
-	case "challenge_win":
+	case "ch_won":
 		return boolVal(m.chWon)
 	}
 	return 0
+}
+
+// paceFlags evaluates every pace_run rule in the catalog: "a run of at least
+// arg_distance_m meters at under arg_pace_s seconds per km". Per-row queries
+// keep the rule fully DB-tunable (a new pace tier is one INSERT, no deploy).
+func (s *Service) paceFlags(ctx context.Context, userID string, catalog []Badge) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, b := range catalog {
+		if b.Metric != "pace_run" {
+			continue
+		}
+		if b.ArgDistanceM <= 0 || b.ArgPaceS <= 0 {
+			continue // misconfigured row: never awardable, never crashes
+		}
+		var ok bool
+		if err := s.db.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM activities
+			              WHERE user_id = $1 AND distance_m >= $2
+			                AND duration_s > 0 AND duration_s::float / (distance_m / 1000.0) < $3)`,
+			userID, b.ArgDistanceM, b.ArgPaceS).Scan(&ok); err != nil {
+			return nil, err
+		}
+		out[b.ID] = ok
+	}
+	return out, nil
 }
 
 // --- profile (the API shape) ---
@@ -271,7 +290,19 @@ type Profile struct {
 // every fetch is also an award pass, so badges that depend on external events
 // (a challenge ending) land on the next look without a scheduler.
 func (s *Service) Evaluate(ctx context.Context, userID string) (*Profile, error) {
+	catalog, err := loadCatalog(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	levels, err := loadLevels(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
 	m, err := s.computeMetrics(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	paceOK, err := s.paceFlags(ctx, userID, catalog)
 	if err != nil {
 		return nil, err
 	}
@@ -296,12 +327,12 @@ func (s *Service) Evaluate(ctx context.Context, userID string) (*Profile, error)
 
 	// Non-nil slices so the JSON is always [] (a nil slice marshals to null,
 	// which crashes clients doing .length on it).
-	statuses := make([]BadgeStatus, 0, len(Catalog))
+	statuses := make([]BadgeStatus, 0, len(catalog))
 	fresh := []Badge{}
 	now := time.Now()
 	var award []string
-	for _, b := range Catalog {
-		cur := progressOf(b, m)
+	for _, b := range catalog {
+		cur := progressOf(b, m, paceOK)
 		st := BadgeStatus{Badge: b, Current: cur}
 		if at, ok := earned[b.ID]; ok {
 			st.Earned, st.EarnedAt = true, &at
@@ -339,7 +370,7 @@ func (s *Service) Evaluate(ctx context.Context, userID string) (*Profile, error)
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		for _, b := range Catalog {
+		for _, b := range catalog {
 			if won[b.ID] {
 				fresh = append(fresh, b)
 			}
@@ -348,13 +379,13 @@ func (s *Service) Evaluate(ctx context.Context, userID string) (*Profile, error)
 
 	// XP: verified work + badge bonuses. No ledger — always recomputed.
 	xp := int(m.totalKM*10) + m.dayCount*25 + m.chDone*150 + m.attendance*50
-	for _, b := range Catalog {
+	for _, b := range catalog {
 		if _, ok := earned[b.ID]; ok {
 			xp += b.XP
 		}
 	}
 
-	li := levelInfo(xp)
+	li := levelInfo(levels, xp)
 
 	var announce bool
 	if err := s.db.QueryRow(ctx, `SELECT announce_badges FROM users WHERE id = $1`, userID).Scan(&announce); err != nil {
@@ -366,14 +397,15 @@ func (s *Service) Evaluate(ctx context.Context, userID string) (*Profile, error)
 
 // levelInfo maps an XP total to the current level + progress toward the next
 // (1.0 once at the top level). Shared by Evaluate and the read-only Snapshot.
-func levelInfo(xp int) LevelInfo {
-	li := LevelInfo{Index: levelOf(xp), Progress: 1}
-	li.Title = Levels[li.Index].Title
-	if li.Index < len(Levels)-1 {
-		next := Levels[li.Index+1]
+func levelInfo(levels []Level, xp int) LevelInfo {
+	li := LevelInfo{Index: levelOf(levels, xp), Progress: 1}
+	li.Title = levels[li.Index].Title
+	if li.Index < len(levels)-1 {
+		next := levels[li.Index+1]
 		li.NextAt, li.NextTitle = &next.At, &next.Title
-		span := float64(next.At - Levels[li.Index].At)
-		li.Progress = float64(xp-Levels[li.Index].At) / span
+		if span := float64(next.At - levels[li.Index].At); span > 0 {
+			li.Progress = float64(xp-levels[li.Index].At) / span
+		}
 	}
 	return li
 }
@@ -382,6 +414,14 @@ func levelInfo(xp int) LevelInfo {
 // Unlike Evaluate it never awards or announces, so it's safe to call when
 // VIEWING another runner's public profile (no surprise pushes to that runner).
 func (s *Service) Snapshot(ctx context.Context, userID string) (xp int, level LevelInfo, earnedBadges int, err error) {
+	catalog, err := loadCatalog(ctx, s.db)
+	if err != nil {
+		return 0, LevelInfo{}, 0, err
+	}
+	levels, err := loadLevels(ctx, s.db)
+	if err != nil {
+		return 0, LevelInfo{}, 0, err
+	}
 	m, err := s.computeMetrics(ctx, userID)
 	if err != nil {
 		return 0, LevelInfo{}, 0, err
@@ -403,12 +443,12 @@ func (s *Service) Snapshot(ctx context.Context, userID string) (xp int, level Le
 		return 0, LevelInfo{}, 0, err
 	}
 	xp = int(m.totalKM*10) + m.dayCount*25 + m.chDone*150 + m.attendance*50
-	for _, b := range Catalog {
+	for _, b := range catalog {
 		if earned[b.ID] {
 			xp += b.XP
 		}
 	}
-	return xp, levelInfo(xp), len(earned), nil
+	return xp, levelInfo(levels, xp), len(earned), nil
 }
 
 // OnRun is the activities hook: after a run saves, award anything newly earned,
@@ -454,11 +494,4 @@ func (s *Service) OnRun(ctx context.Context, userID string) {
 func (s *Service) SetAnnounce(ctx context.Context, userID string, enabled bool) error {
 	_, err := s.db.Exec(ctx, `UPDATE users SET announce_badges = $2 WHERE id = $1`, userID, enabled)
 	return err
-}
-
-func min(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
 }
