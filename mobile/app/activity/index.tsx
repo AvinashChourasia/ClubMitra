@@ -85,14 +85,49 @@ export default function RunHistory() {
           </Tap>
         </View>
 
-        {/* All-time stats */}
+        {/* Stats: this week leads (the number runners actually chase), then
+            month/all-time/streak, and personal records. */}
         {stats && stats.total_runs > 0 && (
-          <View style={[styles.card, { flexDirection: "row" }]}>
-            <Stat label="Runs" value={String(stats.total_runs)} />
-            <Stat label="Distance" value={formatDistance(stats.total_distance_m)} />
-            <Stat label="Time" value={formatDuration(stats.total_duration_s)} />
-            <Stat label="Streak" value={`${stats.current_streak_days}d`} />
-          </View>
+          <>
+            {/* This week — hero with a Δ-vs-last-week chip */}
+            <View style={[styles.card, { gap: 10 }]}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                <Text style={{ color: colors.muted, fontSize: 12, fontWeight: "800", letterSpacing: 0.8 }}>THIS WEEK</Text>
+                <WeekDelta weekM={stats.week_distance_m} prevM={stats.prev_week_distance_m} />
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 14 }}>
+                <Text style={{ color: colors.text, fontSize: 40, fontWeight: "800", letterSpacing: -1, lineHeight: 44 }}>
+                  {(stats.week_distance_m / 1000).toFixed(1)}
+                  <Text style={{ fontSize: 17, color: colors.muted, fontWeight: "700" }}> km</Text>
+                </Text>
+                <Text style={{ color: colors.muted, fontSize: 13.5, fontWeight: "600", paddingBottom: 6 }}>
+                  {stats.week_runs} run{stats.week_runs === 1 ? "" : "s"} · {formatDuration(stats.week_duration_s)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Month + all-time + streak */}
+            <View style={[styles.card, { flexDirection: "row" }]}>
+              <Stat label="This month" value={formatDistance(stats.month_distance_m)} />
+              <Stat label="All-time" value={formatDistance(stats.total_distance_m)} />
+              <Stat label="Runs" value={String(stats.total_runs)} />
+              <Stat
+                label={stats.best_streak_days > 1 ? `Streak · best ${stats.best_streak_days}d` : "Streak"}
+                value={`${stats.current_streak_days > 0 ? "🔥" : ""}${stats.current_streak_days}d`}
+              />
+            </View>
+
+            {/* Personal records — what people screenshot */}
+            <View style={[styles.card, { gap: 10 }]}>
+              <Text style={{ color: colors.muted, fontSize: 12, fontWeight: "800", letterSpacing: 0.8 }}>PERSONAL RECORDS</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <PRChip icon="resize" label="Longest" value={formatDistance(stats.longest_run_m)} />
+                {stats.best_pace_s_per_km != null && <PRChip icon="speedometer" label="Best pace" value={formatPace(stats.best_pace_s_per_km)} />}
+                {stats.best_pace_5k_s_per_km != null && <PRChip icon="flash" label="5K+ pace" value={formatPace(stats.best_pace_5k_s_per_km)} />}
+                {stats.best_pace_10k_s_per_km != null && <PRChip icon="rocket" label="10K+ pace" value={formatPace(stats.best_pace_10k_s_per_km)} />}
+              </View>
+            </View>
+          </>
         )}
 
         {runs === null ? (
@@ -130,7 +165,37 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ flex: 1, alignItems: "center" }}>
       <Text style={{ color: colors.text, fontSize: 16, fontWeight: "800" }}>{value}</Text>
-      <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 2 }}>{label}</Text>
+      <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 2 }} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+
+// WeekDelta — this week vs last, as an up/down chip. Silent until there's a
+// last week to compare against (first-week runners just see their number).
+function WeekDelta({ weekM, prevM }: { weekM: number; prevM: number }) {
+  if (prevM <= 0) return null;
+  const dKm = (weekM - prevM) / 1000;
+  const up = dKm >= 0;
+  const color = up ? colors.success : colors.warning;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: colors.bgSecondary, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 }}>
+      <Ionicons name={up ? "trending-up" : "trending-down"} size={13} color={color} />
+      <Text style={{ color, fontSize: 12, fontWeight: "800" }}>
+        {up ? "+" : ""}{dKm.toFixed(1)} km vs last week
+      </Text>
+    </View>
+  );
+}
+
+// PRChip — one personal record as a compact medal chip.
+function PRChip({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: colors.bgSecondary, borderRadius: 12, paddingHorizontal: 11, paddingVertical: 8 }}>
+      <Ionicons name={icon} size={14} color={colors.primary} />
+      <View>
+        <Text style={{ color: colors.text, fontWeight: "800", fontSize: 13.5 }}>{value}</Text>
+        <Text style={{ color: colors.muted, fontSize: 10.5, fontWeight: "700" }}>{label}</Text>
+      </View>
     </View>
   );
 }

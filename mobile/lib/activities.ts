@@ -42,7 +42,9 @@ export function uploadRun(
   });
 }
 
-// All-time aggregate stats for the profile/home dashboard.
+// Aggregate run stats for the profile/home dashboard: all-time totals, this
+// week / last week / this month buckets (IST, Monday-start weeks), streaks,
+// and distance-tiered pace PRs.
 export type Stats = {
   total_runs: number;
   total_distance_m: number;
@@ -51,6 +53,16 @@ export type Stats = {
   best_pace_s_per_km: number | null;
   current_streak_days: number;
   streak_freezes_left: number; // this month's unused freeze allowance
+  week_distance_m: number;
+  week_runs: number;
+  week_duration_s: number;
+  prev_week_distance_m: number;
+  month_distance_m: number;
+  month_runs: number;
+  // Best avg pace over runs of at least 5/10 km; null until a qualifying run.
+  best_pace_5k_s_per_km: number | null;
+  best_pace_10k_s_per_km: number | null;
+  best_streak_days: number;
 };
 
 export function getStats(token: string): Promise<Stats> {

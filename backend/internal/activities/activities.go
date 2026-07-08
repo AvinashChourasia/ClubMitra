@@ -325,24 +325,63 @@ type Stats struct {
 	BestPaceSPerKM  *float64 `json:"best_pace_s_per_km"`
 	CurrentStreakDays int    `json:"current_streak_days"`
 	FreezesLeft     int      `json:"streak_freezes_left"` // this month's unused allowance
+
+	// This-week / last-week / this-month buckets (IST, Monday-start weeks —
+	// the app's day-bucketing convention). Last week's km powers the Δ arrow.
+	WeekDistanceM     float64 `json:"week_distance_m"`
+	WeekRuns          int     `json:"week_runs"`
+	WeekDurationS     int     `json:"week_duration_s"`
+	PrevWeekDistanceM float64 `json:"prev_week_distance_m"`
+	MonthDistanceM    float64 `json:"month_distance_m"`
+	MonthRuns         int     `json:"month_runs"`
+
+	// Distance-tiered pace PRs: best average pace over runs of at least 5/10 km
+	// (same avg_pace semantics as BestPaceSPerKM). Null until a qualifying run.
+	BestPace5KSPerKM  *float64 `json:"best_pace_5k_s_per_km"`
+	BestPace10KSPerKM *float64 `json:"best_pace_10k_s_per_km"`
+
+	// Longest ever consecutive-day streak (raw days, no freezes) — the record
+	// the current streak chases.
+	BestStreakDays int `json:"best_streak_days"`
 }
 
-// Stats computes all-time totals for a user in a single aggregate query, then
-// derives the day-streak from the distinct days the user ran.
+// Stats computes all-time + week/month totals and pace PRs for a user in a
+// single aggregate query, then derives the day-streaks from the distinct days
+// the user ran.
 func (r *Repository) Stats(ctx context.Context, userID string) (*Stats, error) {
 	const q = `
+		WITH b AS (
+			SELECT date_trunc('week',  (now() AT TIME ZONE 'Asia/Kolkata'))::date AS ws,
+			       date_trunc('month', (now() AT TIME ZONE 'Asia/Kolkata'))::date AS ms
+		)
 		SELECT
 			COUNT(*),
 			COALESCE(SUM(distance_m), 0),
 			COALESCE(SUM(duration_s), 0),
 			COALESCE(MAX(distance_m), 0),
-			MIN(avg_pace_s_per_km) FILTER (WHERE avg_pace_s_per_km IS NOT NULL)
-		FROM activities WHERE user_id = $1`
+			MIN(avg_pace_s_per_km) FILTER (WHERE avg_pace_s_per_km IS NOT NULL),
+			COALESCE(SUM(distance_m) FILTER (WHERE (started_at AT TIME ZONE 'Asia/Kolkata')::date >= b.ws), 0),
+			COUNT(*)                 FILTER (WHERE (started_at AT TIME ZONE 'Asia/Kolkata')::date >= b.ws),
+			COALESCE(SUM(duration_s) FILTER (WHERE (started_at AT TIME ZONE 'Asia/Kolkata')::date >= b.ws), 0),
+			COALESCE(SUM(distance_m) FILTER (WHERE (started_at AT TIME ZONE 'Asia/Kolkata')::date >= b.ws - 7
+			                                   AND (started_at AT TIME ZONE 'Asia/Kolkata')::date <  b.ws), 0),
+			COALESCE(SUM(distance_m) FILTER (WHERE (started_at AT TIME ZONE 'Asia/Kolkata')::date >= b.ms), 0),
+			COUNT(*)                 FILTER (WHERE (started_at AT TIME ZONE 'Asia/Kolkata')::date >= b.ms),
+			MIN(avg_pace_s_per_km) FILTER (WHERE distance_m >= 5000  AND avg_pace_s_per_km IS NOT NULL),
+			MIN(avg_pace_s_per_km) FILTER (WHERE distance_m >= 10000 AND avg_pace_s_per_km IS NOT NULL)
+		FROM activities, b WHERE user_id = $1
+		GROUP BY b.ws, b.ms`
 
 	var s Stats
 	if err := r.db.QueryRow(ctx, q, userID).Scan(
 		&s.TotalRuns, &s.TotalDistanceM, &s.TotalDurationS, &s.LongestRunM, &s.BestPaceSPerKM,
+		&s.WeekDistanceM, &s.WeekRuns, &s.WeekDurationS, &s.PrevWeekDistanceM,
+		&s.MonthDistanceM, &s.MonthRuns, &s.BestPace5KSPerKM, &s.BestPace10KSPerKM,
 	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Zero activities: the CROSS JOIN with b yields no rows to group.
+			return r.statsEmpty(ctx, userID)
+		}
 		return nil, err
 	}
 
@@ -351,12 +390,59 @@ func (r *Repository) Stats(ctx context.Context, userID string) (*Stats, error) {
 		return nil, err
 	}
 	s.CurrentStreakDays = streak
+	best, err := r.bestStreakDays(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	s.BestStreakDays = best
 	left, err := r.freezesLeft(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	s.FreezesLeft = left
 	return &s, nil
+}
+
+// statsEmpty is the zero-runs profile (still carries the freeze allowance).
+func (r *Repository) statsEmpty(ctx context.Context, userID string) (*Stats, error) {
+	s := &Stats{}
+	left, err := r.freezesLeft(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	s.FreezesLeft = left
+	return s, nil
+}
+
+// bestStreakDays walks the distinct run days (same UTC bucketing as the
+// current streak) and returns the longest ever consecutive-day run — raw days,
+// no freeze bridging: the record should be honest.
+func (r *Repository) bestStreakDays(ctx context.Context, userID string) (int, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT DISTINCT (started_at AT TIME ZONE 'UTC')::date AS d
+		FROM activities WHERE user_id = $1 ORDER BY d`, userID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	best, cur := 0, 0
+	var prev time.Time
+	for rows.Next() {
+		var d time.Time
+		if err := rows.Scan(&d); err != nil {
+			return 0, err
+		}
+		if cur > 0 && d.Sub(prev) == 24*time.Hour {
+			cur++
+		} else {
+			cur = 1
+		}
+		if cur > best {
+			best = cur
+		}
+		prev = d
+	}
+	return best, rows.Err()
 }
 
 // freezesPerMonth is each runner's streak-freeze allowance per calendar month.
@@ -427,24 +513,32 @@ func (r *Repository) currentStreakDays(ctx context.Context, userID string) (int,
 			continue // already covered (e.g. today's run when cursor started at today)
 		}
 		// Bridge the missing days between the cursor and this run day. Every one
-		// must be frozen (existing or freshly consumable), or the streak ends here.
+		// must be frozen (existing or freshly consumable), or the streak ends
+		// here. Consumption is committed ONLY if the whole gap bridges — a
+		// failed bridge must not burn the month's allowance (it used to: any
+		// 3+ day gap silently ate both freezes for nothing).
 		ok := true
+		var gap []time.Time
+		gapUsed := map[string]int{}
 		for d := cursor; d.After(runDay); d = d.AddDate(0, 0, -1) {
-			key := d.Format("2006-01-02")
-			if frozen[key] {
+			if frozen[d.Format("2006-01-02")] {
 				continue
 			}
 			month := d.Format("2006-01")
-			if monthUsed[month] >= freezesPerMonth {
+			if monthUsed[month]+gapUsed[month] >= freezesPerMonth {
 				ok = false
 				break
 			}
-			monthUsed[month]++
-			frozen[key] = true
-			newFreezes = append(newFreezes, d)
+			gapUsed[month]++
+			gap = append(gap, d)
 		}
 		if !ok {
 			break
+		}
+		for _, d := range gap {
+			frozen[d.Format("2006-01-02")] = true
+			monthUsed[d.Format("2006-01")]++
+			newFreezes = append(newFreezes, d)
 		}
 		streak++
 		cursor = runDay.AddDate(0, 0, -1)
