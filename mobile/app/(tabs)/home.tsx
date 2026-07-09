@@ -13,7 +13,7 @@ import { myRuns, type MyRun } from "../../lib/attendance";
 import { listChallenges, challengeFraction, challengeProgress, challengeTarget, challengeUnit, type Challenge } from "../../lib/challenges";
 import { myChapters, type MyChapter } from "../../lib/clubs";
 import { publicClubs, type DiscoverClub } from "../../lib/discover";
-import { listActivities, getRoute, geoJSONToLatLng, offsetsToTimes, type Activity, type LatLng } from "../../lib/activities";
+import { listActivities, getRoute, getStats, geoJSONToLatLng, offsetsToTimes, type Activity, type LatLng, type Stats } from "../../lib/activities";
 import { listRaces, cityMatch, type Race } from "../../lib/races";
 import { useJoinGate, ClubCarousel, TrackRunCard } from "../../components/discovery";
 import { RaceCarousel } from "../../components/RaceCarousel";
@@ -52,6 +52,7 @@ export default function Home() {
   const [lastRun, setLastRun] = useState<Activity | null>(null);
   const [lastRoute, setLastRoute] = useState<LatLng[]>([]);
   const [lastTimes, setLastTimes] = useState<number[] | undefined>(undefined);
+  const [stats, setStats] = useState<Stats | null>(null); // week pulse (best-effort)
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   // A hard load failure (vs. a transient refresh that we silently ride out on
@@ -64,7 +65,7 @@ export default function Home() {
     try {
       const token = await getAccessToken();
       if (token) {
-        const [r, c, ch, pc, acts, rc] = await Promise.all([
+        const [r, c, ch, pc, acts, rc, st] = await Promise.all([
           myRuns(token),
           listChallenges(token, true),
           myChapters(token),
@@ -73,12 +74,15 @@ export default function Home() {
           listActivities(token).catch(() => [] as Activity[]),
           // Upcoming marathons teaser — fetch all, prioritise the member's city.
           listRaces(token).catch(() => [] as Race[]),
+          // Week pulse for the momentum strip (best-effort).
+          getStats(token).catch(() => null),
         ]);
         setRuns(r);
         setChallenges(c);
         setClubs(ch);
         setCityClubs(pc);
         setRaces(rc);
+        setStats(st);
         // Latest GPS run + its route for the thumbnail (best-effort).
         const latest = acts[0] ?? null;
         setLastRun(latest);
@@ -181,6 +185,37 @@ export default function Home() {
             background, otherwise the "start a run" track card. Lives in its
             own component so its 1s tick never re-renders this whole screen. */}
         <ActiveRunBanner onPress={() => router.push("/activity/record")} />
+
+        {/* Week pulse — your momentum at a glance; taps into the stats hub. */}
+        {stats && stats.total_runs > 0 && (
+          <Tap onPress={() => router.push("/activity")} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 13 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.muted, fontSize: 10.5, fontWeight: "800", letterSpacing: 1 }}>THIS WEEK</Text>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, marginTop: 2 }}>
+                <Text style={{ color: colors.text, fontSize: 19, fontWeight: "800", letterSpacing: -0.3 }}>
+                  {(stats.week_distance_m / 1000).toFixed(1)} km
+                </Text>
+                <Text style={{ color: colors.muted, fontSize: 12.5, fontWeight: "600" }}>
+                  {stats.week_runs} run{stats.week_runs === 1 ? "" : "s"}
+                </Text>
+                {stats.prev_week_distance_m > 0 && (
+                  <Ionicons
+                    name={stats.week_distance_m >= stats.prev_week_distance_m ? "trending-up" : "trending-down"}
+                    size={15}
+                    color={stats.week_distance_m >= stats.prev_week_distance_m ? colors.success : colors.warning}
+                  />
+                )}
+              </View>
+            </View>
+            {stats.current_streak_days > 0 && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(245,158,11,0.14)", borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 }}>
+                <Text style={{ fontSize: 13 }}>🔥</Text>
+                <Text style={{ color: colors.warning, fontWeight: "800", fontSize: 13.5 }}>{stats.current_streak_days}d</Text>
+              </View>
+            )}
+            <Ionicons name="chevron-forward" size={18} color={colors.subtle} />
+          </Tap>
+        )}
 
         {/* Your last run — real route thumbnail + the headline numbers. */}
         {lastRun && (
