@@ -7,7 +7,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Animated, Easing, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Path, Stop } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useAuth } from "../lib/auth";
@@ -222,26 +221,6 @@ export function TrackRunCard({ onPress, title, subtitle }: { onPress: () => void
         end={{ x: 1, y: 1 }}
         style={{ borderRadius: radius.xl, overflow: "hidden", padding: 18 }}
       >
-        {/* Decorative pace-gradient route sweeping the card (fast→slow ramp). */}
-        <Svg
-          pointerEvents="none"
-          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-          viewBox="0 0 360 150"
-          preserveAspectRatio="xMidYMid slice"
-        >
-          <Defs>
-            <SvgLinearGradient id="paceRamp" x1="0" y1="0" x2="1" y2="0">
-              <Stop offset="0" stopColor="#4ADE80" />
-              <Stop offset="0.55" stopColor="#F59E0B" />
-              <Stop offset="1" stopColor="#EF4444" />
-            </SvgLinearGradient>
-          </Defs>
-          {/* Soft wide underlay, then the ramp line on top — the RouteTrace look. */}
-          <Path d={MOTIF_PATH} stroke="rgba(255,255,255,0.07)" strokeWidth={16} fill="none" strokeLinecap="round" />
-          <Path d={MOTIF_PATH} stroke="url(#paceRamp)" strokeWidth={3.5} fill="none" strokeLinecap="round" strokeOpacity={0.85} />
-          <Circle cx={26} cy={118} r={5} fill="#4ADE80" stroke="#fff" strokeWidth={1.5} />
-        </Svg>
-
         {/* Top gloss so the card reads lit, like the app's other heroes. */}
         <LinearGradient
           colors={gradients.gloss}
@@ -306,9 +285,6 @@ export function TrackRunCard({ onPress, title, subtitle }: { onPress: () => void
     </Tap>
   );
 }
-
-// A smooth run-route squiggle sweeping the card, drawn once (viewBox 360×150).
-const MOTIF_PATH = "M26,118 C60,128 84,96 104,78 C124,60 150,58 176,72 C202,86 224,120 252,118 C280,116 292,80 310,58 C322,44 338,36 352,34";
 
 function HeroChip({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
   return (

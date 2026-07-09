@@ -173,9 +173,7 @@ export default function Home() {
               <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 13.5, fontWeight: "600" }}>
                 {new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}
               </Text>
-              <Text style={{ color: "#fff", fontSize: 27, fontWeight: "800", letterSpacing: -0.4 }}>
-                {greetingFor(new Date().getHours())}, {firstName} 👋
-              </Text>
+              <Text style={{ color: "#fff", fontSize: 27, fontWeight: "800", letterSpacing: -0.4 }}>Hi, {firstName} 👋</Text>
             </View>
             <Ionicons name="walk" size={30} color="rgba(255,255,255,0.9)" />
           </View>
@@ -422,15 +420,6 @@ function ActiveRunBanner({ onPress }: { onPress: () => void }) {
 
   /* Start a run — the GPS track card IS the record button. */
   return <TrackRunCard onPress={onPress} title="Record your run" subtitle="Every km counts for your clubs & challenges." />;
-}
-
-// greetingFor picks the salutation by local hour — small, but it makes the
-// front door feel awake.
-function greetingFor(hour: number): string {
-  if (hour < 4) return "Night owl";
-  if (hour < 12) return "Good morning";
-  if (hour < 17) return "Good afternoon";
-  return "Good evening";
 }
 
 function HeroStat({ value, label, onPress }: { value: number; label: string; onPress?: () => void }) {
