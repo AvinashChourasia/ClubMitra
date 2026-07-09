@@ -3,7 +3,7 @@
 // upcoming marathons to chase — and fresh clubs in your city to discover.
 
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Linking, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -165,19 +165,28 @@ export default function Home() {
         contentContainerStyle={{ padding: 16, gap: 18, paddingBottom: 32 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
-        {/* Greeting */}
+        {/* Greeting — time-aware, with the date; the three counters double as
+            shortcuts into their screens. */}
         <GradientCard glowColor={colors.primary} style={{ padding: 22, gap: 16 }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
             <View>
-              <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 14, fontWeight: "600" }}>Welcome back</Text>
-              <Text style={{ color: "#fff", fontSize: 27, fontWeight: "800", letterSpacing: -0.4 }}>Hi, {firstName} 👋</Text>
+              <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 13.5, fontWeight: "600" }}>
+                {new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" })}
+              </Text>
+              <Text style={{ color: "#fff", fontSize: 27, fontWeight: "800", letterSpacing: -0.4 }}>
+                {greetingFor(new Date().getHours())}, {firstName} 👋
+              </Text>
             </View>
             <Ionicons name="walk" size={30} color="rgba(255,255,255,0.9)" />
           </View>
           <View style={{ flexDirection: "row", gap: 24 }}>
-            <HeroStat value={clubs.length} label={clubs.length === 1 ? "club" : "clubs"} />
-            <HeroStat value={challenges.length} label="challenges" />
-            <HeroStat value={runs.filter((r) => !isPast(r.scheduled_at)).length} label="upcoming" />
+            <HeroStat value={clubs.length} label={clubs.length === 1 ? "club" : "clubs"} onPress={() => router.push("/clubs")} />
+            <HeroStat value={challenges.length} label="challenges" onPress={() => router.push("/challenges")} />
+            <HeroStat
+              value={runs.filter((r) => !isPast(r.scheduled_at)).length}
+              label="upcoming"
+              onPress={() => router.push("/schedule" as Href)}
+            />
           </View>
         </GradientCard>
 
@@ -262,10 +271,11 @@ export default function Home() {
                   {nextRun.checked_in && <Ionicons name="checkmark-circle" size={22} color={colors.success} />}
                 </Tap>
               ) : (
-                <View style={[styles.card, { alignItems: "center", paddingVertical: 24 }]}>
+                <Tap onPress={() => router.push("/schedule" as Href)} style={[styles.card, { alignItems: "center", paddingVertical: 24 }]}>
                   <Ionicons name="calendar-outline" size={28} color={colors.subtle} />
-                  <Text style={{ color: colors.muted, marginTop: 8 }}>No upcoming runs.</Text>
-                </View>
+                  <Text style={{ color: colors.text, fontWeight: "700", marginTop: 8 }}>No upcoming runs</Text>
+                  <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>Check the schedule — or rally your club for one.</Text>
+                </Tap>
               )}
             </View>
 
@@ -278,15 +288,29 @@ export default function Home() {
                   <Text style={{ color: colors.muted, marginTop: 8 }}>You haven&apos;t joined a challenge yet.</Text>
                 </View>
               ) : (
-                activeChallenges.map((c) => (
+                activeChallenges.map((c) => {
+                  // Ending-soon urgency: the nudge that gets the run recorded today.
+                  const daysLeft = Math.ceil((new Date(c.end_date).getTime() - Date.now()) / 86400000);
+                  const urgent = daysLeft >= 0 && daysLeft <= 7;
+                  return (
                   <Tap key={c.id} onPress={() => router.push(`/challenge/${c.id}`)} style={[styles.card, { gap: 8 }]}>
-                    <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>{c.title}</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15, flex: 1 }} numberOfLines={1}>{c.title}</Text>
+                      {urgent && (
+                        <View style={{ backgroundColor: daysLeft <= 3 ? "rgba(245,158,11,0.16)" : colors.bgSecondary, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+                          <Text style={{ color: daysLeft <= 3 ? colors.warning : colors.muted, fontSize: 11, fontWeight: "800" }}>
+                            {daysLeft === 0 ? "ends today" : `${daysLeft}d left`}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                     <ProgressBar fraction={challengeFraction(c)} />
                     <Text style={{ color: colors.muted, fontSize: 12 }}>
                       {challengeProgress(c).toFixed(challengeUnit(c) === "km" ? 1 : 0)} / {challengeTarget(c)} {challengeUnit(c)} ({Math.round(challengeFraction(c) * 100)}%)
                     </Text>
                   </Tap>
-                ))
+                  );
+                })
               )}
             </View>
 
@@ -400,12 +424,21 @@ function ActiveRunBanner({ onPress }: { onPress: () => void }) {
   return <TrackRunCard onPress={onPress} title="Record your run" subtitle="Every km counts for your clubs & challenges." />;
 }
 
-function HeroStat({ value, label }: { value: number; label: string }) {
+// greetingFor picks the salutation by local hour — small, but it makes the
+// front door feel awake.
+function greetingFor(hour: number): string {
+  if (hour < 4) return "Night owl";
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function HeroStat({ value, label, onPress }: { value: number; label: string; onPress?: () => void }) {
   return (
-    <View>
+    <Pressable onPress={onPress} hitSlop={8} accessibilityLabel={`${value} ${label}`}>
       <Text style={{ color: "#fff", fontSize: 22, fontWeight: "800" }}>{value}</Text>
       <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 12, fontWeight: "600" }}>{label}</Text>
-    </View>
+    </Pressable>
   );
 }
 

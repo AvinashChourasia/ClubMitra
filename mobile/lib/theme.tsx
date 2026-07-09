@@ -59,7 +59,8 @@ const light: Palette = {
   danger: "#DC2626",
   bubbleMine: "#D9FDD3",
   bubbleMineText: "#0B1220",
-  chatBg: "#EFEAE2",
+  // Cleaner warm neutral (the old value was WhatsApp's beige verbatim).
+  chatBg: "#F1EDE7",
   // MarathonMitra red, light: red-600 → red-700 → red-800.
   heroGradient: ["#DC2626", "#B91C1C", "#991B1B"],
 };
@@ -84,7 +85,9 @@ const dark: Palette = {
   danger: "#EF4444",
   bubbleMine: "#005C4B",
   bubbleMineText: "#FFFFFF",
-  chatBg: "#0B141A",
+  // Ink-family wallpaper so dark chat matches the app's night identity
+  // (was a borrowed WhatsApp near-black with a green cast).
+  chatBg: "#0A1020",
   // MarathonMitra red, dark: red-900 → red-950 → black (fades to black).
   heroGradient: ["#7F1D1D", "#450A0A", "#000000"],
 };

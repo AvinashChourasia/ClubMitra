@@ -280,9 +280,16 @@ export default function Chat() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
-      {/* Header */}
+      {/* Header — subtitle counts what's waiting */}
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10 }}>
-        <Text style={{ fontSize: 28, fontWeight: "800", color: colors.text }}>Chats</Text>
+        <View>
+          <Text style={{ fontSize: 28, fontWeight: "800", color: colors.text }}>Chats</Text>
+          {items !== null && sumUnread(items) > 0 && (
+            <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: "700", marginTop: 1 }}>
+              {sumUnread(items)} unread message{sumUnread(items) === 1 ? "" : "s"}
+            </Text>
+          )}
+        </View>
         <Tap onPress={() => router.push("/thread/new")} accessibilityLabel="New chat" hitSlop={8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="create-outline" size={20} color="#fff" />
         </Tap>
