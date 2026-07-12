@@ -442,7 +442,7 @@ export default function ClubDetail() {
 
   async function shareInvite() {
     if (!chapter) return;
-    await Share.share({ message: `Join ${chapter.name} on ClubMitra! Use invite code ${chapter.invite_code} in the app. Get the app: ${APP_DOWNLOAD_URL}` });
+    await Share.share({ message: `Join ${chapter.name} on MarathonMitra! Use invite code ${chapter.invite_code} in the app. Get the app: ${APP_DOWNLOAD_URL}` });
   }
 
   async function withToken(fn: (token: string) => Promise<unknown>): Promise<boolean> {

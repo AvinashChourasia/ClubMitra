@@ -395,7 +395,7 @@ export function ChatThread({
   function permAlert(canAskAgain: boolean, what: string) {
     Alert.alert(
       `${what === "camera" ? "Camera" : "Photo"} access needed`,
-      canAskAgain ? `ClubMitra needs ${what} access to attach this.` : `Enable ${what} access for ClubMitra in Settings.`,
+      canAskAgain ? `MarathonMitra needs ${what} access to attach this.` : `Enable ${what} access for MarathonMitra in Settings.`,
       canAskAgain ? [{ text: "OK" }] : [{ text: "Cancel", style: "cancel" }, { text: "Open Settings", onPress: () => Linking.openSettings() }]
     );
   }
@@ -662,7 +662,7 @@ export function ChatThread({
   async function startVoice() {
     const perm = await AudioModule.requestRecordingPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert("Microphone needed", "Enable microphone access for ClubMitra to record voice notes.");
+      Alert.alert("Microphone needed", "Enable microphone access for MarathonMitra to record voice notes.");
       return;
     }
     try {

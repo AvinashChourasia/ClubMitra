@@ -23,7 +23,7 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // Routes returns a router with all /auth endpoints mounted, ready to attach
-// under /api/v1/auth in main. ClubMitra owns identity now, so /register lives
+// under /api/v1/auth in main. MarathonMitra owns identity now, so /register lives
 // here (accounts are created in-app, not on an external platform).
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()

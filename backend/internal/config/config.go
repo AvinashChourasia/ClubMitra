@@ -59,7 +59,7 @@ type Config struct {
 	// the flows go live the moment a key + from-address are injected.
 	SendGridAPIKey string
 	EmailFrom      string // the verified sender address (e.g. no-reply@clubmitra.app)
-	EmailFromName  string // display name on outgoing mail; defaults to "ClubMitra"
+	EmailFromName  string // display name on outgoing mail; defaults to "MarathonMitra"
 
 	// How long tokens stay valid. Access tokens are deliberately short
 	// (small damage window if stolen); refresh tokens are long (so users
@@ -96,7 +96,7 @@ func Load() (*Config, error) {
 
 		SendGridAPIKey: os.Getenv("SENDGRID_API_KEY"),
 		EmailFrom:      os.Getenv("EMAIL_FROM"),
-		EmailFromName:  getEnv("EMAIL_FROM_NAME", "ClubMitra"),
+		EmailFromName:  getEnv("EMAIL_FROM_NAME", "MarathonMitra"),
 
 		AccessTokenTTL:  15 * time.Minute,
 		RefreshTokenTTL: 30 * 24 * time.Hour, // 30 days

@@ -1,5 +1,5 @@
 // Activity Sync client — connect Strava (read-only) so your Strava runs flow
-// into ClubMitra and count toward challenges/leaderboards/badges. The whole
+// into MarathonMitra and count toward challenges/leaderboards/badges. The whole
 // feature is dormant unless the backend has Strava credentials (status.configured).
 
 import * as WebBrowser from "expo-web-browser";

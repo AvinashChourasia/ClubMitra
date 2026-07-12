@@ -107,7 +107,7 @@ func (h *Handler) fetchEvents(ctx context.Context, skip int) (*mmEventsResponse,
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "ClubMitra/1.0 (race calendar sync)")
+	req.Header.Set("User-Agent", "MarathonMitra/1.0 (race calendar sync)")
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return nil, err

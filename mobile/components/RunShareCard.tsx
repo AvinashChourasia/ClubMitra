@@ -1,6 +1,6 @@
 // RunShareCard: the run as a picture — what actually gets posted to WhatsApp /
 // Instagram. A dark 4:5 card: pace-gradient route trace as the hero, the
-// distance huge, the stats that matter, ClubMitra branding. Pure RN + SVG
+// distance huge, the stats that matter, MarathonMitra branding. Pure RN + SVG
 // (no native deps) so it renders everywhere; capturing it to a PNG is the
 // caller's job (react-native-view-shot, lazily required).
 
@@ -51,7 +51,7 @@ export function RunShareCard({ runnerName, startedAt, distanceM, durationS, avgP
           <View style={{ width: 22, height: 22, borderRadius: 7, backgroundColor: "#DC2626", alignItems: "center", justifyContent: "center" }}>
             <Text style={{ fontSize: 12 }}>🏃</Text>
           </View>
-          <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 13, letterSpacing: 0.3 }}>ClubMitra</Text>
+          <Text style={{ color: "rgba(255,255,255,0.85)", fontWeight: "900", fontSize: 13, letterSpacing: 0.3 }}>MarathonMitra</Text>
         </View>
         <Text style={{ color: "rgba(255,255,255,0.55)", fontSize: 11.5, fontWeight: "700" }}>{when}</Text>
       </View>
@@ -88,7 +88,7 @@ export function RunShareCard({ runnerName, startedAt, distanceM, durationS, avgP
           {runnerName}
         </Text>
         <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 10.5, fontWeight: "700", letterSpacing: 0.4 }}>
-          GPS-tracked · clubmitra
+          GPS-tracked · marathonmitra
         </Text>
       </View>
     </LinearGradient>

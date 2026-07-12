@@ -131,7 +131,7 @@ export function GuestHome() {
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
       >
-        <GuestHeader title="ClubMitra" city={city} onCity={setCity} />
+        <GuestHeader title="MarathonMitra" city={city} onCity={setCity} />
 
         {/* Hero: the city's pulse */}
         <GradientCard glowColor={colors.primary} style={{ padding: 22, gap: 14 }}>

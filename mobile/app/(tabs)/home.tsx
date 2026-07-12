@@ -312,24 +312,24 @@ export default function Home() {
               )}
             </View>
 
-            {/* Upcoming marathons — a swipeable teaser into the full calendar */}
+            {/* Upcoming marathons — a swipeable teaser into the Events tab */}
             <View style={{ gap: 10 }}>
               <SectionHeader
                 title="Upcoming marathons"
-                action={upcomingRaces.length > 0 ? { label: "See all", onPress: () => router.push("/races" as Href) } : undefined}
+                action={upcomingRaces.length > 0 ? { label: "See all", onPress: () => router.push("/events" as Href) } : undefined}
               />
               {upcomingRaces.length > 0 ? (
                 <RaceCarousel
                   races={upcomingRaces}
-                  onPressRace={(r) => (r.url ? Linking.openURL(r.url).catch(() => {}) : router.push("/races" as Href))}
+                  onPressRace={(r) => (r.url ? Linking.openURL(r.url).catch(() => {}) : router.push("/events" as Href))}
                 />
               ) : (
-                <Tap onPress={() => router.push("/races" as Href)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
+                <Tap onPress={() => router.push("/events" as Href)} style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 14 }]}>
                   <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.bgSecondary, alignItems: "center", justifyContent: "center" }}>
                     <Ionicons name="flag" size={22} color={colors.warning} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Race calendar</Text>
+                    <Text style={{ color: colors.text, fontWeight: "800", fontSize: 15 }}>Event calendar</Text>
                     <Text style={{ color: colors.muted, fontSize: 13 }}>Find your next start line</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={20} color={colors.subtle} />

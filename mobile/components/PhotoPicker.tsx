@@ -24,8 +24,8 @@ export function PhotoPicker({ uri, onChange, label = "Add photo", size = 96, sha
       Alert.alert(
         "Photo access needed",
         perm.canAskAgain
-          ? "ClubMitra needs access to your photos to set a picture."
-          : "Enable photo access for ClubMitra in Settings to pick a picture.",
+          ? "MarathonMitra needs access to your photos to set a picture."
+          : "Enable photo access for MarathonMitra in Settings to pick a picture.",
         perm.canAskAgain
           ? [{ text: "OK" }]
           : [{ text: "Cancel", style: "cancel" }, { text: "Open Settings", onPress: () => Linking.openSettings() }],

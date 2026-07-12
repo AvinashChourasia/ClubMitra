@@ -62,7 +62,7 @@ export default function Login() {
           <GradientCard glowColor={colors.primary} radius={26} style={{ width: 80, height: 80, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="walk" size={38} color="#fff" />
           </GradientCard>
-          <Text style={{ fontSize: 30, fontWeight: "800", color: colors.text, letterSpacing: -0.6 }}>ClubMitra</Text>
+          <Text style={{ fontSize: 30, fontWeight: "800", color: colors.text, letterSpacing: -0.6 }}>MarathonMitra</Text>
           <Text style={{ color: colors.muted, fontSize: 15 }}>Your running club, in your pocket.</Text>
         </View>
 

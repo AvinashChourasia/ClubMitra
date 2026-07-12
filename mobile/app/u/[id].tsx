@@ -176,7 +176,7 @@ export default function RunnerProfileScreen() {
           {/* Meta */}
           <View style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 10 }]}>
             <Ionicons name="calendar-outline" size={18} color={colors.muted} />
-            <Text style={{ color: colors.muted, fontSize: 13 }}>Running with ClubMitra since {memberSince(profile.member_since)}</Text>
+            <Text style={{ color: colors.muted, fontSize: 13 }}>Running with MarathonMitra since {memberSince(profile.member_since)}</Text>
           </View>
           {profile.running_level ? (
             <View style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 10 }]}>

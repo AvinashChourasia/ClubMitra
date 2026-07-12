@@ -69,7 +69,7 @@ export default function Welcome() {
           <GradientCard glowColor={colors.primary} radius={26} style={{ width: 84, height: 84, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="walk" size={40} color="#fff" />
           </GradientCard>
-          <Text style={{ fontSize: 32, fontWeight: "800", color: colors.text, letterSpacing: -0.6 }}>ClubMitra</Text>
+          <Text style={{ fontSize: 32, fontWeight: "800", color: colors.text, letterSpacing: -0.6 }}>MarathonMitra</Text>
           <Text style={{ color: colors.muted, fontSize: 16, textAlign: "center" }}>
             Your city runs together.{"\n"}Find your club, race your challenges.
           </Text>

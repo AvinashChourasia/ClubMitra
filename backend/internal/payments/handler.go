@@ -60,21 +60,21 @@ func (h *Handler) checkoutPage(w http.ResponseWriter, r *http.Request) {
 	}
 	desc := r.URL.Query().Get("desc")
 	if desc == "" {
-		desc = "ClubMitra payment"
+		desc = "MarathonMitra payment"
 	}
 	// json.Marshal escapes <, >, & to \uXXXX, so these values are safe to embed in
 	// the <script> block (no breakout via a crafted desc).
 	opts, _ := json.Marshal(map[string]string{
 		"key":         h.svc.KeyID(),
 		"order_id":    orderID,
-		"name":        "ClubMitra",
+		"name":        "MarathonMitra",
 		"description": desc,
 		"theme_color": "#F43F5E",
 	})
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(`<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ClubMitra payment</title></head>
+<title>MarathonMitra payment</title></head>
 <body style="margin:0;background:#0B1220;color:#fff;font-family:-apple-system,system-ui,sans-serif">
 <div style="display:flex;align-items:center;justify-content:center;height:100vh">Opening secure checkout…</div>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>

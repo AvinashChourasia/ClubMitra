@@ -162,7 +162,7 @@ type AuthContextValue = {
   // shows a splash/loading state until this is false, so we don't flash the
   // login screen at an already-logged-in user.
   initializing: boolean;
-  // ClubMitra owns identity now: accounts are created in-app via register,
+  // MarathonMitra owns identity now: accounts are created in-app via register,
   // and login verifies the email/password against our backend.
   register: (params: RegisterParams) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;

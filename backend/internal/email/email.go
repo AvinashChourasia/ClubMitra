@@ -45,7 +45,7 @@ type sendgrid struct {
 // composition root can always construct it.
 func New(apiKey, fromEmail, fromName string) Sender {
 	if fromName == "" {
-		fromName = "ClubMitra"
+		fromName = "MarathonMitra"
 	}
 	return &sendgrid{
 		apiKey:    apiKey,

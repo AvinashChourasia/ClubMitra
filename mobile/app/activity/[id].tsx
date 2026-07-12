@@ -113,7 +113,7 @@ export default function ActivityDetail() {
     const lines = [
       headline,
       fullKm && bestSplit ? `⚡ Best km ${formatPace(bestSplit)}` : null,
-      `📍 ${when} · tracked on ClubMitra`,
+      `📍 ${when} · tracked on MarathonMitra`,
     ].filter(Boolean);
     try {
       await Share.share({ message: lines.join("\n") });
@@ -378,7 +378,7 @@ export default function ActivityDetail() {
       {activity && showShare && (
         <View ref={cardRef} collapsable={false} style={{ position: "absolute", left: -2000, top: 0 }}>
           <RunShareCard
-            runnerName={user?.name ?? "ClubMitra runner"}
+            runnerName={user?.name ?? "MarathonMitra runner"}
             startedAt={activity.started_at}
             distanceM={activity.distance_m}
             durationS={activity.duration_s}
@@ -399,7 +399,7 @@ export default function ActivityDetail() {
           >
             <Pressable onPress={() => {}}>
               <RunShareCard
-                runnerName={user?.name ?? "ClubMitra runner"}
+                runnerName={user?.name ?? "MarathonMitra runner"}
                 startedAt={activity.started_at}
                 distanceM={activity.distance_m}
                 durationS={activity.duration_s}

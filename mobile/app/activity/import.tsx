@@ -20,7 +20,7 @@ const GUIDES: { app: string; icon: keyof typeof Ionicons.glyphMap; steps: string
     steps: [
       "On strava.com, open the run (GPX export is web-only).",
       "Click the ••• menu → Export GPX.",
-      "Share that file to ClubMitra, or save it and tap Choose a GPX file below.",
+      "Share that file to MarathonMitra, or save it and tap Choose a GPX file below.",
     ],
   },
   {
@@ -29,7 +29,7 @@ const GUIDES: { app: string; icon: keyof typeof Ionicons.glyphMap; steps: string
     steps: [
       "Open the activity in Garmin Connect.",
       "Tap the ••• / gear menu → Export to GPX.",
-      "Share it to ClubMitra, or save it and tap Choose a GPX file below.",
+      "Share it to MarathonMitra, or save it and tap Choose a GPX file below.",
     ],
   },
 ];
@@ -141,7 +141,7 @@ export default function ImportRun() {
         <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start", paddingHorizontal: 4 }}>
           <Ionicons name="share-outline" size={15} color={colors.subtle} style={{ marginTop: 2 }} />
           <Text style={{ flex: 1, color: colors.subtle, fontSize: 12.5, lineHeight: 18 }}>
-            Tip: from Strava or Files, use Share → ClubMitra to import a .gpx without leaving the other app.
+            Tip: from Strava or Files, use Share → MarathonMitra to import a .gpx without leaving the other app.
           </Text>
         </View>
       </ScrollView>

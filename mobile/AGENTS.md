@@ -1,4 +1,4 @@
-# ClubMitra mobile — Expo
+# MarathonMitra mobile — Expo
 
 This app is on **Expo SDK 54**. When you need exact API details, read the
 versioned docs at https://docs.expo.dev/versions/v54.0.0/ (match the installed

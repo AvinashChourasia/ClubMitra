@@ -43,7 +43,7 @@ var ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
 const minPasswordLen = 8
 const maxPasswordLen = 72
 
-// Service holds the auth business logic. ClubMitra owns identity now: it stores a
+// Service holds the auth business logic. MarathonMitra owns identity now: it stores a
 // bcrypt password hash, verifies it on login, and issues its own JWT + rotating
 // refresh token.
 type Service struct {
@@ -189,8 +189,8 @@ func (s *Service) RequestPasswordReset(ctx context.Context, rawEmail string) err
 	if err != nil {
 		return err
 	}
-	subject := "Your ClubMitra password reset code"
-	text := "Your ClubMitra password reset code is " + code + ".\n\n" +
+	subject := "Your MarathonMitra password reset code"
+	text := "Your MarathonMitra password reset code is " + code + ".\n\n" +
 		"It expires in 15 minutes. If you didn't request this, you can ignore this email — your password stays unchanged."
 	return s.mailer.Send(ctx, user.Email, subject, text, "")
 }
@@ -258,8 +258,8 @@ func (s *Service) RequestEmailChange(ctx context.Context, userID, rawNewEmail st
 	if err != nil {
 		return err
 	}
-	subject := "Confirm your new ClubMitra email"
-	text := "Use this code to confirm your new ClubMitra email address: " + code + ".\n\n" +
+	subject := "Confirm your new MarathonMitra email"
+	text := "Use this code to confirm your new MarathonMitra email address: " + code + ".\n\n" +
 		"It expires in 15 minutes. If you didn't request this, you can ignore this email."
 	return s.mailer.Send(ctx, newEmail, subject, text, "")
 }

@@ -1,5 +1,5 @@
 // Register screen. Collects the full runner profile and creates the account via
-// auth.register() (ClubMitra owns identity now). On success the auth gate routes
+// auth.register() (MarathonMitra owns identity now). On success the auth gate routes
 // the new, already-logged-in user home. Everything except t-shirt size is
 // required — the backend enforces the same.
 

@@ -1,15 +1,16 @@
-# ClubMitra — System Architecture
+# MarathonMitra — System Architecture
 
-> Standalone running-club operating system. ClubMitra owns identity — no external
-> auth dependency. A MarathonMitra product with its own backend, database, and app.
+> Standalone running-club operating system. The MarathonMitra app owns identity —
+> no external auth dependency. Same brand as the MarathonMitra website, but with
+> its own backend, database, and app — no shared auth.
 >
 > **Status (June 2026):** Phases 1, 2, 4 and 5 are **built and live** — club
 > core, messaging (WhatsApp-grade chat + realtime), analytics, inventory, GPS
 > run tracking (record + GPX import), GPS-native challenges, rolling + city
-> leaderboards, streak freezes, race calendar (MarathonMitra-fed), and the full
-> Phase 5 layer (badges + XP + levels + achievement wall, explore + public club
-> profiles + directory, follows + runner profiles, club XP / Member of the
-> Week, org-wide board, re-engagement push, polls).
+> leaderboards, streak freezes, event calendar (fed by the MarathonMitra
+> website), and the full Phase 5 layer (badges + XP + levels + achievement
+> wall, explore + public club profiles + directory, follows + runner profiles,
+> club XP / Member of the Week, org-wide board, re-engagement push, polls).
 > **Phase 3 is the big remaining build** — led now by **Activity Sync** (the #1
 > survey gap, below), then real payments (gated on Razorpay Route KYC;
 > membership/challenge fees run a MOCK confirm step today).
@@ -29,8 +30,10 @@
 > payments, multi-currency, country + timezone-aware chapters. Europe Month 7+
 > (Stripe + EUR/USD).
 >
-> **Naming:** the Go module still ships as `RunMitra` paths (DB `virtualrun`,
-> ports 8090/5433/6380 in dev). The ClubMitra rename is pending cleanup.
+> **Naming:** the app displays as **MarathonMitra** (same brand as the companion
+> website). Code identifiers still ship as `clubmitra` (Go module
+> `github.com/avinash/clubmitra/backend`, DB `clubmitra`, ports 8090/5433/6380
+> in dev); identifiers/config migrate at Play Store time.
 
 ---
 
@@ -73,7 +76,7 @@
 │                                                        │
 │  Expo Notifications  push (chat, badges, club events)  │
 │  Cloudinary          photos, logos, chat media, voice  │
-│  MarathonMitra API   race calendar feed (lazy sync)    │
+│  MarathonMitra site  event calendar feed (lazy sync)   │
 │  Razorpay + Route    INR payment + split     (Phase 3) │
 │  Stripe + Connect    EUR/USD payment + split (Phase 3) │
 └────────────────────────────────────────────────────────┘
@@ -89,7 +92,7 @@
 
 ```
 Expo Router (file-based, typed routes)
-  (auth)/  (tabs)/  club/  challenge/  thread/  activity/  races/
+  (auth)/  (tabs)/  club/  challenge/  thread/  activity/
   achievements/  profile/  schedule/  settings
 
 State        React Context + hooks (auth, theme, unread) — no Redux/Zustand
@@ -104,8 +107,9 @@ Offline      lib/runQueue — runs persist locally first, upload when online
 Push         expo-notifications; deep links: chat thread / challenge / badge;
              foreground chat banner = custom in-app toast (OS banner muted)
 Media        expo-image-picker / expo-audio (voice notes) → Cloudinary
-Guest mode   all 5 tabs browsable logged-out; auth gates at commitment
-             moments with pending-intent resume (join → register → joined)
+Guest mode   all tabs except Events browsable logged-out (Events needs
+             sign-in); auth gates at commitment moments with
+             pending-intent resume (join → register → joined)
 Updates      EAS Update channel `preview` (runtime 1.0.0);
              native modules ride APK builds (expo-audio, expo-calendar)
 ```
@@ -113,7 +117,8 @@ Updates      EAS Update channel `preview` (runtime 1.0.0);
 > Design system: color/space/radius/type tokens, elevated cards, gradient
 > heroes (GradientCard gloss), Ionicons, SVG visuals (RouteTrace pace
 > gradient, ProgressRing, Podium3D, BadgeMedal, Confetti).
-> Tabs: Home · Clubs · Challenges · Chat · Profile.
+> Tabs: Home · Events · Clubs · Challenges · Chat · Profile — Events is the
+> event calendar (titled "Event calendar"; formerly a pushed /races screen).
 
 ---
 
@@ -299,12 +304,12 @@ CREATE TABLE message_reactions (    -- one emoji per user per message (upsert)
 );
 ```
 
-### Race calendar — built (MarathonMitra-fed)
+### Event calendar — built (fed by the MarathonMitra website)
 
 ```sql
 CREATE TABLE races (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    external_id TEXT UNIQUE,        -- MarathonMitra id → repeat syncs upsert
+    external_id TEXT UNIQUE,        -- MarathonMitra-site id → repeat syncs upsert
     title       TEXT NOT NULL,
     city        TEXT NOT NULL,
     race_date   DATE NOT NULL,
@@ -322,15 +327,17 @@ CREATE TABLE race_interests (   -- "I'm going" toggle, live count
 );
 ```
 
-> Races flow in from MarathonMitra's **official public events API**
+> Events flow in from the MarathonMitra **website's official public events API**
 > (`api.marathonmitra.com/api/events?status=upcoming`, documented, no auth):
 > a throttled background sync paginates limit/skip to the reported total and
 > upserts by slug (`external_id`) — including banner `image_url`, `organizer`,
-> venue and formatted distances ("5K · 10K · Half Marathon"). Cards lead with
-> the banner and filter by city + distance; tapping opens the MarathonMitra
-> event page (`/events/{slug}`); organisers are handed there to submit
-> (approval there = appearance here). Client adds races to the phone calendar
-> (expo-calendar native, Google-Calendar URL fallback).
+> venue and formatted distances ("5K · 10K · Half Marathon"). In the app the
+> calendar is the top-level **Events** tab (second, after Home; titled "Event
+> calendar" — formerly a pushed `/races` screen). Cards lead with the banner
+> and filter by city + distance; tapping opens the event page on the
+> MarathonMitra website (`/events/{slug}`); organisers are handed there to
+> submit (approval there = appearance here). Client adds races to the phone
+> calendar (expo-calendar native, Google-Calendar URL fallback).
 
 ### Gamification — built (Phase 5 core)
 
@@ -605,7 +612,7 @@ backend/internal/
   messaging/      club/event/direct chat: reactions, replies, edit, voice,
                   read info, prefs (mute/archive), badge announce, push
   realtime/       websocket hub (connections, fanout, typing relay)
-  races/          race calendar + MarathonMitra lazy sync + interests
+  races/          event calendar + MarathonMitra-site lazy sync + interests
   gamification/   badge catalog + award engine + XP/levels + announce
   notifications/  Expo push tokens + send helpers (throttled, deep-linked)
   analytics/      drop-off / engagement / volume (admin, live queries)
@@ -614,8 +621,8 @@ backend/internal/
   httpx/ config/ database/   shared plumbing (migrate-on-boot)
 
 mobile/
-  app/            Expo Router routes (tabs, club, challenge, thread,
-                  activity, races, achievements, settings…)
+  app/            Expo Router routes (tabs incl. events, club, challenge,
+                  thread, activity, achievements, settings…)
   components/     design system + feature visuals (ChatThread, RouteTrace,
                   ProgressRing, Podium3D, BadgeMedal, Confetti, MessageToast…)
   lib/            typed API clients per domain + gps/queue/realtime/push/
@@ -634,7 +641,7 @@ Phase 2  ✅ messaging (→ later WhatsApp-grade + realtime + voice + push),
             (trust scoring built → REMOVED in 00027)
 Phase 4  ✅ GPS engine: record + background + autopause + pace-gradient
             routes + replay; GPX import; streak freezes; city board;
-            activity feed; race calendar (MarathonMitra); run share
+            activity feed; event calendar (MarathonMitra site); run share
 Phase 5  ✅ gamification core (badges + XP + levels + wall + unlock
             celebrations + chat announce); social: explore + public club
             profiles + global directory, follows + runner profiles, club XP /
@@ -645,7 +652,8 @@ Phase 3  ⏳ P0 Activity Sync (Strava OAuth + Garmin import) — #1 survey gap,
             first — KYC is the gate), finance dashboard, plan enforcement, paid
             inventory; GPX on scheduled runs + nav deep-links; desktop admin
             panel; training fields.
-Also queued: store readiness (icon/splash/listing), RunMitra→ClubMitra rename.
+Also queued: store readiness (icon/splash/listing) + the MarathonMitra
+            identifier/config migration (display rename done).
             FROZEN (survey "keep it simple"): chat search + voice waveforms.
             DE-PRIORITISED: membership-fee polish (75% of clubs charge no fee).
 ```
@@ -668,7 +676,7 @@ ENV=development
 
 CLOUDINARY_CLOUD=... CLOUDINARY_KEY=... CLOUDINARY_SECRET=...
 
-# Race calendar feed (optional — races sync only when set)
+# Event calendar feed (optional — races sync only when set)
 MARATHONMITRA_API_URL=https://api.marathonmitra.com/...
 
 # Strava sync (optional — dormant until both are set). From
@@ -694,8 +702,8 @@ SENDGRID_API_KEY=... EMAIL_FROM=noreply@clubmitra.in
 | Upstash | Redis (challenge boards) | |
 | Cloudinary | photos, logos, chat media, voice notes | |
 | Expo EAS | APK builds + OTA updates (channel `preview`) | `npm run update:preview` / `build:android` |
-| MarathonMitra | race feed (read-only API) | env-gated, best-effort sync |
+| MarathonMitra website | event feed (read-only API) | env-gated, best-effort sync |
 
 ---
 
-*ClubMitra — built for running clubs. India first, global-ready.*
+*MarathonMitra — built for running clubs. India first, global-ready.*

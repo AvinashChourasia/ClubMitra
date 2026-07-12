@@ -1,4 +1,4 @@
-// Command api is the entry point for the ClubMitra backend.
+// Command api is the entry point for the MarathonMitra backend.
 //
 // Go convention: code under cmd/<name> builds into an executable. The actual
 // logic lives in internal/ packages so it stays small, testable, and reusable.
@@ -97,7 +97,7 @@ func main() {
 	// Strava/Razorpay.
 	mailer := email.New(cfg.SendGridAPIKey, cfg.EmailFrom, cfg.EmailFromName)
 
-	// ClubMitra owns identity now (no external platform): the auth service stores
+	// MarathonMitra owns identity now (no external platform): the auth service stores
 	// password hashes and verifies them itself.
 	authSvc := auth.NewService(userRepo, refreshRepo, tokenMgr, cfg.RefreshTokenTTL, recoveryRepo, mailer)
 	authHandler := auth.NewHandler(authSvc)

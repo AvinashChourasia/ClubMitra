@@ -53,7 +53,7 @@ export async function pay(token: string, args: PayArgs): Promise<PayOutcome> {
     body: { purpose: args.purpose, target_id: args.targetId, quantity: args.quantity, meta: args.meta },
   });
 
-  const desc = encodeURIComponent(args.desc ?? "ClubMitra payment");
+  const desc = encodeURIComponent(args.desc ?? "MarathonMitra payment");
   const url = `${BASE_URL}/public/payments/razorpay/checkout?order_id=${encodeURIComponent(order.order_id)}&desc=${desc}`;
 
   const res = await WebBrowser.openAuthSessionAsync(url, "clubmitra://payment");

@@ -184,7 +184,7 @@ const BG_OPTS: Location.LocationTaskOptions = {
   activityType: Location.ActivityType.Fitness,
   showsBackgroundLocationIndicator: true,
   foregroundService: {
-    notificationTitle: "ClubMitra — recording run",
+    notificationTitle: "MarathonMitra — recording run",
     notificationBody: "Tracking your route…",
   },
 };

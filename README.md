@@ -1,11 +1,11 @@
-# ClubMitra
+# MarathonMitra
 
 A running club operating system for endurance communities. Member management,
 attendance, challenges, payments, inventory, finances, messaging, and GPS run
 tracking — built for running clubs of every size.
 
 > **Primary customer: Running clubs.** Free for runners. Clubs pay for features.
-> **A MarathonMitra product.** Standalone — separate backend, separate database, no shared auth.
+> **Same brand as the MarathonMitra website.** Standalone — separate backend, separate database, no shared auth.
 > **Market:** India first (Razorpay + INR). Global-ready from day one; Europe expansion Month 7+ (Stripe + EUR/USD).
 
 ---
@@ -17,7 +17,7 @@ tracking — built for running clubs of every size.
 > below (`P0`–`P3`, `DONE`, `NOT REQUIRED`) reflect **demand**, not feature area.
 
 **The single most important finding:** **68% of runners will not switch their
-recording app.** Only 13% would record directly in ClubMitra. They use Strava
+recording app.** Only 13% would record directly in MarathonMitra. They use Strava
 (81%) and Garmin (14%) and expect those runs to count automatically. We made
 challenges **GPS-native only** (recorded-in-app or GPX import), which blocks
 two-thirds of runners. **This is the #1 gap and the top build priority.**
@@ -30,13 +30,13 @@ two-thirds of runners. **This is the #1 gap and the top build priority.**
 | **P1** | Run a live pilot challenge (MarathonMitra 100K) with the 130+ runner leads | ❌ not started | Convert survey takers → active users now |
 | **P1** | Reposition pitch: "keep members running together" (not "save 10–15 hrs") | ❌ copy/deck | 14/20 admins spend <5 hrs/wk — time-saving pitch is false |
 | **P1** | Real payments (Razorpay) — membership, challenge, inventory, subscription | ✅ BUILT (dormant — needs Razorpay keys + webhook) | Real collection replaced the MOCK; revenue-ready once keyed |
-| **P1** | RunMitra → ClubMitra rename + store readiness (icon/splash/listing) | ❌ pending | Blocks soft launch |
+| **P1** | ClubMitra → MarathonMitra rename + store readiness (icon/splash/listing) | 🟡 display rename done — identifiers/config migrate at store time | Blocks soft launch |
 | **P2** | Inactive-member alerts surfaced prominently to admins | 🟡 analytics built | Admins named it unprompted (12/20) |
 | **P2** | Event-registration fees (real money flow vs membership) | ❌ not built | Events have money; memberships mostly don't |
 | **P3** | Membership-fee collection polish | 🟡 MOCK | **DE-PRIORITISED** — admin's LAST priority (4/20), 75% clubs free |
 | **NOT REQUIRED** | More messaging depth (search-in-thread, voice waveforms) | ❌ queued | **DROP** — survey said "keep it simple"; chat is already over-built |
 | **DONE ✅** | Challenges + leaderboards | ✅ | Admin #1 want — the hero, already shipped |
-| **DONE ✅** | Race & event calendar | ✅ | Admin #2 want — validated, already shipped (MM-fed) |
+| **DONE ✅** | Event calendar (top-level Events tab) | ✅ | Admin #2 want — validated, already shipped (fed by the MarathonMitra website) |
 | **DONE ✅** | Streaks + badges + XP | ✅ | Streak = #3 runner motivator — validated |
 | **DONE ✅** | Attendance + self check-in | ✅ | Admin top-5 — validated |
 | **DONE ✅** | Inventory CRUD | ✅ | Admin top-6, a differentiator — keep |
@@ -54,9 +54,9 @@ Reorder around sync; freeze chat.
 
 ---
 
-## What ClubMitra Solves
+## What MarathonMitra Solves
 
-Running clubs today run on WhatsApp + spreadsheets + UPI screenshots. ClubMitra
+Running clubs today run on WhatsApp + spreadsheets + UPI screenshots. MarathonMitra
 replaces that stack with:
 
 - One place to manage all club members, attendance, fees, and inventory
@@ -64,7 +64,7 @@ replaces that stack with:
 - GPS-verified activity — recorded runs credit challenges, leaderboards, and badges automatically
 - WhatsApp-grade messaging — club groups + DMs with realtime delivery, reactions, replies, voice notes, push
 - Gamification that runners feel — XP, 6 runner levels, 26 GPS-earned badges, achievement wall, unlock celebrations
-- Race calendar fed by MarathonMitra, with one-tap add to the phone calendar
+- Event calendar — a top-level Events tab fed by the MarathonMitra website's public events API, with one-tap add to the phone calendar
 - In-app payment collection with automatic platform split — Razorpay Route in India, Stripe Connect globally (Phase 3)
 - Drop-off analytics so admins know who's drifting before they leave
 
@@ -86,9 +86,10 @@ replaces that stack with:
 
 **Estimated monthly infrastructure cost: $0–$7 at launch**
 
-> **Naming note:** the codebase ships as **ClubMitra** (Go module
+> **Naming note:** the app displays as **MarathonMitra** (same brand as the
+> companion website), but code identifiers still ship as **ClubMitra** (Go module
 > `github.com/avinash/clubmitra/backend`, DB `clubmitra`, ports 8090/5433/6380).
-> A further rebrand to **RunMitra** is planned but currently deferred.
+> Identifiers/config migrate at Play Store time.
 
 ---
 
@@ -106,7 +107,7 @@ Club pays:
         └── Event registration   when club runs paid events
 
 Runner pays:
-  └── Nothing to ClubMitra directly
+  └── Nothing to MarathonMitra directly
       (pays club membership fee if club enables it)
 ```
 
@@ -153,7 +154,7 @@ clubmitra/
 │   │   │                      # voice notes, badge chips, push          [Phase 2]
 │   │   ├── realtime/          # WebSocket hub — instant messages + typing
 │   │   ├── runlog/            # Per-club run ledger → rolling boards (IST)
-│   │   ├── races/             # Race calendar + MarathonMitra sync     [Phase 4]
+│   │   ├── races/             # Event calendar (marathonmitra.com feed) [Phase 4]
 │   │   ├── gamification/      # XP, levels, badge engine (GPS-verified) [Phase 5]
 │   │   ├── analytics/         # Drop-off metrics, engagement dashboard  [Phase 2]
 │   │   ├── uploads/           # Cloudinary signed-upload params
@@ -178,7 +179,7 @@ clubmitra/
 │   │   ├── _layout.tsx        # ThemeProvider + AuthProvider, Inter font, push tap
 │   │   ├── index.tsx          # auth gate → /home or /login
 │   │   ├── (auth)/            # login, register (full mandatory profile)
-│   │   ├── (tabs)/            # home, clubs, challenges, profile, settings
+│   │   ├── (tabs)/            # home, events, clubs, challenges, chat, profile
 │   │   ├── club/              # [id] detail, new, join, edit
 │   │   ├── challenge/         # [id] detail + leaderboard, new
 │   │   ├── run/               # [id] detail, new, edit
@@ -208,7 +209,7 @@ clubmitra/
 > self-contained backend + in-app messaging — no external setup, builds today.
 > Real payments wait for Phase 3 because they're gated by merchant KYC (Razorpay
 > Route in India, Stripe Connect globally) — start that paperwork in parallel so
-> Phase 3 isn't blocked. GPS tracking and the race calendar follow in Phase 4.
+> Phase 3 isn't blocked. GPS tracking and the event calendar follow in Phase 4.
 
 ### Phase 1 — Club Core ✅ COMPLETE
 
@@ -336,7 +337,7 @@ clubmitra/
 - [x] Attachments: photo library, camera, document; staged preview + caption
 
 #### Cleanup
-- [x] virtual-run-tracker → ClubMitra rename (Go module, DB, env, ports) ✅ — a further RunMitra rebrand is deferred
+- [x] virtual-run-tracker → ClubMitra rename (Go module, DB, env, ports) ✅ — the app now displays as **MarathonMitra**; code identifiers migrate at store time
 
 ---
 
@@ -402,7 +403,7 @@ clubmitra/
 
 ---
 
-### Phase 4 — GPS Tracking + Race Calendar `(Month 4)` ✅ COMPLETE
+### Phase 4 — GPS Tracking + Event Calendar `(Month 4)` ✅ COMPLETE
 
 - [x] GPS run recording: live route, distance, pace, elevation
 - [x] Offline run recording with auto-sync
@@ -426,8 +427,8 @@ clubmitra/
 - [x] Streak freeze: 2 per month, auto-applied to bridge missed days
 - [x] Background GPS (requires EAS dev build)
 - [x] City leaderboard: all verified runners in a city ranked collectively
-- [x] Race calendar: LIVE-fed from MarathonMitra's official public events API (api.marathonmitra.com — paginated background sync, upsert by slug); banner-image cards with distance chips + organizer, city & distance filters; cards tap through to the MarathonMitra event page; "I'm going", add to phone/Google calendar
-- [x] Race calendar map view — interactive map, one labelled flag per race (fanned out within its city so each separates as you zoom), tap a flag → its MarathonMitra event page; reflects the active filters & searchable city picker
+- [x] Event calendar — a top-level **Events** tab (second, after Home) titled "Event calendar" (formerly a pushed `/races` screen titled "Race calendar"): LIVE-fed from the MarathonMitra website's official public events API (api.marathonmitra.com — paginated background sync, upsert by slug); banner-image cards with distance chips + organizer, city & distance filters; cards tap through to the event page on the MarathonMitra website; "I'm going", add to phone/Google calendar
+- [x] Event calendar map view — interactive map, one labelled flag per race (fanned out within its city so each separates as you zoom), tap a flag → its event page on the MarathonMitra website; reflects the active filters & searchable city picker
 - [x] Similar races list / race recommendations — "Recommended for you" strip on the calendar, scored by your city + the distances you save (excludes already-saved)
 
 ---
@@ -598,7 +599,7 @@ GET    /api/v1/activities/:id/geojson
 POST   /api/v1/activities/gpx
 GET    /api/v1/city/:city/leaderboard         # city-wide
 
-# Race Calendar
+# Event Calendar (races API)
 GET    /api/v1/races?city=:city&type=:type
 GET    /api/v1/races/:id
 GET    /api/v1/races/similar/:id
@@ -642,7 +643,7 @@ GET    /api/v1/races/similar/:id
 6. **GPS-first activity validation** — recorded runs are the credible source: they credit challenges and every active club's leaderboard automatically. Manual proof (with per-method evidence weights) remains only for challenge submissions.
 7. **Redis leaderboard** — self-heals from Postgres. Sorted sets per challenge AND per rolling period (daily/weekly/monthly/all-time).
 8. **Global-ready from day one** — multi-currency pricing, provider-agnostic payments, country + timezone-aware chapters. India first, Europe Month 7+.
-9. **Standalone** — ClubMitra owns identity. No external auth dependency, no shared DB, no linked accounts required with MarathonMitra.
+9. **Standalone** — the MarathonMitra app owns identity. No external auth dependency, no shared DB, no linked accounts required with the MarathonMitra website.
 10. **Quality over quantity** — every new feature must justify itself: does this help a club admin save time or a runner stay engaged?
 
 ---
@@ -661,7 +662,7 @@ A full authentication + authorization + injection + client/infra audit was run a
 
 ### Verified solid (no action needed)
 - JWT pins the HMAC algorithm (blocks `alg:none`/confusion); refresh tokens are 256-bit random, stored SHA-256-hashed, rotated with reuse→revoke-all theft detection; bcrypt with a 72-byte cap; login is timing-safe and non-enumerable.
-- All SQL is pgx-parameterized (no string-built queries); request bodies capped at 1 MB with unknown-field rejection; no SSRF (the only outbound fetch is the env-configured MarathonMitra sync); `password_hash` and email/phone never leak to other users; Cloudinary secret stays server-side (client gets only a scoped signature).
+- All SQL is pgx-parameterized (no string-built queries); request bodies capped at 1 MB with unknown-field rejection; no SSRF (the only outbound fetch is the env-configured MarathonMitra-website events sync); `password_hash` and email/phone never leak to other users; Cloudinary secret stays server-side (client gets only a scoped signature).
 - Tokens stored in SecureStore (not AsyncStorage); no secrets in the mobile bundle; HTTPS in prod; deep-link/push-tap navigation only uses client-constructed routes (no open-redirect). CORS intentionally absent (native-only client).
 
 ### Known / accepted for now
@@ -737,7 +738,8 @@ PLATFORM_CUT_PCT=10
 ```
 
 > Dev DB `clubmitra` on ports 5433 (Postgres) + 6380 (Redis); Go module
-> `github.com/avinash/clubmitra/backend`. (A RunMitra rebrand is planned but deferred.)
+> `github.com/avinash/clubmitra/backend`. (The app displays as MarathonMitra;
+> code identifiers keep the ClubMitra name until the Play Store config migration.)
 
 ---
 
@@ -763,7 +765,7 @@ PLATFORM_CUT_PCT=10
 | 1 | Club core — members, attendance, challenges | Month 1 ✅ |
 | 2 | Rolling leaderboards, analytics, inventory, messaging | Month 2 ✅ |
 | 3 | Strava sync ✅ + Razorpay payments ✅ (both dormant until keyed) · GPX UX, event fees, desktop admin remain | Month 3 (partial) |
-| 4 | GPS tracking, interactive maps, race calendar, city leaderboard | Month 4 ✅ |
+| 4 | GPS tracking, interactive maps, event calendar (Events tab), city leaderboard | Month 4 ✅ |
 | 5 | Social, badges, XP, achievements, public profiles, global directory | Month 5 ✅ |
 | 6+ | Europe launch, leagues, coaches, physical events, white-label | Month 7+ |
 

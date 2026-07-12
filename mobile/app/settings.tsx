@@ -240,7 +240,7 @@ function StravaCard({ getToken }: { getToken: () => Promise<string | null> }) {
       ) : (
         <>
           <Text style={{ color: colors.muted, fontSize: 13, marginBottom: 10 }}>
-            Run with Strava? Connect once and your runs count here automatically — no need to re-record in ClubMitra.
+            Run with Strava? Connect once and your runs count here automatically — no need to re-record in MarathonMitra.
           </Text>
           <Pressable onPress={onConnect} disabled={busy} style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 7, backgroundColor: "#FC4C02", opacity: busy ? 0.6 : 1, borderRadius: 999, paddingVertical: 13 }}>
             {busy ? <ActivityIndicator color="#fff" /> : <><Ionicons name="logo-electron" size={16} color="#fff" /><Text style={{ color: "#fff", fontWeight: "800", fontSize: 14 }}>Connect Strava</Text></>}
@@ -289,8 +289,8 @@ export default function Settings() {
   }, []);
 
   function sendFeedback() {
-    const body = `\n\n\n— — —\nApp: ClubMitra v${appVersion} (${buildTag})\nPlatform: ${Platform.OS}\nBackend: ${backend}\nUser: ${user?.email ?? ""}`;
-    const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent("ClubMitra feedback")}&body=${encodeURIComponent(body)}`;
+    const body = `\n\n\n— — —\nApp: MarathonMitra v${appVersion} (${buildTag})\nPlatform: ${Platform.OS}\nBackend: ${backend}\nUser: ${user?.email ?? ""}`;
+    const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent("MarathonMitra feedback")}&body=${encodeURIComponent(body)}`;
     Linking.openURL(url).catch(() => {
       // No mail app on this device — hand over the address instead.
       Alert.alert("No mail app found", `Send your feedback to ${FEEDBACK_EMAIL}.`, [

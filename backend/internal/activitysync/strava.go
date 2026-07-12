@@ -42,7 +42,7 @@ type stravaActivity struct {
 	TotalElevationGain float64 `json:"total_elevation_gain"`
 }
 
-// isRun reports whether an activity counts as a run for ClubMitra.
+// isRun reports whether an activity counts as a run for MarathonMitra.
 func (a stravaActivity) isRun() bool {
 	t := a.SportType
 	if t == "" {
