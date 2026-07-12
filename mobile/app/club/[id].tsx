@@ -49,8 +49,8 @@ type Tab = "feed" | "members" | "schedule" | "challenges" | "leaderboard";
 
 const MEDAL = ["#FACC15", "#CBD5E1", "#D8965B"]; // gold / silver / bronze
 
-// Placeholder — update when the final distribution link (APK/store) is live.
-const APP_DOWNLOAD_URL = "https://clubmitra.app";
+// Where invitees get the app — must serve the APK / landing page at launch.
+const APP_DOWNLOAD_URL = "https://marathonmitra.app";
 
 // timeAgo renders a feed timestamp the way people read it ("2h ago").
 function timeAgo(iso: string): string {
